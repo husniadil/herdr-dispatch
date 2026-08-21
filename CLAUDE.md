@@ -26,8 +26,11 @@ negotiable in either direction:
 
 - **Board facts live in htask** — task state, claims, leases, evidence,
   review authority, who may approve. The dispatcher READS them and never
-  duplicates them in its own state. Anything it must remember between ticks
-  is derivable from the board plus Herdr, or it is wrong to remember.
+  duplicates them in its own state. Its only memory of its own is the
+  binding: which pane it prompted for which task, when, how often, and
+  whether review was announced — the one mapping that exists nowhere else
+  until the worker claims. Everything else it might want to remember is
+  derivable from the board plus Herdr, or wrong to remember.
 - **Execution policy lives here** — which agent kind, model, effort and args
   a worker gets, how a goal is delivered, when a silent worker is re-prompted,
   when a pane is retired. None of that belongs in htask.
