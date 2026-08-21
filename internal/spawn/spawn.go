@@ -17,10 +17,10 @@
 //   - `pane run` returns when the line is typed, not when it finishes. On
 //     the codex path that leaves the environment eval still owning the
 //     shell, and `agent start` into a busy shell is refused outright.
-//   - the launch line is TYPED into the pane, so its length is a risk. Past
-//     roughly two thousand characters it intermittently arrives broken. The
-//     settings document is the part of it that can leave, and it does: see
-//     TypedLineOverheadBudget.
+//   - the launch line is TYPED into the pane, so its length is a risk, and
+//     nothing long is allowed on it. The settings document leaves for a file
+//     the worker reads, and the condition is a pointer to the board row
+//     rather than the row's own text: see PointerGoal and TypedLineBudget.
 package spawn
 
 import (
@@ -50,33 +50,47 @@ const GoalPrefix = "/goal "
 // directory the whole machine can list.
 const SettingsFileMode = 0o600
 
-// TypedLineOverheadBudget bounds everything hdis puts on the line herdr types
-// into a worker's pane, except the goal itself.
+// PointerGoal composes the /goal condition a worker boots with: a pointer to
+// the board row, never the row's own text.
 //
-// That line is TYPED, character by character, into a terminal. A long one
-// intermittently arrives broken: in two live codex runs the ~2.2k-character
-// line — the settings JSON inline, the profile's flags, and a ~1.3k one-line
-// goal — came out with the goal cut mid-criterion and the command's own start
-// typed over what followed, the pane showing
+// The board's rendered goal document runs past a thousand characters, and it
+// used to travel on this line whole. It cannot. The line is TYPED into the
+// pane, character by character, and a long one intermittently arrives broken:
+// two live codex runs proved it, one at roughly 2.2k characters and one at
+// roughly 1.4k, both with the condition cut mid-word and the command's own
+// start typed over what followed, the pane showing
 //
 //	htask task submit claude --settings '{"disabl
 //
-// Measured on 2026-08-21 against the real tools, with a codex profile of
-// --agent claude --model haiku --effort low:
+// while throwaway probes typed into a bare shell stayed clean to a megabyte.
+// The fix is to stop typing long lines, not to trim the condition harder.
 //
-//	`codex-cc-proxy settings` compacts to 473 characters. Single-quoted
-//	after the flag it costs 487 of the typed line, and the whole
-//	hdis-chosen part comes to 536.
+// So the pointer carries only what a worker cannot get anywhere else: how to
+// take the task, where to read what it asks for, and the end state. The
+// criteria stay on the board, where `htask task get` reads them whole and no
+// shell ever types them, and the end state is named so /goal can still judge
+// the transcript and finish.
+func PointerGoal(seq int) string {
+	return fmt.Sprintf("task %d is submitted for review: claim it with htask task claim %d, "+
+		"read its full criteria with htask task get %d, do the work, then run "+
+		"htask task submit %d with a report and evidence.", seq, seq, seq, seq)
+}
+
+// TypedLineBudget bounds the whole line herdr types into a worker's pane.
 //
-//	The same document written to a file under this machine's TMPDIR (49
-//	characters) costs 90, and the whole part 139.
+// Everything on that line is now hdis's own choice, so the whole line is what
+// a budget can honestly bound. Measured on 2026-08-21 against the real tools,
+// with a codex profile of --agent claude --model haiku --effort low and the
+// pointer condition for a two-digit task:
 //
-// The budget sits at 256: comfortably above the measured file form, so a
-// longer temp path or another flag still fits, and less than half the inline
-// form, which can never come back. The goal is deliberately outside it — it
-// is the board's text, it has to reach the slash-command parser whole, and a
-// budget that counted it would be a budget on someone else's prose.
-const TypedLineOverheadBudget = 256
+//	the 185-character pointer condition, and the settings document
+//	written to a file under this machine's TMPDIR (a 48-character
+//	directory), render a whole line of 332 characters.
+//
+// The budget sits at 512: room for a longer temp path, another profile flag
+// and a five-digit task number, and still less than a quarter of the ~1.4k
+// line that came out broken on the live shell.
+const TypedLineBudget = 512
 
 // TypedLine reconstructs the command line herdr types into a worker's pane
 // for an agent argv: the client's own name, then every argument, quoted the
@@ -88,16 +102,6 @@ func TypedLine(agentArgs []string) string {
 		parts = append(parts, shellQuote(a))
 	}
 	return strings.Join(parts, " ")
-}
-
-// TypedOverhead is the length of that line without its last argument, which
-// is the goal, plus the space that would separate them: the part hdis
-// chooses, and the only part a budget can honestly bound.
-func TypedOverhead(agentArgs []string) int {
-	if len(agentArgs) == 0 {
-		return len(TypedLine(nil))
-	}
-	return len(TypedLine(agentArgs[:len(agentArgs)-1])) + 1
 }
 
 // shellSafe are the characters a shell passes through untouched, so an

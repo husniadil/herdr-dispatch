@@ -545,9 +545,36 @@ func agentArgsOf(t *testing.T, h *harness) []string {
 	return nil
 }
 
+// The condition hdis arms a worker with is a pointer to the board row, not
+// the row itself: the line it travels on is TYPED into a pane, and a long one
+// intermittently arrives broken. The pointer has to carry three things — how
+// to take the task, where to read what it asks for, and the end state /goal
+// judges from the transcript.
+func TestTheSpawnConditionIsAShortPointerToTheBoard(t *testing.T) {
+	got := PointerGoal(14)
+	for _, want := range []string{
+		"htask task claim 14",
+		"htask task get 14",
+		"htask task submit 14",
+		"review",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("the pointer condition does not name %q: %s", want, got)
+		}
+	}
+	if strings.ContainsAny(got, "\n\r") {
+		t.Fatalf("the condition carries a line break, which herdr refuses outright: %q", got)
+	}
+	if len(got) > 256 {
+		t.Fatalf("the condition is %d characters, which is no longer a pointer: %s", len(got), got)
+	}
+	t.Logf("pointer condition: %d characters, %q", len(got), got)
+}
+
 // The line herdr types into a worker's pane is typed, character by character,
-// and a long one intermittently arrives broken. This is the regression guard
-// on the only part of it hdis chooses.
+// and a long one intermittently arrives broken. Now that the condition is a
+// pointer hdis composes, the WHOLE line is hdis's own choice, so the whole
+// line is what the budget bounds.
 func TestTheTypedSpawnLineStaysUnderItsBudgetWithACodexProfile(t *testing.T) {
 	h := newHarness(t, []string{goalActive}, startRegistered)
 	// The real temp directory, because the path's own length is what is
@@ -560,45 +587,47 @@ func TestTheTypedSpawnLineStaysUnderItsBudgetWithACodexProfile(t *testing.T) {
 
 	p := codexProfile()
 	p.Model = "haiku"
-	if _, err := h.pipe.Run(context.Background(), req(p)); err != nil {
+	r := req(p)
+	r.Goal = PointerGoal(14)
+	if _, err := h.pipe.Run(context.Background(), r); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
 	args := agentArgsOf(t, h)
-	measured := TypedOverhead(args)
-	t.Logf("typed overhead: %d of %d budgeted, on %q", measured, TypedLineOverheadBudget, TypedLine(args[:len(args)-1]))
-	if measured > TypedLineOverheadBudget {
-		t.Fatalf("the typed line's hdis-chosen part is %d characters, over the %d budget:\n%s",
-			measured, TypedLineOverheadBudget, TypedLine(args))
+	line := TypedLine(args)
+	t.Logf("typed line: %d of %d budgeted, on %q", len(line), TypedLineBudget, line)
+	if len(line) > TypedLineBudget {
+		t.Fatalf("the typed line is %d characters, over the %d budget:\n%s",
+			len(line), TypedLineBudget, line)
 	}
 
-	// And the budget bites: the same document inline, which is what the two
-	// corrupted live runs typed, is well past it.
-	inline := append([]string{"--settings", realProxySettings}, args[2:]...)
-	inlineOverhead := TypedOverhead(inline)
-	t.Logf("the inline form the corrupted live runs typed measures %d", inlineOverhead)
-	if inlineOverhead <= TypedLineOverheadBudget {
-		t.Fatalf("the inline form measures %d, which the budget of %d would have allowed",
-			inlineOverhead, TypedLineOverheadBudget)
+	// And the budget bites: the shape the two corrupted live runs typed —
+	// the settings document inline and the board's whole goal document
+	// behind it — is far past it.
+	inline := append([]string{"--settings", realProxySettings}, args[2:len(args)-1]...)
+	inline = append(inline, GoalPrefix+strings.Repeat("x", 1300))
+	if got := len(TypedLine(inline)); got <= TypedLineBudget {
+		t.Fatalf("the corrupted live shape measures %d, which the budget of %d would have allowed",
+			got, TypedLineBudget)
 	}
 }
 
-// The goal is the board's, and it has to reach the slash-command parser
-// whole. Only the settings leave the line.
-func TestTheGoalIsNeverShortenedToMakeRoom(t *testing.T) {
+// Composing the condition is the caller's job; the pipeline's job is to
+// deliver it untouched. Nothing here trims, wraps or re-renders it.
+func TestThePipelineDeliversTheConditionItWasGivenUnchanged(t *testing.T) {
 	h := newHarness(t, []string{goalActive}, startRegistered)
 	h.Bin(t, "codex-cc-proxy", `cat "$HDIS_FAKE_DIR/settings.json"`)
 	h.Write(t, "settings.json", realProxySettings)
 
 	r := req(codexProfile())
-	r.Goal = strings.Repeat("x", 1300) + " · Done when: the goal arrived whole"
+	r.Goal = PointerGoal(14)
 	if _, err := h.pipe.Run(context.Background(), r); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
 	args := agentArgsOf(t, h)
 	if got, want := args[len(args)-1], GoalPrefix+r.Goal; got != want {
-		t.Fatalf("the goal did not travel whole: got %d characters, want %d", len(got), len(want))
+		t.Fatalf("the condition did not travel whole:\n got %q\nwant %q", got, want)
 	}
 }
 

@@ -98,17 +98,6 @@ func (c *Client) Get(ctx context.Context, id string) (Task, error) {
 	return res.Task, nil
 }
 
-// Goal renders the task as the condition a worker boots with. The one-line
-// form is the one that matters here: it travels in the argv of `herdr agent
-// start`, which refuses a newline outright.
-func (c *Client) Goal(ctx context.Context, id string) (string, error) {
-	out, err := c.run(ctx, "task", "goal", id, "--one-line")
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
 func (c *Client) json(ctx context.Context, into any, args ...string) error {
 	out, err := c.run(ctx, args...)
 	if err != nil {

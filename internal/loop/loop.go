@@ -142,16 +142,15 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 	if err != nil {
 		return err
 	}
-	goal, err := l.Board.Goal(ctx, row.ID)
-	if err != nil {
-		return err
-	}
+	// The condition is composed here, not rendered from the board: it travels
+	// on a line herdr TYPES into the pane, and the board's own goal document
+	// is far too long to type intact. The worker reads the criteria itself.
 	pane, err := l.Spawn.Run(ctx, spawn.Request{
 		Name:     workerName(row.Seq),
 		BasePane: l.BasePane,
 		Cwd:      row.Project,
 		Profile:  profile,
-		Goal:     goal,
+		Goal:     spawn.PointerGoal(row.Seq),
 	})
 	if pane == "" {
 		return err

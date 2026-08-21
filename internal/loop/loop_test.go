@@ -114,14 +114,17 @@ func TestATickTakesAReadyTaskToADeliveredGoal(t *testing.T) {
 	if got := calls(t, f, "task list --ready --all-projects"); len(got) != 1 {
 		t.Fatalf("ready was asked for %d times", len(got))
 	}
-	if got := calls(t, f, "task goal 01AAA --one-line"); len(got) != 1 {
-		t.Fatalf("the goal was asked for %d times: %v", len(got), f.Calls(t))
+	// The board's own goal document never reaches the typed line: the
+	// condition is a pointer hdis composes, and the criteria stay on the
+	// board for the worker to read with `task get`.
+	if got := calls(t, f, "task goal"); len(got) != 0 {
+		t.Fatalf("the board's goal document was rendered for the typed line: %v", got)
 	}
 	start := calls(t, f, "agent start")
 	if len(start) != 1 {
 		t.Fatalf("agent start ran %d times", len(start))
 	}
-	for _, want := range []string{"hdis-7", "--kind claude", "--pane wM:p9", "/goal do the thing · Done when: it is done"} {
+	for _, want := range []string{"hdis-7", "--kind claude", "--pane wM:p9", spawn.GoalPrefix + spawn.PointerGoal(7)} {
 		if !strings.Contains(start[0], want) {
 			t.Fatalf("want %q in %q", want, start[0])
 		}

@@ -69,10 +69,22 @@ ledger.
 2. `herdr pane split` off the dispatcher's pane, in the task's own project.
 3. For a `codex` profile, `eval "$(codex-cc-proxy env)"` in that pane: the
    worker inherits the routing environment as a direct child of the shell.
-4. `herdr agent start`, with the profile's argv and the task's goal after the
-   separator. The goal travels as a one-line `/goal` condition
-   (`htask task goal <id> --one-line`), so the worker boots with its
-   completion condition already armed.
+4. `herdr agent start`, with the profile's argv and a short `/goal` condition
+   after the separator. That condition is a **pointer** hdis composes — claim
+   the task with `htask task claim <n>`, read its full criteria with
+   `htask task get <n>`, and finish by submitting it for review with a report
+   and evidence — and never the board's rendered goal document. The line is
+   TYPED into the pane, character by character, and a long one intermittently
+   arrives broken: two live runs came out with the condition cut mid-word and
+   the command's own start typed over what followed, one at ~2.2k characters
+   and one at ~1.4k, while the same text piped into a bare shell was clean to
+   a megabyte. So the criteria stay on the board, where the worker reads them
+   whole and no shell ever types them, and the whole typed line is held under
+   a budget (`spawn.TypedLineBudget`) that a named test measures.
+
+   `htask task goal <id> --one-line` is no longer part of this pipeline. It
+   remains the operator's paste-ready form for arming `/goal` in a pane by
+   hand, where nothing is typed character by character.
 5. If Claude Code's trust-folder dialog appears, exactly one Enter — and only
    if it is seen on screen. A dialog that never comes is never answered.
 6. Delivery is confirmed from the pane, never from `agent start`'s exit. That

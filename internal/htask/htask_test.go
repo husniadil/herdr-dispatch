@@ -91,27 +91,6 @@ EOF`)
 	}
 }
 
-// The goal reaches the worker through an argv that refuses a newline, so it
-// is asked for in the form that has none.
-func TestGoalIsAskedForAsOneLine(t *testing.T) {
-	c, f := client(t)
-	f.Bin(t, "htask", `printf 'do the thing. \xc2\xb7 Done when: ... '`)
-
-	goal, err := c.Goal(context.Background(), "01AAA")
-	if err != nil {
-		t.Fatalf("goal: %v", err)
-	}
-	if strings.ContainsAny(goal, "\n\r") {
-		t.Fatalf("goal carries a line break: %q", goal)
-	}
-	if strings.HasSuffix(goal, " ") || !strings.HasPrefix(goal, "do the thing") {
-		t.Fatalf("goal not trimmed: %q", goal)
-	}
-	if got, want := f.Calls(t)[0], "task goal 01AAA --one-line --as plugin:hdis"; got != want {
-		t.Fatalf("argv: got %q, want %q", got, want)
-	}
-}
-
 // When htask refuses, the operator gets htask's own words and not a wrapper's.
 func TestAnHtaskRefusalIsReportedInItsOwnWords(t *testing.T) {
 	c, f := client(t)
