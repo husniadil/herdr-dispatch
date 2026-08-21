@@ -116,6 +116,7 @@ func run(argv []string) error {
 			StartTimeout:   *startTimeout,
 			DialogCeiling:  20 * time.Second,
 			ConfirmCeiling: 60 * time.Second,
+			ShellCeiling:   30 * time.Second,
 			Poll:           2 * time.Second,
 		},
 		BasePane: *basePane,

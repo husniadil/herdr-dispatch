@@ -3,6 +3,7 @@ package spawn
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -282,6 +283,10 @@ func TestCodexRunsTheTwoMeasuredSteps(t *testing.T) {
 	if strings.ContainsAny(start[sep+2], "\n\r") {
 		t.Fatal("the settings document was not compacted")
 	}
+	// A shell that is already free costs one attempt and no waiting.
+	if n := count(h.verbs(t), "agent start"); n != 1 {
+		t.Fatalf("a free shell must be started into once, got %d agent starts", n)
+	}
 }
 
 // Two --settings collide silently in the client, so a profile that carries
@@ -384,5 +389,87 @@ func TestAFlakyReadRecoversWithinTheCeiling(t *testing.T) {
 	}
 	if n := count(h.verbs(t), "pane close"); n != 0 {
 		t.Fatal("a recovered read must not retire its pane")
+	}
+}
+
+// startBusyThen is what `agent start` really answers while the target pane's
+// shell is still running something: an immediate refusal, with nothing typed
+// and nothing started. The envelope is verbatim from herdr 0.8.2, measured by
+// running `pane run <pane> 'sleep 20'` and starting an agent into it. After n
+// of them the shell is free and the given script answers instead.
+func startBusyThen(n int, then string) string {
+	return `c=$(cat "$HDIS_FAKE_DIR/startn" 2>/dev/null || echo 0)
+c=$((c+1)); printf %s "$c" > "$HDIS_FAKE_DIR/startn"
+if [ "$c" -le ` + strconv.Itoa(n) + ` ]; then
+  echo '{"error":{"code":"agent_pane_busy","message":"agent target pane wM:p9 is not an available shell"},"id":"cli:agent:start"}' >&2
+  exit 1
+fi
+` + then
+}
+
+// The live failure on the codex path, in a test: `pane run` returns as soon
+// as the environment eval is typed, not when it finishes, so agent start can
+// arrive while that eval still owns the shell — and herdr refuses it outright
+// with agent_pane_busy. The spawn waits on herdr's own verdict and starts the
+// moment the shell is free, never surfacing a busy shell as a failure.
+func TestTheCodexSpawnWaitsForItsPanesShellBeforeStartingTheAgent(t *testing.T) {
+	h := newHarness(t, []string{goalActive}, startBusyThen(3, startRegistered))
+	h.pipe.ShellCeiling = 6 * time.Second // six tries at the harness's one-second poll
+	h.Bin(t, "codex-cc-proxy", `echo '{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8787"}}'`)
+
+	pane, err := h.pipe.Run(context.Background(), req(codexProfile()))
+	if err != nil {
+		t.Fatalf("a shell that frees inside the ceiling must not fail the spawn: %v", err)
+	}
+	if pane != "wM:p9" {
+		t.Fatalf("pane: %q", pane)
+	}
+	verbs := h.verbs(t)
+	if n := count(verbs, "agent start"); n != 4 {
+		t.Fatalf("want three refusals and then one start, got %d agent starts", n)
+	}
+	if n := count(verbs, "pane close"); n != 0 {
+		t.Fatal("a spawn that waited out a busy shell must not retire its pane")
+	}
+	// The wait belongs after the environment half, which is what made the
+	// shell busy in the first place.
+	run, start := -1, -1
+	for i, v := range verbs {
+		if v == "pane run" && run < 0 {
+			run = i
+		}
+		if v == "agent start" && start < 0 {
+			start = i
+		}
+	}
+	if run < 0 || start < 0 || run > start {
+		t.Fatalf("the environment half must precede every start attempt: %v", verbs)
+	}
+}
+
+// A shell that never frees inside the ceiling fails loud, and the pane it
+// would have started in is retired: herdr refuses before it types anything,
+// so there is no worker in there to lose.
+func TestAPaneShellThatNeverFreesFailsLoudAndRetiresThePane(t *testing.T) {
+	h := newHarness(t, []string{goalActive}, startBusyThen(99, startRegistered))
+	h.pipe.ShellCeiling = 3 * time.Second
+	h.Bin(t, "codex-cc-proxy", `echo '{}'`)
+
+	pane, err := h.pipe.Run(context.Background(), req(codexProfile()))
+	if err == nil {
+		t.Fatal("a shell that never frees must fail the spawn")
+	}
+	if !strings.Contains(err.Error(), "agent_pane_busy") {
+		t.Fatalf("the error drops herdr's own refusal: %v", err)
+	}
+	verbs := h.verbs(t)
+	if n := count(verbs, "agent start"); n != 3 {
+		t.Fatalf("want three bounded tries, got %d agent starts", n)
+	}
+	if n := count(verbs, "pane close"); n != 1 {
+		t.Fatalf("a pane nothing was started in must be retired, closed %d times", n)
+	}
+	if pane != "" {
+		t.Fatalf("a retired pane must not come back for a binding, got %q", pane)
 	}
 }

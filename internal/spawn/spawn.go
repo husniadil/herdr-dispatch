@@ -2,7 +2,7 @@
 // up, its agent starts with the task's goal already in its argv, and the
 // pipeline confirms the goal took before the dispatcher records a binding.
 //
-// Three measured facts shape it, and every one of them is a fact to re-check
+// Four measured facts shape it, and every one of them is a fact to re-check
 // rather than a constant to trust forever:
 //
 //   - herdr refuses an agent argument containing a newline, outright, before
@@ -14,6 +14,9 @@
 //     from that exit.
 //   - a fresh directory raises Claude Code's trust-folder dialog, which
 //     blocks startup. It is answered when it is seen and never blind.
+//   - `pane run` returns when the line is typed, not when it finishes. On
+//     the codex path that leaves the environment eval still owning the
+//     shell, and `agent start` into a busy shell is refused outright.
 package spawn
 
 import (
@@ -48,6 +51,19 @@ var GoalMarkers = []string{"goal set:", "/goal active"}
 // goal causes the first, and a startup dialog causes the second.
 var startCodesMeaningNotReady = map[string]bool{"timeout": true, "agent_not_ready": true}
 
+// PaneBusyCode is herdr's refusal when `agent start` finds the target pane's
+// shell still running something. Measured verbatim against herdr 0.8.2:
+//
+//	{"error":{"code":"agent_pane_busy","message":"agent target pane wM:p13 is not an available shell"}}
+//
+// It arrives in about ten milliseconds and starts nothing on the way, which
+// is what makes it safe to ask again.
+const PaneBusyCode = "agent_pane_busy"
+
+// DefaultShellCeiling bounds the wait for a pane's shell when the pipeline
+// carries no bound of its own.
+const DefaultShellCeiling = 30 * time.Second
+
 // KeepPaneError is a spawn failure the pipeline refuses to clean up after.
 // It means the worker could not be READ, not that the goal was refused: a
 // goal that registered puts the worker to work immediately, so a pane the
@@ -76,6 +92,9 @@ type Pipeline struct {
 	DialogCeiling time.Duration
 	// ConfirmCeiling bounds the wait for the goal to show up on screen.
 	ConfirmCeiling time.Duration
+	// ShellCeiling bounds the wait for the pane's own shell to come free
+	// before the agent is started in it; zero means DefaultShellCeiling.
+	ShellCeiling time.Duration
 	// Poll is the gap between two reads of the pane.
 	Poll time.Duration
 	// ReadLines is how much of the pane each read asks for; zero means 200.
@@ -150,7 +169,7 @@ func (p *Pipeline) build(ctx context.Context, req Request, pane string, agentArg
 		}
 	}
 
-	_, err := p.Herdr.AgentStart(ctx, herdr.StartRequest{
+	err := p.startWhenShellIsFree(ctx, herdr.StartRequest{
 		Name:      req.Name,
 		Kind:      Kind,
 		Pane:      pane,
@@ -173,6 +192,27 @@ func (p *Pipeline) build(ctx context.Context, req Request, pane string, agentArg
 		return fmt.Errorf("spawn %s: %w", req.Name, err)
 	}
 	return nil
+}
+
+// startWhenShellIsFree types the agent into its pane only once herdr agrees
+// the pane's shell is free to take it, and herdr's own refusal is the signal.
+// Retrying agent_pane_busy asks herdr the exact question herdr will act on,
+// which no reading of the pane's process table can promise: between seeing an
+// idle shell and starting into it, the shell can go busy again.
+//
+// The codex path is what makes the wait ordinary. Its environment half runs
+// in the pane's shell, and `pane run` returns as soon as the line is typed,
+// so the eval is still running when the start would otherwise arrive. A pane
+// whose shell is already free costs one attempt and no sleeping.
+func (p *Pipeline) startWhenShellIsFree(ctx context.Context, req herdr.StartRequest) error {
+	var err error
+	for i, n := 0, attempts(p.shellCeiling(), p.Poll); i < n; i++ {
+		if _, err = p.Herdr.AgentStart(ctx, req); !paneBusy(err) {
+			return err
+		}
+		p.sleep(p.Poll)
+	}
+	return err
 }
 
 // answerStartupDialog watches for the trust-folder dialog and answers it once
@@ -242,6 +282,13 @@ func (p *Pipeline) direction() string {
 	return "right"
 }
 
+func (p *Pipeline) shellCeiling() time.Duration {
+	if p.ShellCeiling > 0 {
+		return p.ShellCeiling
+	}
+	return DefaultShellCeiling
+}
+
 func (p *Pipeline) readLines() int {
 	if p.ReadLines > 0 {
 		return p.ReadLines
@@ -287,6 +334,13 @@ func tail(text string) string {
 		text = "…" + text[len(text)-max:]
 	}
 	return strings.Join(strings.Fields(text), " ")
+}
+
+// paneBusy reports whether herdr refused a start because the pane's shell was
+// still occupied — the one refusal worth asking again about.
+func paneBusy(err error) bool {
+	var herr *herdr.Error
+	return errors.As(err, &herr) && herr.Code == PaneBusyCode
 }
 
 func notReady(err error) bool {
