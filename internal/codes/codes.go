@@ -31,6 +31,9 @@ const (
 	AlreadyDispatched Code = "ALREADY_DISPATCHED"
 	// AlreadyRunning is a second daemon meeting the first one's lock.
 	AlreadyRunning Code = "ALREADY_RUNNING"
+	// NotRunning is a verb that needs a live daemon and found none. Only
+	// stop answers with it: every other verb starts one rather than refuse.
+	NotRunning Code = "NOT_RUNNING"
 )
 
 // Error is a failure with a name on it.

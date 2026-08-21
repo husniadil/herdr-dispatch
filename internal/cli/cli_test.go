@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -145,5 +146,31 @@ func TestUsageListsEveryVerbInTheTable(t *testing.T) {
 		if !strings.Contains(usage, want) {
 			t.Errorf("usage does not mention %q", want)
 		}
+	}
+}
+
+// The no-daemon outcome is the operator's, so the help says it rather than
+// leaving them to meet the code once and guess.
+func TestStopsHelpStatesTheNoDaemonOutcome(t *testing.T) {
+	v, ok := verbs.ByCLI([]string{"stop"})
+	if !ok {
+		t.Fatal("no stop subcommand")
+	}
+	if !strings.Contains(v.Long, string(codes.NotRunning)) {
+		t.Errorf("stop's help does not name %s: %q", codes.NotRunning, v.Long)
+	}
+	if !strings.Contains(Usage(), "hdis stop") {
+		t.Errorf("usage does not list stop:\n%s", Usage())
+	}
+}
+
+// Stop prints what it did, in a line an operator reads.
+func TestStopPrintsWhatItStopped(t *testing.T) {
+	var out bytes.Buffer
+	if err := Write("stop", json.RawMessage(`{"stopping":true,"socket":"/tmp/hdis.sock","pid":41}`), false, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "/tmp/hdis.sock") {
+		t.Errorf("stop printed %q", out.String())
 	}
 }

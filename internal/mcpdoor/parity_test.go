@@ -31,6 +31,10 @@ import (
 // pinnedTools is the tool list this door publishes. Adding, renaming or
 // removing one is a deliberate change to a surface other harnesses call:
 // it moves this list in the same commit, and it is a breaking change.
+//
+// stop is a verb and is not here, on purpose: see
+// TestStopIsServedOnTheCLIDoorOnly for why the operator's brake stays off a
+// door every agent session holds one of.
 var pinnedTools = []string{
 	"hdis_doctor",
 	"hdis_dispatch",
@@ -142,6 +146,14 @@ func TestNeitherDoorCarriesAVerbTheOtherLacks(t *testing.T) {
 		if _, ok := verbs.ByCLI(v.CLI); !ok {
 			t.Errorf("verb %q has no CLI subcommand", v.Name)
 		}
+		// A CLI-only verb is the one asymmetry the table may declare, and
+		// declaring it is what keeps it from being an accident.
+		if v.CLIOnly {
+			if _, ok := served[v.MCP]; ok {
+				t.Errorf("verb %q is declared CLI-only and served over MCP", v.Name)
+			}
+			continue
+		}
 		tl, ok := served[v.MCP]
 		if !ok {
 			t.Errorf("verb %q is a CLI subcommand and no MCP tool", v.Name)
@@ -172,6 +184,9 @@ func TestTheSchemaDeclaresExactlyWhatTheCLITakes(t *testing.T) {
 		byName[tl.Name] = tl
 	}
 	for _, v := range verbs.All {
+		if v.CLIOnly {
+			continue
+		}
 		raw, err := json.Marshal(byName[v.MCP].InputSchema)
 		if err != nil {
 			t.Fatalf("schema for %q: %v", v.MCP, err)
@@ -378,5 +393,39 @@ func TestTheDoorKeepsNoStateOfItsOwn(t *testing.T) {
 	}
 	if got.Pane != "" {
 		t.Fatalf("a door outside a pane claimed pane %q", got.Pane)
+	}
+}
+
+// Stop is deliberately CLI-only, and the parity guard above knows it. The
+// reason: every other verb is about one task, and an MCP door is spawned once
+// per client session — any agent holding one could take the dispatcher away
+// from every other worker it is driving. Stopping the dispatcher is the
+// operator's act, at the terminal they started it from.
+func TestStopIsServedOnTheCLIDoorOnly(t *testing.T) {
+	_, call := inProcessDaemon(t)
+	sess := session(t, call)
+
+	v, ok := verbs.ByName("stop")
+	if !ok {
+		t.Fatal("no stop verb")
+	}
+	if !v.CLIOnly {
+		t.Fatal("stop is not marked CLI-only")
+	}
+	if _, ok := verbs.ByCLI([]string{"stop"}); !ok {
+		t.Error("stop has no CLI subcommand")
+	}
+	tools, err := sess.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	for _, tl := range tools.Tools {
+		if tl.Name == v.MCP {
+			t.Fatalf("stop is served over MCP as %q", tl.Name)
+		}
+	}
+	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{Name: v.MCP})
+	if err == nil && !res.IsError {
+		t.Fatal("the MCP door answered a stop call")
 	}
 }

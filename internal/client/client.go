@@ -30,6 +30,9 @@ type Client struct {
 	// Timeout bounds the wait for a daemon this client started; zero means
 	// StartTimeout.
 	Timeout time.Duration
+	// NoStart refuses with NotRunning when nothing is listening, rather
+	// than starting a daemon. Stop is what it is for.
+	NoStart bool
 	// Started is the daemon this client had to bring up, if it brought one
 	// up. Nothing here stops it again: it outlives the door on purpose.
 	Started *os.Process
@@ -60,6 +63,10 @@ func (c *Client) dialOrStart() (net.Conn, error) {
 	path := config.SocketPath()
 	if conn, err := net.Dial("unix", path); err == nil {
 		return conn, nil
+	}
+	if c.NoStart {
+		return nil, codes.Errorf(codes.NotRunning,
+			"no hdis daemon is listening on %s", path)
 	}
 	if err := c.start(); err != nil {
 		return nil, err

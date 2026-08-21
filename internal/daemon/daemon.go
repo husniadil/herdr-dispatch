@@ -16,6 +16,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"sync"
 	"syscall"
 	"time"
 
@@ -45,6 +46,15 @@ type Daemon struct {
 	// kick wakes the tick early, so an accepted dispatch does not wait out
 	// the interval before its worker comes up.
 	kick chan struct{}
+	// halt carries an operator's stop from the verb to Serve.
+	halt chan struct{}
+	// answered closes when the stop that asked has its own answer on the
+	// wire, which is what Serve waits for before the process goes. Waiting
+	// on every open connection instead would hang on a caller that holds
+	// one open and asks nothing.
+	answered  chan struct{}
+	stopOnce  sync.Once
+	writeOnce sync.Once
 }
 
 // Lock takes the one-daemon lock, and holds it for as long as the returned
@@ -88,16 +98,25 @@ func Listen() (net.Listener, error) {
 	return ln, nil
 }
 
-// Serve ticks the loop and answers the socket until ctx ends.
+// Serve ticks the loop and answers the socket until ctx ends or stop is
+// asked for. Either way it leaves nothing of itself behind.
 func (d *Daemon) Serve(ctx context.Context, ln net.Listener) error {
 	d.kick = make(chan struct{}, 1)
+	d.halt = make(chan struct{})
+	d.answered = make(chan struct{})
+	ctx, done := context.WithCancel(ctx)
+	defer done()
 	ticking := make(chan struct{})
 	go func() {
 		defer close(ticking)
 		d.tick(ctx)
 	}()
 	go func() {
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+		case <-d.halt:
+			done()
+		}
 		ln.Close()
 	}()
 
@@ -105,12 +124,32 @@ func (d *Daemon) Serve(ctx context.Context, ln net.Listener) error {
 		conn, err := ln.Accept()
 		if err != nil {
 			if ctx.Err() != nil {
+				select {
+				case <-d.halt:
+					// The stop that closed the listener is still writing
+					// its own answer; leave after it, not during it.
+					<-d.answered
+				default:
+				}
 				<-ticking
+				d.Cleanup()
 				return nil
 			}
 			return fmt.Errorf("accept: %w", err)
 		}
 		go d.answer(ctx, conn)
+	}
+}
+
+// Cleanup removes what a running daemon owns in the state dir. The lock is
+// released by the kernel when the process ends either way; removing the file
+// as well keeps a stopped daemon from leaving a path behind that says one is
+// still here.
+func (d *Daemon) Cleanup() {
+	for _, path := range []string{config.SocketPath(), config.LockPath()} {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			d.logf("remove %s: %v", path, err)
+		}
 	}
 }
 
@@ -159,6 +198,9 @@ func (d *Daemon) answer(ctx context.Context, conn net.Conn) {
 		return
 	}
 	d.write(conn, protocol.Response{Result: result})
+	if req.Verb == "stop" && d.answered != nil {
+		d.writeOnce.Do(func() { close(d.answered) })
+	}
 }
 
 func (d *Daemon) write(conn net.Conn, resp protocol.Response) {
@@ -194,6 +236,16 @@ func (d *Daemon) Handle(ctx context.Context, req protocol.Request) (json.RawMess
 	case "status":
 		st, err := d.Loop.Status(ctx)
 		return encode(st, err)
+	case "stop":
+		if d.halt == nil {
+			return nil, codes.Errorf(codes.NotRunning, "this daemon is not serving")
+		}
+		d.logf("stopping: %s asked over %s", req.Caller(), door(req))
+		// The board hears nothing about this. A worker mid-task keeps its
+		// claim and its lease, and htask times those out on its own; a
+		// second writer racing that is the bug, not a courtesy.
+		d.stopOnce.Do(func() { close(d.halt) })
+		return encode(StopReport{Stopping: true, Socket: config.SocketPath(), PID: os.Getpid()}, nil)
 	}
 	return nil, codes.Errorf(codes.Invalid, "verb %q is declared and not served", v.Name)
 }
@@ -208,6 +260,13 @@ func (d *Daemon) wake() {
 	case d.kick <- struct{}{}:
 	default:
 	}
+}
+
+// StopReport is what stop answers with, before the daemon goes.
+type StopReport struct {
+	Stopping bool   `json:"stopping"`
+	Socket   string `json:"socket"`
+	PID      int    `json:"pid"`
 }
 
 // DoctorReport is what doctor answers with: enough to say why a dispatch

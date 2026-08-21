@@ -38,6 +38,14 @@ type Verb struct {
 	Long string
 	// Args is the parameter list, in CLI positional order.
 	Args []Arg
+	// CLIOnly keeps a verb off the MCP door. It is the one asymmetry the
+	// table may declare, and declaring it here is what keeps it from being
+	// an accident: the parity guard reads this field rather than a list of
+	// exceptions kept beside it.
+	CLIOnly bool
+	// NoAutostart sends the verb to whatever daemon is already listening
+	// and refuses when none is, instead of starting one.
+	NoAutostart bool
 }
 
 // All is the registry. Order is the order the CLI lists them in.
@@ -59,6 +67,16 @@ var All = []Verb{
 		Args: []Arg{
 			{Name: "task", Type: String, Desc: "The task id or its number on the board", Required: true, Positional: true},
 		},
+	},
+	{
+		Name: "stop", CLI: []string{"stop"}, MCP: "hdis_stop",
+		Short: "Ask the running daemon to shut down",
+		Long: "The daemon stops ticking, closes its socket, drops its lock and " +
+			"exits; it writes nothing to the board on the way out, and the tasks " +
+			"it was driving keep their claims and their leases, which are the " +
+			"board's to time out. Answers NOT_RUNNING when no daemon is " +
+			"listening: nothing is started just to be stopped.",
+		CLIOnly: true, NoAutostart: true,
 	},
 	{
 		Name: "status", CLI: []string{"status"}, MCP: "hdis_status",

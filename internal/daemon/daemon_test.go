@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -440,4 +441,113 @@ func TestADaemonWithNoBasePaneDoesNotTick(t *testing.T) {
 	}
 	cancel()
 	<-served
+}
+
+// The ask-to-stop path: a daemon a door started can only be reached over the
+// socket, so stop has to be a verb. It answers, stops ticking, and takes its
+// socket and lock with it.
+func TestStopShutsTheDaemonDownCleanly(t *testing.T) {
+	dir := stateDir(t)
+	d, f := newDaemon(t)
+	lock, err := Lock()
+	if err != nil {
+		t.Fatalf("lock: %v", err)
+	}
+	defer lock.Close()
+	ln, err := Listen()
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	served := make(chan error, 1)
+	go func() { served <- d.Serve(ctx, ln) }()
+
+	conn, err := net.Dial("unix", config.SocketPath())
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	if err := json.NewEncoder(conn).Encode(protocol.Request{Verb: "stop", Door: "cli"}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	var resp protocol.Response
+	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+		t.Fatalf("read the answer to stop: %v", err)
+	}
+	conn.Close()
+	if resp.Error != nil {
+		t.Fatalf("stop over the socket: %+v", resp.Error)
+	}
+	var rep StopReport
+	if err := json.Unmarshal(resp.Result, &rep); err != nil {
+		t.Fatalf("stop json: %v", err)
+	}
+	if !rep.Stopping || rep.Socket != config.SocketPath() {
+		t.Fatalf("stop answered %+v", rep)
+	}
+
+	before := len(f.Calls(t))
+	select {
+	case err := <-served:
+		if err != nil {
+			t.Fatalf("serve after stop: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the daemon did not stop when asked")
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "hdis.sock")); !os.IsNotExist(err) {
+		t.Errorf("the socket outlived the daemon: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "hdis.lock")); !os.IsNotExist(err) {
+		t.Errorf("the lock file outlived the daemon: %v", err)
+	}
+	// The board is htask's, and a dispatcher going away writes nothing to
+	// it: no release, no note, no claim handed back.
+	after := f.Calls(t)
+	if len(after) != before {
+		t.Errorf("stopping reached out: %q", after[before:])
+	}
+	for _, c := range after {
+		for _, write := range []string{"task claim", "task release", "task submit", "task approve", "task reject", "note "} {
+			if strings.Contains(c, write) {
+				t.Errorf("stopping wrote to the board: %q", c)
+			}
+		}
+	}
+}
+
+// Nothing is ticking after a stop: the loop's goroutine is gone with it.
+func TestStopEndsTheTick(t *testing.T) {
+	stateDir(t)
+	d, f := newDaemon(t)
+	d.Interval = 10 * time.Millisecond
+	ln, err := Listen()
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	served := make(chan error, 1)
+	go func() { served <- d.Serve(ctx, ln) }()
+
+	conn, err := net.Dial("unix", config.SocketPath())
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	json.NewEncoder(conn).Encode(protocol.Request{Verb: "stop"})
+	var resp protocol.Response
+	json.NewDecoder(conn).Decode(&resp)
+	conn.Close()
+	select {
+	case <-served:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the daemon did not stop when asked")
+	}
+
+	settled := len(f.Calls(t))
+	time.Sleep(100 * time.Millisecond)
+	if got := len(f.Calls(t)); got != settled {
+		t.Fatalf("the tick ran %d more times after the daemon stopped", got-settled)
+	}
 }

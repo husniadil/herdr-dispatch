@@ -57,12 +57,16 @@ func TestByCLIMatchesTheSubcommandPath(t *testing.T) {
 	}
 }
 
-func TestTheFirstSliceIsTheThreeVerbsAndNoMore(t *testing.T) {
+// The table is pinned so a verb is added on purpose. It moved once, from
+// three to four: stop joined it because a daemon a door autostarted has no
+// terminal to answer SIGINT from and could only be killed by pid. stop is
+// CLI-only, so the MCP tool list stayed at three.
+func TestTheTableIsTheFourVerbsAndNoMore(t *testing.T) {
 	var got []string
 	for _, v := range All {
 		got = append(got, v.Name)
 	}
-	want := []string{"doctor", "dispatch", "status"}
+	want := []string{"doctor", "dispatch", "stop", "status"}
 	if len(got) != len(want) {
 		t.Fatalf("verbs = %v, want %v", got, want)
 	}

@@ -68,7 +68,7 @@ func Run(v verbs.Verb, argv []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	result, err := (&client.Client{}).Call(req)
+	result, err := (&client.Client{NoStart: v.NoAutostart}).Call(req)
 	if err != nil {
 		return err
 	}
@@ -105,6 +105,12 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 			return err
 		}
 		fmt.Fprintf(out, "task #%d %q is reserved; its worker comes up on the next tick\n", res.Seq, res.Title)
+	case "stop":
+		var rep daemon.StopReport
+		if err := json.Unmarshal(result, &rep); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "the daemon on %s (pid %d) is stopping\n", rep.Socket, rep.PID)
 	case "status":
 		var st loop.Status
 		if err := json.Unmarshal(result, &st); err != nil {

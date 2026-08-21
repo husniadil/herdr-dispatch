@@ -149,3 +149,24 @@ func TestACallGivesUpBoundedWhenNoDaemonComesUp(t *testing.T) {
 		t.Fatalf("the call waited %s for a daemon that never came", waited)
 	}
 }
+
+// Stop is the one verb that must not autostart a daemon. Starting one just to
+// ask it to go away leaves the operator with a process that ran a tick and a
+// spawn on its way in, which is the opposite of what they asked for.
+func TestStopWithNoDaemonDoesNotStartOne(t *testing.T) {
+	bin := build(t)
+	world(t)
+
+	c := &Client{Bin: bin, Timeout: 10 * time.Second, NoStart: true}
+	reap(t, c)
+	_, err := c.Call(protocol.Request{Verb: "stop", Door: "cli"})
+	if got, want := codes.Of(err), codes.NotRunning; got != want {
+		t.Fatalf("stop with no daemon = %v (%q), want %q", err, got, want)
+	}
+	if c.Started != nil {
+		t.Fatal("stop started a daemon just to stop it")
+	}
+	if _, err := os.Stat(config.SocketPath()); !os.IsNotExist(err) {
+		t.Errorf("stop left a socket behind: %v", err)
+	}
+}
