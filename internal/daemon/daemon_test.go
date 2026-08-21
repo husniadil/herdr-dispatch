@@ -22,6 +22,7 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/protocol"
 	"github.com/husniadil/herdr-dispatch/internal/proxy"
 	"github.com/husniadil/herdr-dispatch/internal/spawn"
+	"github.com/husniadil/herdr-dispatch/internal/store"
 	"github.com/husniadil/herdr-dispatch/internal/version"
 )
 
@@ -79,6 +80,7 @@ func newDaemon(t *testing.T) (*Daemon, *fake.Fake) {
 				StartTimeout: time.Second, DialogCeiling: time.Second, ConfirmCeiling: 2 * time.Second,
 				Poll: time.Second, Sleep: func(time.Duration) {},
 			},
+			Store:    &store.Bindings{Path: filepath.Join(t.TempDir(), "hdis-bindings.json")},
 			BasePane: "wM:p1",
 			Log:      log.New(io.Discard, "", 0),
 		},
@@ -577,5 +579,38 @@ func TestStopEndsTheTick(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if got := len(f.Calls(t)); got != settled {
 		t.Fatalf("the tick ran %d more times after the daemon stopped", got-settled)
+	}
+}
+
+// doctor names the file the bindings live in and how many of them a restart
+// took back, which is the only place an operator can see either.
+func TestDoctorSaysWhereTheBindingsLiveAndHowManyCameBack(t *testing.T) {
+	d, f := newDaemon(t)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9","agent":"claude","agent_status":"working","revision":1}]}}`)
+	if err := d.Loop.Store.Save([]decide.Binding{{
+		TaskID: "01AAA", Pane: "wM:p9", PromptedAt: time.Now().UTC(), Prompts: 1,
+	}}); err != nil {
+		t.Fatalf("seed the store: %v", err)
+	}
+	if _, err := d.Loop.Adopt(context.Background()); err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+
+	raw, err := call(t, d, protocol.Request{Verb: "doctor"})
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+	var rep DoctorReport
+	if err := json.Unmarshal(raw, &rep); err != nil {
+		t.Fatalf("doctor json: %v", err)
+	}
+	if rep.Bindings != d.Loop.Store.Path {
+		t.Errorf("doctor says the bindings live at %q, want %q", rep.Bindings, d.Loop.Store.Path)
+	}
+	if rep.Readopted != 1 {
+		t.Errorf("doctor reports %d re-adopted, want 1", rep.Readopted)
+	}
+	if rep.Workers != 1 {
+		t.Errorf("doctor reports %d workers, want the re-adopted one", rep.Workers)
 	}
 }

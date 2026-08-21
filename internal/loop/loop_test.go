@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/htask"
 	"github.com/husniadil/herdr-dispatch/internal/proxy"
 	"github.com/husniadil/herdr-dispatch/internal/spawn"
+	"github.com/husniadil/herdr-dispatch/internal/store"
 )
 
 var clock = time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
@@ -75,6 +77,7 @@ func newLoop(t *testing.T) (*Loop, *fake.Fake) {
 			StartTimeout: time.Second, DialogCeiling: time.Second, ConfirmCeiling: 5 * time.Second,
 			Poll: time.Second, Sleep: func(time.Duration) {},
 		},
+		Store:    &store.Bindings{Path: filepath.Join(t.TempDir(), "hdis-bindings.json")},
 		BasePane: "wM:p1",
 		Now:      func() time.Time { return clock },
 		Log:      log.New(io.Discard, "", 0),

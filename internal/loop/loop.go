@@ -1,23 +1,27 @@
 // Package loop is the dispatcher's tick: collect a snapshot of the facts,
 // hand it to the pure decision core, and execute what comes back.
 //
-// The bindings are the only state the dispatcher owns, and they live in
-// memory. Everything else it might want to remember is a board fact or a
-// Herdr fact, and both are read fresh every tick.
+// The bindings are the only state the dispatcher owns, and they are written
+// to the plugin's own store on every change so a restart does not forget a
+// worker it prompted. Everything else it might want to remember is a board
+// fact or a Herdr fact, and both are read fresh every tick.
 package loop
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
 	"time"
 
+	"github.com/husniadil/herdr-dispatch/internal/codes"
 	"github.com/husniadil/herdr-dispatch/internal/config"
 	"github.com/husniadil/herdr-dispatch/internal/decide"
 	"github.com/husniadil/herdr-dispatch/internal/herdr"
 	"github.com/husniadil/herdr-dispatch/internal/htask"
 	"github.com/husniadil/herdr-dispatch/internal/spawn"
+	"github.com/husniadil/herdr-dispatch/internal/store"
 )
 
 // Loop holds the adapters, the policy, and the bindings.
@@ -27,6 +31,10 @@ type Loop struct {
 	Spawn  *spawn.Pipeline
 	Config config.Config
 	Policy decide.Policy
+	// Store is where the bindings outlive the process. A nil Store keeps
+	// them in memory only, which is a test that does not care and never a
+	// running daemon.
+	Store *store.Bindings
 
 	// BasePane is the pane worker panes are split off, normally the
 	// dispatcher's own.
@@ -47,6 +55,9 @@ type Loop struct {
 	// spawned yet. A reservation is what keeps the watching loop and the
 	// dispatch verb from both taking the same task.
 	pending []string
+	// readopted is how many persisted bindings the last Adopt kept, for
+	// doctor to report.
+	readopted int
 	// rows is the last tick's board rows, by task id: the project a worker
 	// runs in, the number an operator reads, the title status prints. It is
 	// a cache of board facts and never a source of them.
@@ -62,6 +73,110 @@ func (l *Loop) Tick(ctx context.Context) error {
 	}
 	l.apply(ctx, decide.Decide(snap, l.Policy))
 	return nil
+}
+
+// Adopt reads the persisted bindings and takes back the ones reality still
+// agrees with. It is run once, before the first tick.
+//
+// Verification is against the two systems that own the facts: the pane must
+// still be one Herdr lists, and the task must still be one this pane is
+// driving. A binding that fails either is dropped with a line in the log and
+// nothing is done to its pane — retiring a worker on the strength of a
+// binding a restart could not verify is the split this is here to prevent.
+//
+// Herdr being unreachable is different from a pane being gone, and adopting
+// on that guess would hand a live worker's task to a second pane. Nothing is
+// adopted, the failure is loud, and the store is left for the next start.
+func (l *Loop) Adopt(ctx context.Context) (int, error) {
+	if l.Store == nil {
+		return 0, nil
+	}
+	held, err := l.Store.Load()
+	if err != nil {
+		// A store that cannot be read is a dispatcher that has forgotten,
+		// which is where it was before any of this. It is not a reason to
+		// refuse to start.
+		l.logf("the bindings could not be read, starting with none: %v", err)
+		return 0, nil
+	}
+	if len(held) == 0 {
+		return 0, nil
+	}
+
+	panes, err := l.Herdr.Panes(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("herdr cannot say which panes are alive, so %d persisted binding(s) stay unadopted: %w", len(held), err)
+	}
+
+	kept := make([]decide.Binding, 0, len(held))
+	rows := make(map[string]htask.Task, len(held))
+	for _, b := range held {
+		if _, alive := panes[b.Pane]; !alive {
+			l.logf("task %s: pane %s is gone, dropping the binding a restart found", b.TaskID, b.Pane)
+			continue
+		}
+		row, err := l.Board.Get(ctx, b.TaskID)
+		if err != nil {
+			var refusal *htask.Refusal
+			if errors.As(err, &refusal) && refusal.Code == string(codes.NotFound) {
+				l.logf("task %s: the board has no such task, dropping the binding a restart found", b.TaskID)
+				continue
+			}
+			// The board could not answer, which is not an answer that the
+			// task moved on. Hold it, exactly as a tick holds it.
+			l.logf("task %s: cannot be read, holding the binding a restart found: %v", b.TaskID, err)
+			kept = append(kept, b)
+			continue
+		}
+		if decide.Terminal(row.Status) {
+			l.logf("task %s is %s, dropping the binding a restart found on pane %s", b.TaskID, row.Status, b.Pane)
+			continue
+		}
+		if claimed := row.Pane(); claimed != "" && claimed != b.Pane {
+			l.logf("task %s is held by %s, not by pane %s; dropping the binding a restart found", b.TaskID, claimed, b.Pane)
+			continue
+		}
+		rows[row.ID] = row
+		kept = append(kept, b)
+	}
+
+	l.mu.Lock()
+	l.bindings = kept
+	l.rows = rows
+	l.readopted = len(kept)
+	l.saveLocked()
+	l.mu.Unlock()
+	l.logf("re-adopted %d of %d persisted binding(s) from %s", len(kept), len(held), l.Store.Path)
+	return len(kept), nil
+}
+
+// Readopted is how many persisted bindings the last Adopt kept.
+func (l *Loop) Readopted() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.readopted
+}
+
+// BindingsPath is where the bindings are kept, for doctor to name.
+func (l *Loop) BindingsPath() string {
+	if l.Store == nil {
+		return ""
+	}
+	return l.Store.Path
+}
+
+// saveLocked writes the bindings out. The caller holds mu, so the document
+// on disk can never be a set no process ever held. A store that cannot be
+// written is reported and the daemon carries on: the bindings in memory are
+// still right, and refusing to dispatch because a file is unwritable helps
+// nobody.
+func (l *Loop) saveLocked() {
+	if l.Store == nil {
+		return
+	}
+	if err := l.Store.Save(l.bindings); err != nil {
+		l.logf("the bindings could not be written: %v", err)
+	}
 }
 
 // Bindings reports what the dispatcher currently believes it is driving.
@@ -214,6 +329,7 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 		PromptedAt: l.now(),
 		Prompts:    1,
 	})
+	l.saveLocked()
 	l.mu.Unlock()
 	// The reservation is spent the moment the binding exists.
 	l.unreserve(row.ID)
@@ -235,6 +351,7 @@ func (l *Loop) prompt(ctx context.Context, a decide.Action) error {
 			l.bindings[i].PromptedAt = l.now()
 		}
 	}
+	l.saveLocked()
 	return nil
 }
 
@@ -263,6 +380,7 @@ func (l *Loop) notify(ctx context.Context, a decide.Action) error {
 			l.bindings[i].Notified = true
 		}
 	}
+	l.saveLocked()
 	return nil
 }
 
@@ -286,6 +404,7 @@ func (l *Loop) drop(taskID string) {
 		}
 	}
 	l.bindings = kept
+	l.saveLocked()
 }
 
 func (l *Loop) promptsFor(taskID string) int {

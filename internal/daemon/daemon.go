@@ -276,14 +276,18 @@ type DoctorReport struct {
 	Version string `json:"version"`
 	// Contract is the plugin contract THIS binary satisfies, which is not
 	// the board's: Board.Contract below is htask's own, relayed.
-	Contract   string      `json:"contract"`
-	Socket     string      `json:"socket"`
-	BasePane   string      `json:"base_pane"`
-	MaxWorkers int         `json:"max_workers"`
-	Interval   string      `json:"interval"`
-	Workers    int         `json:"workers"`
-	Pending    int         `json:"pending"`
-	Board      BoardHealth `json:"board"`
+	Contract   string `json:"contract"`
+	Socket     string `json:"socket"`
+	BasePane   string `json:"base_pane"`
+	MaxWorkers int    `json:"max_workers"`
+	Interval   string `json:"interval"`
+	Workers    int    `json:"workers"`
+	Pending    int    `json:"pending"`
+	// Bindings is the file the pane-to-task mapping is kept in, and
+	// Readopted is how many of them this daemon took back when it started.
+	Bindings  string      `json:"bindings"`
+	Readopted int         `json:"readopted"`
+	Board     BoardHealth `json:"board"`
 }
 
 // BoardHealth is the board's own report of itself, or why it gave none.
@@ -308,6 +312,8 @@ func (d *Daemon) doctor(ctx context.Context) (DoctorReport, error) {
 		Interval:   d.Interval.String(),
 		Workers:    len(d.Loop.Bindings()),
 		Pending:    len(d.Loop.Pending()),
+		Bindings:   d.Loop.BindingsPath(),
+		Readopted:  d.Loop.Readopted(),
 	}
 	board, err := d.Board.Doctor(ctx)
 	if err != nil {

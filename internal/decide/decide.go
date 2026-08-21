@@ -97,7 +97,7 @@ func Decide(s Snapshot, p Policy) []Action {
 		status, paneAlive := s.Agents[b.Pane]
 
 		// Endings first: they do not hold a slot.
-		if known && terminal(t.Status) {
+		if known && Terminal(t.Status) {
 			out = append(out, Action{Kind: Retire, TaskID: b.TaskID, Pane: b.Pane, Reason: ReasonTerminal})
 			continue
 		}
@@ -145,6 +145,7 @@ func Decide(s Snapshot, p Policy) []Action {
 	return out
 }
 
-func terminal(status string) bool {
+// Terminal is a board status the dispatcher has nothing left to do about.
+func Terminal(status string) bool {
 	return status == "done" || status == "cancelled"
 }

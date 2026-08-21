@@ -211,26 +211,68 @@ ledger.
 
 ## Restarting the dispatcher
 
-The bindings — which pane was prompted for which task, when, and how often —
-are the dispatcher's only state, and they live in the daemon's memory. That
-mapping exists nowhere else until the worker claims, so restarting the daemon
-loses it:
+The bindings — which pane was prompted for which task, when, how often, and
+whether review was already announced — are the dispatcher's only state, and
+they are the one thing about a worker that exists nowhere else until it
+claims. They are written to `<state_dir>/hdis-bindings.json` on every change
+and taken back at the next start.
 
-- A worker that **already claimed** its task is unaffected. The claim, the
-  lease and the evidence are board facts, the pane is a Herdr fact, and both
-  survive. `hdis` simply stops tracking that pane; nothing retires it, and the
-  board's own lease timer governs it from then on.
-- A worker that was **prompted but never claimed** is forgotten. Its task is
-  still ready on the board, so the next tick dispatches it again into a fresh
-  pane once the claim timeout has passed. The orphaned pane is left where it
-  is — closing a pane the dispatcher no longer knows it opened is worse than
-  leaving it for the operator.
+**What is persisted.** Only what is not derivable: the pane, the task id, the
+time the goal was delivered, the prompt count, and whether review was
+announced. Board facts — status, claim, lease, evidence — are read from the
+board every tick, and pane facts from Herdr; neither is written here. An
+on-demand dispatch's reservation is not persisted either: it is intent that
+has not become a worker yet, and a caller can ask again.
 
-Persisting the bindings would fix the second case and is deliberately not
-done yet: it buys a restart edge case at the cost of a second store that can
-disagree with the board. The daemon makes that window rarer rather than
-shorter — one process holds the bindings for as long as it runs, instead of
-each door holding a set of its own.
+**How it is written.** A JSON document, whole, to a temp file in the same
+directory and then renamed over the old one. A reader sees the previous
+document or the new one and never half of either, so a crash mid-write leaves
+the last good set intact. A document that still cannot be read is reported and
+the daemon starts with none of it rather than refusing to start.
+
+The plugin contract's §5.1 store is SQLite, and this deliberately is not one.
+The whole set is a handful of rows, rewritten in full on every change, read by
+one process holding the daemon's own lock; there is no query, no schema and no
+second reader for a database to earn. A SQLite driver is a large dependency
+against this repo's standard-library budget, so the reason is recorded here
+instead.
+
+**What happens at start.** Every persisted binding is verified against reality
+before it is taken back, and nothing is done to a pane on the strength of one:
+
+- The pane must be one Herdr still lists. A binding whose pane is gone is
+  dropped with a line in the log.
+- The task must still be this pane's to drive. A task the board says is done
+  or cancelled, or one claimed by a different pane, is dropped with a line in
+  the log — the pane is left alone for the operator.
+- A task the board cannot answer for is held, not dropped: a board that is
+  down is not evidence that a task moved on.
+- If **Herdr** cannot be reached at all, nothing is adopted, the failure is
+  loud, and the store is left where it is for the next start. Adopting on that
+  guess is how a live worker's task ends up in a second pane, which is the
+  split this exists to prevent. Nothing is spawned while Herdr is down either,
+  so the wait costs nothing.
+
+`hdis doctor` reports the file and how many bindings came back at the last
+start.
+
+**The window that is left.** A binding is written after the spawn returns a
+pane, so a crash between `pane split` and that write loses it: the pane is
+alive, the task is still ready, and nothing records the two together. The next
+start finds no binding for it, and the task is dispatched again into a fresh
+pane with the old one left behind — the same orphan the store removes
+everywhere else. Closing that window would mean writing a binding before the
+pane exists to bind to, which trades a rare orphan for routine bindings to
+panes that never came up.
+
+Two smaller truths about a restart:
+
+- A worker that **already claimed** its task is unaffected either way. The
+  claim, the lease and the evidence are board facts and the pane is a Herdr
+  fact; a re-adopted binding just means `hdis` keeps following it.
+- The settings file a spawn wrote for a pane is remembered in memory only. A
+  re-adopted pane retired after a restart is closed, and its settings file is
+  left in the temp dir for the operating system to clear.
 
 ## The boundary
 

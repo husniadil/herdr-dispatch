@@ -28,6 +28,7 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/mcpdoor"
 	"github.com/husniadil/herdr-dispatch/internal/proxy"
 	"github.com/husniadil/herdr-dispatch/internal/spawn"
+	"github.com/husniadil/herdr-dispatch/internal/store"
 	"github.com/husniadil/herdr-dispatch/internal/verbs"
 	"github.com/husniadil/herdr-dispatch/internal/version"
 )
@@ -140,8 +141,16 @@ func serve(argv []string) error {
 			ShellCeiling:   spawn.DefaultShellCeiling,
 			Poll:           2 * time.Second,
 		},
+		Store:    &store.Bindings{Path: config.BindingsPath()},
 		BasePane: pane,
 		Log:      log.Default(),
+	}
+
+	// The bindings a previous daemon wrote are taken back before anything is
+	// dispatched: a worker that was prompted and has not claimed yet is
+	// tracked by the same pane it was given, and never handed a second one.
+	if _, err := l.Adopt(ctx); err != nil {
+		log.Printf("%v", err)
 	}
 
 	if *once {

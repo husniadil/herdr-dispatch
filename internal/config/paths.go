@@ -15,9 +15,9 @@ const Name = "hdis"
 const EnvPrefix = "HDIS_"
 
 // StateDir is HDIS_STATE_DIR, else ${XDG_STATE_HOME:-~/.local/state}/hdis.
-// The socket, the lock and the log of a daemon nobody is watching live
-// there. No board fact does: the bindings are the dispatcher's only state
-// and they stay in memory.
+// The socket, the lock, the log and the bindings live there. No board fact
+// does: the bindings are the dispatcher's only state, and they are the one
+// thing about them that is not derivable from the board or from Herdr.
 func StateDir() string {
 	return dirFrom(EnvPrefix+"STATE_DIR", "XDG_STATE_HOME", filepath.Join(".local", "state"))
 }
@@ -38,6 +38,12 @@ func LockPath() string { return filepath.Join(StateDir(), Name+".lock") }
 
 // ConfigPath is <config_dir>/hdis.json, where the profiles already live.
 func ConfigPath() string { return filepath.Join(ConfigDir(), Name+".json") }
+
+// BindingsPath is <state_dir>/hdis-bindings.json, the pane-to-task mapping
+// the dispatcher re-adopts at start. It is the plugin's own state dir, per
+// §5.1, and a JSON document rather than the section's SQLite file for the
+// reason the README records.
+func BindingsPath() string { return filepath.Join(StateDir(), Name+"-bindings.json") }
 
 // LogPath is <state_dir>/hdis.log, where a daemon started by a door writes:
 // it has no terminal, and a dispatcher nobody can hear is worse than none.

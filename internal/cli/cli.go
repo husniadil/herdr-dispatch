@@ -94,6 +94,8 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 		fmt.Fprintf(out, "  base pane   %s\n", or(rep.BasePane, "none: nothing is spawned and dispatch refuses"))
 		fmt.Fprintf(out, "  workers     %d live, %d reserved, max %d\n", rep.Workers, rep.Pending, rep.MaxWorkers)
 		fmt.Fprintf(out, "  tick        every %s\n", rep.Interval)
+		fmt.Fprintf(out, "  bindings    %s, %d re-adopted at start\n",
+			or(rep.Bindings, "in memory only"), rep.Readopted)
 		if rep.Board.Error != "" {
 			fmt.Fprintf(out, "  board       unreachable: %s\n", rep.Board.Error)
 			return nil
