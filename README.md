@@ -4,24 +4,91 @@ The dispatcher for the [herdr-tasks](https://github.com/husniadil/herdr-tasks)
 board: `hdis` watches for ready tasks, brings up a worker agent in a
 [Herdr](https://herdr.dev) pane for each one, delivers the task's goal, tracks
 the worker, and hands off at review — where the board's own review gate takes
-over. The board stays the ledger; this binary is only execution policy.
+over. Any agent can also ask it for a worker on demand, through its CLI or
+over MCP. The board stays the ledger; this binary is only execution policy.
 
 ## Running it
 
 ```sh
 make install
-hdis run
+hdis daemon        # or `hdis run`, which is the same thing
 ```
 
-`hdis run` must run inside a Herdr pane: worker panes are splits of the
-dispatcher's own, and `HERDR_PANE_ID` is where it starts from. `hdis run -h`
-lists the knobs — tick interval, how many workers may be live at once, how
-long a delivered goal may go unclaimed, and how many times one task's goal is
-re-delivered before the worker is given up on.
+One binary is the daemon and both doors. The daemon owns the tick and the
+bindings; the CLI and the MCP server are thin clients of it and hold nothing
+of their own. There is one daemon per user, elected by a lock at
+`$XDG_STATE_HOME/hdis/hdis.lock`, answering on a private socket at
+`$XDG_STATE_HOME/hdis/hdis.sock`. A second one refuses to start with
+`ALREADY_RUNNING` rather than driving the same board alongside the first.
 
-At startup it reads `htask doctor --json` and refuses to run when the board's
-daemon is not answering or when the board cannot reach Herdr. After that, a
-tick that fails is reported and the next one still runs.
+`hdis daemon -h` lists the knobs — tick interval, how many workers may be
+live at once, how long a delivered goal may go unclaimed, and how many times
+one task's goal is re-delivered before the worker is given up on.
+
+Worker panes are splits of a base pane, so the daemon needs one: it takes
+`HERDR_PANE_ID` when it was started inside a Herdr pane, `-pane` when it was
+given one, and the config's `"pane"` key otherwise. Without any of the three
+it still comes up and still answers both doors, but it does not tick and
+every dispatch refuses with `NO_BASE_PANE`. Every spawn it could reach for
+would fail on the same missing pane, once per interval forever, and a log of
+one error repeated is a log nobody reads.
+
+At startup it reads `htask doctor --json` and says what is unreachable. It
+says it rather than obeying it: a board that is down comes back, and `doctor`
+and `status` are exactly what an operator wants to ask while it is down.
+
+## The two doors
+
+Both are generated from one verb table, and a parity test drives a live MCP
+session against it: a verb on one door and not the other fails the gate.
+
+| Verb                  | MCP tool        | What it does                                     |
+| --------------------- | --------------- | ------------------------------------------------ |
+| `hdis doctor`         | `hdis_doctor`   | Why a dispatch would refuse, before one is tried |
+| `hdis dispatch <task>`| `hdis_dispatch` | Reserve one ready task for the next tick         |
+| `hdis status`         | `hdis_status`   | What the dispatcher is driving now               |
+
+Every verb takes `--json`, and those bytes are the same document the MCP tool
+hands its caller.
+
+```sh
+hdis dispatch 7
+hdis status --json
+```
+
+A door that finds no live socket starts the daemon and waits for it, bounded
+at three seconds, rather than fail. A daemon started that way has no terminal
+to write to, so its log goes to `$XDG_STATE_HOME/hdis/hdis.log`.
+
+Wire the MCP door into any client that speaks stdio MCP:
+
+```json
+{ "command": "hdis", "args": ["mcp"] }
+```
+
+**`dispatch` does not wait for a worker.** Bringing one up runs past three
+minutes in the worst case — the pane's shell, the agent's startup, a trust
+dialog that may never come, and the wait for the goal to show on screen — and
+no MCP client holds a tool call that long. So `dispatch` validates the task
+against the board's own ready list, reserves it, and returns; the next tick
+does the work. Read the outcome with `status`. The reservation is also what
+keeps the watching loop and the dispatch verb from both taking one task.
+
+It refuses with a name rather than a sentence to parse: `NOT_READY` when the
+board will not hand the task out, `NOT_FOUND` when the board has no such
+task, `AT_CAPACITY` when `-max-workers` are already live or reserved,
+`ALREADY_DISPATCHED` when this daemon is already driving it, and
+`NO_BASE_PANE` when there is nowhere to put a worker.
+
+**Which profile a worker launches with is not selectable per call.** It is
+decided by the config and nowhere else, for the same reason the board carries
+no profile field: execution policy is this binary's business.
+
+**The caller's identity buys nothing.** The daemon records the pane a caller
+ran in, or `unknown` for a caller on another harness, and grants nothing for
+it. Every caller here is the operator's own tooling reaching a socket only
+the operator can open, and the board only ever hears from this binary as
+`plugin:hdis` whoever asked.
 
 ## Configuration
 
@@ -55,6 +122,10 @@ global default, and per-project overrides:
 | `model`    | A tier alias. Empty means the client's own default.                                                                          |
 | `effort`   | Defaults to `low`.                                                                                                           |
 | `args`     | Extra argv passed through to the worker.                                                                                     |
+
+Two keys sit at the top level beside `profiles`: `"proxy"` names the codex
+provider's launcher, and `"pane"` names the base pane a daemon uses when it
+was not started inside a Herdr pane and was given no `-pane`.
 
 The `codex` provider's launcher is named by an optional top-level `"proxy"`
 key, and defaults to the literal `proxenos`. It lives in the config rather
@@ -105,8 +176,9 @@ ledger.
 ## Restarting the dispatcher
 
 The bindings — which pane was prompted for which task, when, and how often —
-are the dispatcher's only state, and they live in memory. That mapping exists
-nowhere else until the worker claims, so restarting `hdis` loses it:
+are the dispatcher's only state, and they live in the daemon's memory. That
+mapping exists nowhere else until the worker claims, so restarting the daemon
+loses it:
 
 - A worker that **already claimed** its task is unaffected. The claim, the
   lease and the evidence are board facts, the pane is a Herdr fact, and both
@@ -120,7 +192,9 @@ nowhere else until the worker claims, so restarting `hdis` loses it:
 
 Persisting the bindings would fix the second case and is deliberately not
 done yet: it buys a restart edge case at the cost of a second store that can
-disagree with the board.
+disagree with the board. The daemon makes that window rarer rather than
+shorter — one process holds the bindings for as long as it runs, instead of
+each door holding a set of its own.
 
 ## The boundary
 
@@ -150,8 +224,16 @@ every case that shells out answers its own calls with a stand-in binary on
 
 ## Dependencies
 
-The standard library, and nothing else. A dependency that earns its way in
-gets its reason recorded here.
+The standard library, and one thing that earned its way in:
+
+- **`github.com/modelcontextprotocol/go-sdk`** — the MCP door serves a wire
+  protocol with a specified handshake, tool schemas and error envelope, and
+  the version of it a client speaks is not ours to guess. Reimplementing that
+  is substantial work whose only reward is being subtly incompatible with the
+  callers the door exists for. It is pinned to the version the board plugin
+  already runs, so one machine holds one copy.
+
+Anything else that earns its way in gets its reason recorded here too.
 
 ## License
 
