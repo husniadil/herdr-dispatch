@@ -2,6 +2,7 @@ package htask
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -111,5 +112,31 @@ func TestAMissingHtaskIsNotAnEmptyQueue(t *testing.T) {
 	c.Bin = "htask-that-is-not-installed"
 	if _, err := c.Ready(context.Background()); err == nil {
 		t.Fatal("want an error")
+	}
+}
+
+// The board's error envelope carries a code a caller can branch on, and a
+// call that never reached the board carries none: the difference between a
+// task that does not exist and a door that could not answer.
+func TestTheBoardsErrorEnvelopeIsCarriedAsARefusal(t *testing.T) {
+	c, f := client(t)
+	f.Bin(t, "htask", `echo '{"error":{"code":"NOT_FOUND","message":"no task 999 in /src/p"}}'; exit 3`)
+
+	_, err := c.Get(context.Background(), "999")
+	var refusal *Refusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("want a refusal, got %v", err)
+	}
+	if refusal.Code != "NOT_FOUND" || refusal.Message != "no task 999 in /src/p" {
+		t.Fatalf("refusal: %+v", refusal)
+	}
+
+	f.Bin(t, "htask", `echo 'unknown flag --as' >&2; exit 2`)
+	_, err = c.Get(context.Background(), "999")
+	if errors.As(err, &refusal) {
+		t.Fatalf("a door that never answered was read as a refusal: %+v", refusal)
+	}
+	if !strings.Contains(err.Error(), "unknown flag --as") {
+		t.Fatalf("want the door's own words, got %v", err)
 	}
 }

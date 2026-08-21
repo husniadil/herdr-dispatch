@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/husniadil/herdr-dispatch/internal/codes"
@@ -71,12 +72,15 @@ func TestDispatchRefusesATaskTheBoardWillNotHandOut(t *testing.T) {
 	}
 }
 
+// NOT_FOUND is the board's own word, and it is reserved for a board that
+// answered. The refusal arrives the way htask writes it: a JSON error
+// envelope naming its code, on stdout, with a non-zero exit.
 func TestDispatchRefusesATaskTheBoardDoesNotHave(t *testing.T) {
 	l, f := newLoop(t)
 	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
 	f.Bin(t, "htask", `case "$1 $2" in
 "task list") cat "$HDIS_FAKE_DIR/ready.json" ;;
-"task get") echo 'NOT_FOUND: no task 999' >&2; exit 1 ;;
+"task get") echo '{"error":{"code":"NOT_FOUND","message":"no task 999 in /src/p"}}'; exit 3 ;;
 *) echo '{}' ;;
 esac`)
 
@@ -84,7 +88,83 @@ esac`)
 	if got, want := codes.Of(err), codes.NotFound; got != want {
 		t.Fatalf("dispatch of a missing task = %v (%q), want %q", err, got, want)
 	}
+	if !strings.Contains(err.Error(), "no task 999 in /src/p") {
+		t.Fatalf("the board's own words are missing from %v", err)
+	}
 }
+
+// The live failure this pins: the door the validation step shells out to
+// refused for a reason of its own — a build skew, a flag it did not know —
+// and the caller was told NOT_FOUND for a task that may well exist. A door
+// that could not answer is not a board that answered.
+func TestDispatchNamesTheUnderlyingRefusalWhenTheBoardCannotBeRead(t *testing.T) {
+	l, f := newLoop(t)
+	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
+	f.Bin(t, "htask", brokenGet)
+
+	_, err := l.Dispatch(context.Background(), "7")
+	if got := codes.Of(err); got == codes.NotFound {
+		t.Fatalf("a door that refused was reported as %q: %v", got, err)
+	}
+	if got, want := codes.Of(err), codes.Unavailable; got != want {
+		t.Fatalf("dispatch over a refusing door = %v (%q), want %q", err, got, want)
+	}
+	if !strings.Contains(err.Error(), "unknown flag --as") {
+		t.Fatalf("the refusal's own words are missing from %v", err)
+	}
+	if got := l.Pending(); len(got) != 0 {
+		t.Fatalf("a validation failure left a standing reservation: %v", got)
+	}
+	if got := calls(t, f, "pane split"); len(got) != 0 {
+		t.Fatalf("a failed dispatch split a pane: %v", got)
+	}
+}
+
+// The caller retries on an error, which is exactly what happened live. Two
+// refusals must leave nothing behind, and the tick that follows once the door
+// is whole again must bring up one worker, not two.
+func TestRetryingAFailedDispatchCannotProduceTwoReservationsOrTwoWorkers(t *testing.T) {
+	l, f := newLoop(t)
+	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
+	f.Bin(t, "htask", brokenGet)
+
+	for i := 0; i < 2; i++ {
+		if _, err := l.Dispatch(context.Background(), "7"); err == nil {
+			t.Fatalf("dispatch %d over a refusing door succeeded", i+1)
+		}
+	}
+	if got := l.Pending(); len(got) != 0 {
+		t.Fatalf("two failed dispatches left %d reservations: %v", len(got), got)
+	}
+
+	// The door is whole again and the board offers the task.
+	f.Bin(t, "htask", htaskScript)
+	f.Write(t, "ready.json", readyOne)
+	if _, err := l.Dispatch(context.Background(), "7"); err != nil {
+		t.Fatalf("dispatch after the door recovered: %v", err)
+	}
+	if got := l.Pending(); len(got) != 1 {
+		t.Fatalf("reservations after one accepted dispatch: %v", got)
+	}
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if got := calls(t, f, "pane split"); len(got) != 1 {
+		t.Fatalf("split %d panes for one task: %v", len(got), got)
+	}
+	if len(l.Bindings()) != 1 {
+		t.Fatalf("bindings: %+v", l.Bindings())
+	}
+}
+
+// A door that refuses `task get` for a reason of its own, the way a binary
+// built against a different contract does: nothing on stdout to parse, the
+// complaint on stderr, a non-zero exit. The ready list still answers.
+const brokenGet = `case "$1 $2" in
+"task list") cat "$HDIS_FAKE_DIR/ready.json" ;;
+"task get") echo 'unknown flag --as' >&2; exit 2 ;;
+*) echo '{}' ;;
+esac`
 
 func TestDispatchRefusesWhenTheFleetIsAtMaxWorkers(t *testing.T) {
 	l, _ := newLoop(t)

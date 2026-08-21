@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"time"
 
@@ -99,7 +100,15 @@ func (l *Loop) Dispatch(ctx context.Context, ref string) (Reservation, error) {
 func (l *Loop) whyNotReady(ctx context.Context, ref string) error {
 	row, err := l.Board.Get(ctx, ref)
 	if err != nil {
-		return codes.Errorf(codes.NotFound, "the board has no task %s: %v", ref, err)
+		// NOT_FOUND is a board that answered and had no such task. A door
+		// that could not answer at all is a different failure, and saying
+		// NOT_FOUND for it tells the caller a task does not exist while it
+		// may well be sitting on the board.
+		var refusal *htask.Refusal
+		if errors.As(err, &refusal) && refusal.Code == string(codes.NotFound) {
+			return codes.Errorf(codes.NotFound, "the board has no task %s: %s", ref, refusal.Message)
+		}
+		return codes.Errorf(codes.Unavailable, "cannot read task %s from the board: %v", ref, err)
 	}
 	if claimed := row.ClaimedBy; claimed != "" {
 		return codes.Errorf(codes.NotReady, "task %d is %s, held by %s", row.Seq, row.Status, claimed)

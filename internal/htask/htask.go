@@ -51,6 +51,17 @@ func (t Task) Pane() string {
 	return pane
 }
 
+// Refusal is the board answering that it will not do something, in its own
+// words. htask writes it as a JSON error envelope on stdout with a non-zero
+// exit; a call that fails without one did not reach a board that answered,
+// and carries no Refusal.
+type Refusal struct {
+	Code    string
+	Message string
+}
+
+func (r *Refusal) Error() string { return r.Code + ": " + r.Message }
+
 // Doctor is the board's own report of itself: enough to say at startup
 // whether the dispatcher can work at all, and in whose words it cannot.
 type Doctor struct {
@@ -115,10 +126,30 @@ func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return nil, fmt.Errorf("htask %s: %s", strings.Join(args, " "), msg)
+		line := "htask " + strings.Join(args, " ")
+		if refusal, ok := refusalIn(stdout.Bytes()); ok {
+			return nil, fmt.Errorf("%s: %w", line, refusal)
 		}
-		return nil, fmt.Errorf("htask %s: %w", strings.Join(args, " "), err)
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return nil, fmt.Errorf("%s: %s", line, msg)
+		}
+		return nil, fmt.Errorf("%s: %w", line, err)
 	}
 	return stdout.Bytes(), nil
+}
+
+// refusalIn reads the board's error envelope out of a failed call's stdout.
+// Anything else — a door that could not parse its own flags, a binary that
+// is not there — leaves nothing to read, and is not the board speaking.
+func refusalIn(out []byte) (*Refusal, bool) {
+	var body struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out, &body); err != nil || body.Error.Code == "" {
+		return nil, false
+	}
+	return &Refusal{Code: body.Error.Code, Message: body.Error.Message}, true
 }
