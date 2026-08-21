@@ -39,7 +39,7 @@ const herdrScript = `case "$1 $2" in
     exit 1
   fi
   cat "$HDIS_FAKE_DIR/screen.txt" ;;
-"agent list") cat "$HDIS_FAKE_DIR/agents.json" ;;
+"pane list") cat "$HDIS_FAKE_DIR/panes.json" ;;
 "agent get") cat "$HDIS_FAKE_DIR/agentget.json" ;;
 "agent start") echo '{"id":"x","error":{"code":"timeout","message":"timed out waiting for agent startup"}}' >&2; exit 1 ;;
 *) echo '{"id":"x","result":{"type":"ok"}}' ;;
@@ -55,7 +55,7 @@ func newLoop(t *testing.T) (*Loop, *fake.Fake) {
 	f.Write(t, "ready.json", readyOne)
 	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"todo"},"ready":false,"dependents":[]}`)
 	f.Write(t, "goal.txt", "do the thing · Done when: it is done")
-	f.Write(t, "agents.json", `{"id":"x","result":{"type":"agent_list","agents":[]}}`)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[]}}`)
 	f.Write(t, "screen.txt", "⎿  Goal set: do the thing\n  ◎ /goal active\n")
 	// Idle, so the screen is what confirms the goal rather than the status.
 	f.Write(t, "agentget.json", `{"id":"x","result":{"type":"agent_info","agent":{"pane_id":"wM:p9","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}}}`)
@@ -138,7 +138,7 @@ func TestASecondTickDoesNotDispatchATaskItAlreadyPrompted(t *testing.T) {
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("first tick: %v", err)
 	}
-	f.Write(t, "agents.json", `{"id":"x","result":{"type":"agent_list","agents":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"working","interactive_ready":false,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"working","interactive_ready":false,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
 
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("second tick: %v", err)
@@ -160,7 +160,7 @@ func TestReviewIsAnnouncedOnceAndNeverActedOn(t *testing.T) {
 	}
 	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
 	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"review","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`)
-	f.Write(t, "agents.json", `{"id":"x","result":{"type":"agent_list","agents":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
 
 	for i := 0; i < 2; i++ {
 		if err := l.Tick(context.Background()); err != nil {
@@ -206,7 +206,7 @@ func TestAnUnclaimedWorkerIsNudgedAfterTheClaimTimeout(t *testing.T) {
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("first tick: %v", err)
 	}
-	f.Write(t, "agents.json", `{"id":"x","result":{"type":"agent_list","agents":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
 	l.Now = func() time.Time { return clock.Add(10 * time.Minute) }
 
 	if err := l.Tick(context.Background()); err != nil {
@@ -269,7 +269,7 @@ func TestAFlakyReadStillReachesTheReviewNotification(t *testing.T) {
 
 	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
 	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"review","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`)
-	f.Write(t, "agents.json", `{"id":"x","result":{"type":"agent_list","agents":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
 
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("second tick: %v", err)
@@ -305,12 +305,136 @@ func TestAnUnreadableConfirmKeepsTheBindingSoReviewIsStillAnnounced(t *testing.T
 	// The worker was alive all along: it claimed, worked, and submitted.
 	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
 	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"review","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`)
-	f.Write(t, "agents.json", `{"id":"x","result":{"type":"agent_list","agents":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
 
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("second tick: %v", err)
 	}
 	if got := calls(t, f, "notification show"); len(got) != 1 {
 		t.Fatalf("review was announced %d times: %v", len(got), got)
+	}
+}
+
+// panesWith is what `herdr pane list` answers while one worker pane is up.
+// A pane herdr has not attached an agent to yet is listed there with
+// agent_status "unknown" and no agent name at all, exactly as measured — and
+// `agent list` omits such a pane entirely.
+func panesWith(status string) string {
+	agent := `"agent":"claude",`
+	if status == "unknown" {
+		agent = ""
+	}
+	return `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9",` + agent +
+		`"agent_status":"` + status + `","focused":false,"revision":1}]}}`
+}
+
+// The live repro, in a test. In the codex run one task got FOUR spawn
+// attempts across ticks, so three claude workers raced one claim and burned
+// quota. The spawn had kept its pane, but herdr had no agent on that pane
+// yet — a state `agent list` reports by omitting the pane entirely. Read as
+// "the pane is gone", the binding was dropped, the task went back to ready,
+// and the next tick spawned it again on top of a live worker. The binding has
+// to outlive that window whatever herdr has attached yet.
+func TestAKeptPaneBindingSuppressesASecondSpawnOnTheNextTick(t *testing.T) {
+	l, f := newLoop(t)
+	f.Write(t, "readfail", "99") // the confirm never reads, so the pane is kept
+
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	if len(l.bindings) != 1 {
+		t.Fatalf("the spawn kept a pane without recording a binding: %+v", l.bindings)
+	}
+	f.Write(t, "panes.json", panesWith("unknown"))
+
+	for i := 0; i < 3; i++ {
+		if err := l.Tick(context.Background()); err != nil {
+			t.Fatalf("tick %d: %v", i+2, err)
+		}
+	}
+	if got := calls(t, f, "pane split"); len(got) != 1 {
+		t.Fatalf("one task got %d spawn attempts across ticks", len(got))
+	}
+	if len(l.bindings) != 1 || l.bindings[0].Pane != "wM:p9" {
+		t.Fatalf("the binding did not survive the ticks: %+v", l.bindings)
+	}
+}
+
+// A kept pane whose goal registered late needs no second confirm to recover:
+// the worker claims, the board says so, and the binding carries on to the
+// review notification. Nothing is re-delivered and no pane is retired.
+func TestAKeptPaneWhoseGoalRegisteredLateContinuesNormally(t *testing.T) {
+	l, f := newLoop(t)
+	f.Write(t, "readfail", "99")
+
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+
+	// The goal registered a moment after the confirm gave up: the worker
+	// claimed, and herdr now has an agent on the pane.
+	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
+	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"doing","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`)
+	f.Write(t, "panes.json", panesWith("working"))
+
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	for _, verb := range []string{"pane close", "agent prompt", "pane split"} {
+		if got := calls(t, f, verb); verb == "pane split" && len(got) != 1 {
+			t.Fatalf("split %d panes for one task", len(got))
+		} else if verb != "pane split" && len(got) != 0 {
+			t.Fatalf("a late goal triggered %q: %v", verb, got)
+		}
+	}
+	if len(l.bindings) != 1 || l.bindings[0].Prompts != 1 {
+		t.Fatalf("binding: %+v", l.bindings)
+	}
+
+	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"review","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`)
+	f.Write(t, "panes.json", panesWith("idle"))
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("third tick: %v", err)
+	}
+	if got := calls(t, f, "notification show"); len(got) != 1 {
+		t.Fatalf("review was announced %d times: %v", len(got), got)
+	}
+}
+
+// The other side of keeping a pane: one that reads fine, never shows a goal,
+// and leaves its task sitting in todo is given up — but past the larger
+// ceiling the prompt ladder makes, never on the tick the confirm ran out.
+func TestAKeptPaneStillGoallessPastTheLargerCeilingIsGivenUp(t *testing.T) {
+	l, f := newLoop(t)
+	f.Write(t, "screen.txt", "❯ \n  ? for shortcuts\n") // readable, and no goal on it
+	f.Write(t, "agentget.json", `{"id":"x","result":{"type":"agent_info","agent":{"pane_id":"wM:p9","agent_status":"unknown","interactive_ready":false,"focused":false,"launch_pending":true,"revision":1,"screen_detection_skipped":false}}}`)
+
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	if got := calls(t, f, "pane close"); len(got) != 0 {
+		t.Fatalf("the pane was retired on the tick the confirm ran out: %v", got)
+	}
+	if len(l.bindings) != 1 {
+		t.Fatalf("bindings: %+v", l.bindings)
+	}
+	f.Write(t, "panes.json", panesWith("idle"))
+
+	// ClaimTimeout is five minutes and MaxPrompts is two: one nudge, then
+	// the give-up that retires the pane.
+	for _, at := range []time.Duration{10 * time.Minute, 20 * time.Minute} {
+		l.Now = func() time.Time { return clock.Add(at) }
+		if err := l.Tick(context.Background()); err != nil {
+			t.Fatalf("tick at %s: %v", at, err)
+		}
+	}
+	if got := calls(t, f, "agent prompt"); len(got) != 1 {
+		t.Fatalf("nudged %d times before giving up: %v", len(got), got)
+	}
+	if got := calls(t, f, "pane close"); len(got) != 1 {
+		t.Fatalf("a pane that never got a goal was closed %d times", len(got))
+	}
+	if len(l.bindings) != 0 {
+		t.Fatalf("the binding outlived the give-up: %+v", l.bindings)
 	}
 }

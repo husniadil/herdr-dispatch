@@ -92,11 +92,11 @@ func (l *Loop) snapshot(ctx context.Context) (decide.Snapshot, error) {
 		snap.Ready = append(snap.Ready, row.ID)
 	}
 
-	agents, err := l.Herdr.Agents(ctx)
+	panes, err := l.Herdr.Panes(ctx)
 	if err != nil {
 		return decide.Snapshot{}, err
 	}
-	snap.Agents = agents
+	snap.Agents = panes
 	snap.Bindings = l.bindings
 	return snap, nil
 }

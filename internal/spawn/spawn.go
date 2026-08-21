@@ -64,6 +64,20 @@ const PaneBusyCode = "agent_pane_busy"
 // carries no bound of its own.
 const DefaultShellCeiling = 30 * time.Second
 
+// DefaultConfirmCeiling bounds the wait for a goal to show on screen when the
+// pipeline carries no bound of its own.
+//
+// Measured on the live codex path — a pane split, `eval "$(codex-cc-proxy
+// env)"` run in its shell, then a claude started with the goal in its argv —
+// the pane was listed by herdr at 1.14s and the goal marker was on screen at
+// 2.23s. The live dispatcher run that this bound exists for was far slower
+// than that: the goal registered only AFTER its 60s window, and the pane was
+// retired out from under a worker that was still coming up. Two minutes
+// covers the observed failure with room, and the cost of overshooting is now
+// only a longer tick rather than a killed worker: past the ceiling the pane
+// is kept and later ticks decide.
+const DefaultConfirmCeiling = 2 * time.Minute
+
 // KeepPaneError is a spawn failure the pipeline refuses to clean up after.
 // It means the worker could not be READ, not that the goal was refused: a
 // goal that registered puts the worker to work immediately, so a pane the
@@ -90,7 +104,8 @@ type Pipeline struct {
 	StartTimeout time.Duration
 	// DialogCeiling bounds the wait for a startup dialog that may never come.
 	DialogCeiling time.Duration
-	// ConfirmCeiling bounds the wait for the goal to show up on screen.
+	// ConfirmCeiling bounds the wait for the goal to show up on screen;
+	// zero means DefaultConfirmCeiling.
 	ConfirmCeiling time.Duration
 	// ShellCeiling bounds the wait for the pane's own shell to come free
 	// before the agent is started in it; zero means DefaultShellCeiling.
@@ -242,14 +257,18 @@ func (p *Pipeline) answerStartupDialog(ctx context.Context, pane string) error {
 // confirmGoal reads the pane until the goal shows, and falls back to the
 // worker's own status: a registered goal puts it to work immediately.
 //
-// A read that fails is not a refusal, and the difference is the whole point.
-// Failing reads are retried for the rest of the ceiling; if the last one
-// still fails, the goal's fate is unknown and the pane is kept. Only a read
-// that came back — and carried no goal on it — retires a worker.
+// Running out of ceiling is not a verdict. Only one thing on this screen is:
+// herdr calling the worker idle means it is sitting at its prompt box with
+// nothing armed, and no goal is coming. Everything else — a read that never
+// came back, a worker herdr is still calling unknown or blocked — is a worker
+// that may register seconds later, and retiring it is how one task ends up
+// with two live workers: the pane dies, the task goes back to ready, and the
+// next tick spawns another on top of it. Those panes are kept, and the ticks
+// that follow decide.
 func (p *Pipeline) confirmGoal(ctx context.Context, pane string) error {
-	var last string
+	var last, status string
 	var readErr error
-	for i, n := 0, attempts(p.ConfirmCeiling, p.Poll); i < n; i++ {
+	for i, n := 0, attempts(p.confirmCeiling(), p.Poll); i < n; i++ {
 		text, err := p.Herdr.PaneRead(ctx, pane, p.readLines())
 		readErr = err
 		if err == nil {
@@ -260,8 +279,11 @@ func (p *Pipeline) confirmGoal(ctx context.Context, pane string) error {
 				last = text
 			}
 		}
-		if a, err := p.Herdr.AgentGet(ctx, pane); err == nil && a.Status == herdr.StatusWorking {
-			return nil
+		if a, err := p.Herdr.AgentGet(ctx, pane); err == nil {
+			if a.Status == herdr.StatusWorking {
+				return nil
+			}
+			status = a.Status
 		}
 		p.sleep(p.Poll)
 	}
@@ -269,10 +291,26 @@ func (p *Pipeline) confirmGoal(ctx context.Context, pane string) error {
 		return &KeepPaneError{Pane: pane, Err: fmt.Errorf(
 			"pane %s could not be read in %s, so whether the goal registered is unknown: %w; "+
 				"the pane is kept because a registered goal means a worker already at work",
-			pane, p.ConfirmCeiling, readErr)}
+			pane, p.confirmCeiling(), readErr)}
 	}
-	return fmt.Errorf("the goal never registered in pane %s within %s; the pane last showed: %s",
-		pane, p.ConfirmCeiling, tail(last))
+	if status != herdr.StatusIdle {
+		return &KeepPaneError{Pane: pane, Err: fmt.Errorf(
+			"the goal has not registered in pane %s within %s and herdr calls the worker %q, "+
+				"so it is still coming up rather than done with the question; the pane is kept "+
+				"and later ticks decide. It last showed: %s",
+			pane, p.confirmCeiling(), statusOrUnknown(status), tail(last))}
+	}
+	return fmt.Errorf("the goal never registered in pane %s within %s and herdr calls the worker idle, "+
+		"so it is at its prompt with nothing armed; the pane last showed: %s",
+		pane, p.confirmCeiling(), tail(last))
+}
+
+// statusOrUnknown names what herdr said, including when it never answered.
+func statusOrUnknown(status string) string {
+	if status == "" {
+		return herdr.StatusUnknown
+	}
+	return status
 }
 
 func (p *Pipeline) direction() string {
@@ -287,6 +325,13 @@ func (p *Pipeline) shellCeiling() time.Duration {
 		return p.ShellCeiling
 	}
 	return DefaultShellCeiling
+}
+
+func (p *Pipeline) confirmCeiling() time.Duration {
+	if p.ConfirmCeiling > 0 {
+		return p.ConfirmCeiling
+	}
+	return DefaultConfirmCeiling
 }
 
 func (p *Pipeline) readLines() int {

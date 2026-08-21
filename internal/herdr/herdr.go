@@ -140,18 +140,25 @@ func (c *Client) AgentGet(ctx context.Context, target string) (Agent, error) {
 	return res.Agent, err
 }
 
-// Agents maps every live worker's pane to its agent_status. A bound pane
-// missing from the map is a pane that is gone.
-func (c *Client) Agents(ctx context.Context) (map[string]string, error) {
+// Panes maps every live pane to its agent_status. A bound pane missing from
+// the map is a pane that is gone.
+//
+// It reads `pane list` rather than `agent list`, and the difference is the
+// whole reason this exists. A pane herdr has not attached an agent to yet —
+// a worker pane in the seconds between `pane split` and the agent
+// registering — is listed here with agent_status "unknown", and is absent
+// from `agent list` altogether. Reading that absence as "the pane is gone"
+// unbound a live worker and let its task be dispatched a second time.
+func (c *Client) Panes(ctx context.Context) (map[string]string, error) {
 	var res struct {
-		Agents []Agent `json:"agents"`
+		Panes []Agent `json:"panes"`
 	}
-	if err := c.result(ctx, &res, "agent", "list"); err != nil {
+	if err := c.result(ctx, &res, "pane", "list"); err != nil {
 		return nil, err
 	}
-	byPane := make(map[string]string, len(res.Agents))
-	for _, a := range res.Agents {
-		byPane[a.PaneID] = a.Status
+	byPane := make(map[string]string, len(res.Panes))
+	for _, p := range res.Panes {
+		byPane[p.PaneID] = p.Status
 	}
 	return byPane, nil
 }

@@ -59,7 +59,10 @@ type Binding struct {
 }
 
 // Snapshot is everything a tick may know. Agents maps pane id to Herdr's
-// agent_status; a bound pane missing from the map is gone.
+// agent_status for every LIVE pane, whether or not an agent is attached to
+// it yet; a bound pane missing from the map is gone. A worker pane herdr has
+// not registered an agent in reads as "unknown", which is a worker still
+// coming up rather than a pane to unbind.
 type Snapshot struct {
 	Ready    []string // ready task ids, in dispatch order
 	Tasks    map[string]Task

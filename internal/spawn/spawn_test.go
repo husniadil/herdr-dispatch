@@ -473,3 +473,41 @@ func TestAPaneShellThatNeverFreesFailsLoudAndRetiresThePane(t *testing.T) {
 		t.Fatalf("a retired pane must not come back for a binding, got %q", pane)
 	}
 }
+
+// The other half of the live codex failure: the pane read fine and simply had
+// no goal on it yet, because the worker was still starting. Retiring it there
+// killed a worker that was seconds from registering, and the task went back
+// to ready to be spawned again. A worker herdr does not call idle is still
+// coming up, so the pane is kept and the next tick decides.
+func TestAConfirmThatTimesOutOnAStartingWorkerKeepsThePane(t *testing.T) {
+	h := newHarness(t, []string{promptBox}, startRegistered)
+	h.Write(t, "agentget.json", `{"id":"x","result":{"type":"agent_info","agent":`+agentJSON("unknown")+`}}`)
+
+	pane, err := h.pipe.Run(context.Background(), req(claudeProfile()))
+	if err == nil {
+		t.Fatal("a confirm that ran out of ceiling must still say so")
+	}
+	var keep *KeepPaneError
+	if !errors.As(err, &keep) {
+		t.Fatalf("a worker that is still coming up must be a keep-pane failure, got %T: %v", err, err)
+	}
+	if pane != "wM:p9" {
+		t.Fatalf("the pane must come back so the dispatcher can hold its binding, got %q", pane)
+	}
+	if n := count(h.verbs(t), "pane close"); n != 0 {
+		t.Fatalf("a worker that was still starting was retired anyway, closed %d times", n)
+	}
+}
+
+// The confirm ceiling is a knob, not a constant: the codex path's startup is
+// what it has to cover, and that is measured rather than assumed.
+func TestTheConfirmCeilingIsConfigurableAndDefaulted(t *testing.T) {
+	p := &Pipeline{Poll: time.Second}
+	if got := p.confirmCeiling(); got != DefaultConfirmCeiling {
+		t.Fatalf("an unset ceiling must fall back to the default, got %s", got)
+	}
+	p.ConfirmCeiling = 7 * time.Second
+	if got := p.confirmCeiling(); got != 7*time.Second {
+		t.Fatalf("a set ceiling must be honoured, got %s", got)
+	}
+}

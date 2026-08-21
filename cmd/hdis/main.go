@@ -69,6 +69,7 @@ func run(argv []string) error {
 	claimTimeout := fs.Duration("claim-timeout", 5*time.Minute, "how long a delivered goal may go unclaimed before a nudge")
 	maxPrompts := fs.Int("max-prompts", 3, "how many times one task's goal may be delivered before giving up")
 	startTimeout := fs.Duration("start-timeout", 45*time.Second, "how long herdr waits for a worker to become interactive")
+	confirmCeiling := fs.Duration("confirm-ceiling", spawn.DefaultConfirmCeiling, "how long to wait for a delivered goal to show on the worker's screen")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
@@ -115,7 +116,7 @@ func run(argv []string) error {
 			Proxy:          &proxy.Client{},
 			StartTimeout:   *startTimeout,
 			DialogCeiling:  20 * time.Second,
-			ConfirmCeiling: 60 * time.Second,
+			ConfirmCeiling: *confirmCeiling,
 			ShellCeiling:   30 * time.Second,
 			Poll:           2 * time.Second,
 		},

@@ -135,22 +135,27 @@ func TestANonJSONFailureIsStillReported(t *testing.T) {
 	}
 }
 
-// Pane liveness and worker state both come from agent_status, which is the
-// only truth about a worker this repo accepts.
-func TestAgentsMapsPanesToStatus(t *testing.T) {
+// Pane liveness and worker state both come from `pane list`, and the reason
+// is measured: a pane herdr has not attached an agent to yet is listed there
+// with agent_status "unknown", and is absent from `agent list` entirely.
+// Reading that absence as "the pane is gone" is what unbound a live worker
+// and let its task be dispatched a second time.
+func TestPanesMapsEveryLivePaneToItsAgentStatus(t *testing.T) {
 	c, f := client(t)
-	f.Bin(t, "herdr", `echo '{"id":"x","result":{"type":"agent_list","agents":[
-{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"working","interactive_ready":false,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false},
-{"pane_id":"wM:p8","name":"hdis-4","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}'`)
+	f.Bin(t, "herdr", `echo '{"id":"x","result":{"type":"pane_list","panes":[
+{"pane_id":"wM:p9","agent":"claude","agent_status":"working","focused":false,"revision":1},
+{"pane_id":"wM:p8","agent":"claude","agent_status":"idle","focused":false,"revision":1},
+{"pane_id":"wM:p7","agent_status":"unknown","focused":false,"revision":0}]}}'`)
 
-	byPane, err := c.Agents(context.Background())
+	byPane, err := c.Panes(context.Background())
 	if err != nil {
-		t.Fatalf("agents: %v", err)
+		t.Fatalf("panes: %v", err)
 	}
-	if got, want := byPane, map[string]string{"wM:p9": "working", "wM:p8": "idle"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("got %v, want %v", got, want)
+	want := map[string]string{"wM:p9": "working", "wM:p8": "idle", "wM:p7": "unknown"}
+	if !reflect.DeepEqual(byPane, want) {
+		t.Fatalf("got %v, want %v", byPane, want)
 	}
-	if got, want := f.Calls(t)[0], "agent list"; got != want {
+	if got, want := f.Calls(t)[0], "pane list"; got != want {
 		t.Fatalf("argv: got %q, want %q", got, want)
 	}
 }
