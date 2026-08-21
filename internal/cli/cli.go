@@ -147,9 +147,13 @@ func Usage() string {
 		}
 		fmt.Fprintf(&b, "  hdis %-18s %s\n", line, v.Short)
 	}
-	b.WriteString("  hdis daemon            own the tick and answer both doors (`run` is the same)\n")
-	b.WriteString("  hdis mcp               serve the same verbs over stdio MCP\n")
-	b.WriteString("  hdis version           print the version\n")
+	for _, extra := range [][2]string{
+		{"daemon", "Own the tick and answer both doors (`run` is the same)"},
+		{"mcp", "Serve the same verbs over stdio MCP"},
+		{"version", "Print the version"},
+	} {
+		fmt.Fprintf(&b, "  hdis %-18s %s\n", extra[0], extra[1])
+	}
 	b.WriteString("\nEvery verb takes --json. Run `hdis daemon -h` for the dispatcher's knobs.\n")
 	return b.String()
 }

@@ -57,7 +57,7 @@ type Status struct {
 func (l *Loop) Dispatch(ctx context.Context, ref string) (Reservation, error) {
 	if l.BasePane == "" {
 		return Reservation{}, codes.Errorf(codes.NoBasePane,
-			"this daemon has no pane to split a worker off: start it inside a Herdr pane, or give it -pane")
+			`this daemon has no pane to split a worker off: start it inside a Herdr pane, pass -pane, or set "pane" in the config`)
 	}
 
 	ready, err := l.Board.Ready(ctx)

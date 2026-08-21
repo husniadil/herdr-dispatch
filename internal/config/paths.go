@@ -43,6 +43,17 @@ func ConfigPath() string { return filepath.Join(ConfigDir(), Name+".json") }
 // it has no terminal, and a dispatcher nobody can hear is worse than none.
 func LogPath() string { return filepath.Join(StateDir(), Name+".log") }
 
+// BasePaneOr resolves the pane worker panes are split off: what the caller
+// was given, else what the config names. A daemon started inside a Herdr
+// pane inherits one through HERDR_PANE_ID, which is the flag's default; a
+// daemon started anywhere else has only these two.
+func (c Config) BasePaneOr(given string) string {
+	if given != "" {
+		return given
+	}
+	return c.Pane
+}
+
 // EnsureStateDir creates the state dir, private to the user: the socket in
 // it is a door onto the operator's own panes.
 func EnsureStateDir() error {

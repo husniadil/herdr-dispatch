@@ -49,3 +49,26 @@ func TestEnsureStateDirMakesItPrivate(t *testing.T) {
 		t.Fatalf("EnsureStateDir twice: %v", err)
 	}
 }
+
+func TestTheConfigCanNameTheBasePaneADaemonCannotInherit(t *testing.T) {
+	c, err := Parse([]byte(`{"default":"worker","pane":"wM:p1","profiles":{"worker":{"provider":"claude"}}}`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got, want := c.BasePaneOr(""), "wM:p1"; got != want {
+		t.Errorf("BasePaneOr(\"\") = %q, want %q", got, want)
+	}
+	if got, want := c.BasePaneOr("wZ:p3"), "wZ:p3"; got != want {
+		t.Errorf("the flag did not win: %q, want %q", got, want)
+	}
+}
+
+func TestWithoutAConfiguredPaneThereIsNone(t *testing.T) {
+	c, err := Parse([]byte(`{"default":"worker","profiles":{"worker":{"provider":"claude"}}}`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got := c.BasePaneOr(""); got != "" {
+		t.Errorf("BasePaneOr(\"\") = %q, want empty", got)
+	}
+}

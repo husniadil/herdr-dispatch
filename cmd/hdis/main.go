@@ -89,10 +89,7 @@ func serve(argv []string) error {
 	if err != nil {
 		return err
 	}
-	pane := *basePane
-	if pane == "" {
-		pane = cfg.Pane
-	}
+	pane := cfg.BasePaneOr(*basePane)
 
 	// One daemon per user. The lock is what makes one live worker per task
 	// true across every caller rather than per process.
