@@ -26,11 +26,21 @@ const htaskScript = `case "$1 $2" in
 *) echo '{}' ;;
 esac`
 
+// `pane read` answers with the terminal's own text and no JSON, which is what
+// the real CLI does. A `readfail` file makes the first N reads refuse, the
+// way herdr refuses: a JSON error body on stderr and a non-zero exit.
 const herdrScript = `case "$1 $2" in
 "pane split") echo '{"id":"x","result":{"type":"pane_info","pane":{"pane_id":"wM:p9","workspace_id":"wM","tab_id":"wM:t1","terminal_id":"x","focused":false,"agent_status":"unknown","revision":1}}}' ;;
-"pane read") cat "$HDIS_FAKE_DIR/read.json" ;;
+"pane read")
+  n=$(cat "$HDIS_FAKE_DIR/readn" 2>/dev/null || echo 0)
+  n=$((n+1)); printf %s "$n" > "$HDIS_FAKE_DIR/readn"
+  if [ -f "$HDIS_FAKE_DIR/readfail" ] && [ "$n" -le "$(cat "$HDIS_FAKE_DIR/readfail")" ]; then
+    echo '{"error":{"code":"pane_not_found","message":"pane wM:p9 not found"},"id":"cli:pane:read"}' >&2
+    exit 1
+  fi
+  cat "$HDIS_FAKE_DIR/screen.txt" ;;
 "agent list") cat "$HDIS_FAKE_DIR/agents.json" ;;
-"agent get") echo '{"id":"x","result":{"type":"agent_info","agent":{"pane_id":"wM:p9","agent_status":"working","interactive_ready":false,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}}}' ;;
+"agent get") cat "$HDIS_FAKE_DIR/agentget.json" ;;
 "agent start") echo '{"id":"x","error":{"code":"timeout","message":"timed out waiting for agent startup"}}' >&2; exit 1 ;;
 *) echo '{"id":"x","result":{"type":"ok"}}' ;;
 esac`
@@ -43,10 +53,12 @@ func newLoop(t *testing.T) (*Loop, *fake.Fake) {
 	f.Bin(t, "htask", htaskScript)
 	f.Bin(t, "herdr", herdrScript)
 	f.Write(t, "ready.json", readyOne)
-	f.Write(t, "get.json", `{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"todo"}`)
+	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"todo"},"ready":false,"dependents":[]}`)
 	f.Write(t, "goal.txt", "do the thing · Done when: it is done")
 	f.Write(t, "agents.json", `{"id":"x","result":{"type":"agent_list","agents":[]}}`)
-	f.Write(t, "read.json", `{"id":"x","result":{"type":"pane_read","read":{"pane_id":"wM:p9","workspace_id":"wM","tab_id":"wM:t1","source":"detection","format":"text","revision":1,"truncated":false,"text":"⎿  Goal set: do the thing\n  ◎ /goal active"}}}`)
+	f.Write(t, "screen.txt", "⎿  Goal set: do the thing\n  ◎ /goal active\n")
+	// Idle, so the screen is what confirms the goal rather than the status.
+	f.Write(t, "agentget.json", `{"id":"x","result":{"type":"agent_info","agent":{"pane_id":"wM:p9","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}}}`)
 
 	cfg, err := config.Parse([]byte(`{"default":"worker","profiles":{"worker":{"provider":"claude"}}}`))
 	if err != nil {
@@ -59,7 +71,7 @@ func newLoop(t *testing.T) (*Loop, *fake.Fake) {
 		Policy: decide.Policy{MaxWorkers: 2, ClaimTimeout: 5 * time.Minute, MaxPrompts: 2},
 		Spawn: &spawn.Pipeline{
 			Herdr: &herdr.Client{}, Proxy: &proxy.Client{},
-			StartTimeout: time.Second, DialogCeiling: time.Second, ConfirmCeiling: time.Second,
+			StartTimeout: time.Second, DialogCeiling: time.Second, ConfirmCeiling: 5 * time.Second,
 			Poll: time.Second, Sleep: func(time.Duration) {},
 		},
 		BasePane: "wM:p1",
@@ -147,7 +159,7 @@ func TestReviewIsAnnouncedOnceAndNeverActedOn(t *testing.T) {
 		t.Fatalf("first tick: %v", err)
 	}
 	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
-	f.Write(t, "get.json", `{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"review","claimed_by":"agent:wM:p9"}`)
+	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"review","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`)
 	f.Write(t, "agents.json", `{"id":"x","result":{"type":"agent_list","agents":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
 
 	for i := 0; i < 2; i++ {
@@ -234,5 +246,71 @@ func TestAGonePaneOnlyDropsItsBinding(t *testing.T) {
 		if got := calls(t, f, verb); len(got) != 0 {
 			t.Fatalf("a gone pane triggered %q: %v", verb, got)
 		}
+	}
+}
+
+// The whole point of keeping a pane the dispatcher could not read: the
+// binding survives with it, so when the worker submits, review is still
+// announced. Here the reads recover inside the ceiling and the spawn passes
+// cleanly — the flaky read costs nothing.
+func TestAFlakyReadStillReachesTheReviewNotification(t *testing.T) {
+	l, f := newLoop(t)
+	f.Write(t, "readfail", "2") // the dialog read and the first confirm read
+
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("a read that recovered must not fail the tick: %v", err)
+	}
+	if len(l.bindings) != 1 || l.bindings[0].Pane != "wM:p9" {
+		t.Fatalf("bindings: %+v", l.bindings)
+	}
+	if got := calls(t, f, "pane close"); len(got) != 0 {
+		t.Fatalf("a worker that came back readable was retired: %v", got)
+	}
+
+	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
+	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"review","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`)
+	f.Write(t, "agents.json", `{"id":"x","result":{"type":"agent_list","agents":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
+
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	if got := calls(t, f, "notification show"); len(got) != 1 {
+		t.Fatalf("review was announced %d times: %v", len(got), got)
+	}
+}
+
+// The live failure this fix is for: the confirm could not read the pane at
+// all, so the goal's fate is unknown. The pane stays up and the binding with
+// it, and the worker that was already claiming goes on to submit and be
+// announced. The tick still says out loud what it could not read.
+func TestAnUnreadableConfirmKeepsTheBindingSoReviewIsStillAnnounced(t *testing.T) {
+	l, f := newLoop(t)
+	var logged strings.Builder
+	l.Log = log.New(&logged, "", 0)
+	f.Write(t, "readfail", "99") // never readable
+
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if got := calls(t, f, "pane close"); len(got) != 0 {
+		t.Fatalf("a worker that could not be read was killed: %v", got)
+	}
+	if len(l.bindings) != 1 || l.bindings[0].TaskID != "01AAA" || l.bindings[0].Pane != "wM:p9" {
+		t.Fatalf("the binding did not survive an unreadable confirm: %+v", l.bindings)
+	}
+	if !strings.Contains(logged.String(), "pane_not_found") {
+		t.Fatalf("the failure was not reported: %q", logged.String())
+	}
+
+	// The worker was alive all along: it claimed, worked, and submitted.
+	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
+	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"review","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`)
+	f.Write(t, "agents.json", `{"id":"x","result":{"type":"agent_list","agents":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
+
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	if got := calls(t, f, "notification show"); len(got) != 1 {
+		t.Fatalf("review was announced %d times: %v", len(got), got)
 	}
 }

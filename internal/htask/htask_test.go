@@ -61,10 +61,16 @@ EOF`)
 }
 
 // A claim names a principal; the pane inside it is what a binding is keyed on.
+//
+// `task get --json` wraps the row in an envelope, unlike `task list` and
+// `doctor`, which answer flat. Reading it flat silently yields a zero row,
+// which is worse than an error: the dispatcher holds a binding whose task it
+// believes it knows nothing about, so review is never announced. The body
+// below is a capture of the real CLI.
 func TestGetReportsTheClaimingPane(t *testing.T) {
 	c, f := client(t)
 	f.Bin(t, "htask", `cat <<'EOF'
-{"id":"01AAA","seq":7,"project":"/src/a","title":"first","status":"doing","claimed_by":"agent:wM:p3"}
+{"task":{"id":"01AAA","seq":7,"project":"/src/a","title":"first","status":"doing","claimed_by":"agent:wM:p3","claimed_by_name":"hdis-7","ever_claimed":true},"ready":false,"dependents":[]}
 EOF`)
 
 	task, err := c.Get(context.Background(), "01AAA")

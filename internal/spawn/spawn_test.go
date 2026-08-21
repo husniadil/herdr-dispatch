@@ -2,7 +2,7 @@ package spawn
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -21,23 +21,31 @@ const (
 )
 
 // The herdr fake dispatches on the verb and reads its canned answers out of
-// files, so each case only writes the answers it cares about.
+// files, so each case only writes the answers it cares about. A read whose
+// answer file has a sibling `.fail` refuses the way the real CLI refuses: a
+// JSON error body on stderr and a non-zero exit.
 const herdrScript = `case "$1 $2" in
 "pane split") cat "$HDIS_FAKE_DIR/split.json" ;;
 "pane read")
   n=$(cat "$HDIS_FAKE_DIR/readn" 2>/dev/null || echo 0)
   n=$((n+1)); printf %s "$n" > "$HDIS_FAKE_DIR/readn"
-  if [ -f "$HDIS_FAKE_DIR/read.$n" ]; then cat "$HDIS_FAKE_DIR/read.$n"; else cat "$HDIS_FAKE_DIR/read.last"; fi ;;
+  f="$HDIS_FAKE_DIR/read.$n"; [ -f "$f" ] || f="$HDIS_FAKE_DIR/read.last"
+  if [ -f "$f.fail" ]; then
+    echo '{"error":{"code":"pane_not_found","message":"pane wM:p9 not found"},"id":"cli:pane:read"}' >&2
+    exit 1
+  fi
+  cat "$f" ;;
 "agent start") sh "$HDIS_FAKE_DIR/start.sh" ;;
 "agent get") cat "$HDIS_FAKE_DIR/agentget.json" ;;
 *) echo '{"id":"x","result":{"type":"ok"}}' ;;
 esac`
 
-func paneRead(text string) string {
-	b, _ := json.Marshal(text)
-	return `{"id":"x","result":{"type":"pane_read","read":{"pane_id":"wM:p9","workspace_id":"wM",` +
-		`"tab_id":"wM:t1","source":"detection","format":"text","revision":1,"truncated":false,"text":` + string(b) + `}}}`
-}
+// unreadable stands where a screen would, for a read the CLI refuses.
+const unreadable = "\x00unreadable"
+
+// paneRead is what `herdr pane read` really answers with: the terminal's own
+// text, no JSON envelope anywhere. Measured against the real CLI.
+func paneRead(text string) string { return text }
 
 func agentJSON(status string) string {
 	return `{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"` + status +
@@ -68,11 +76,19 @@ func newHarness(t *testing.T, reads []string, start string) *harness {
 	f.Write(t, "start.sh", start)
 	f.Write(t, "agentget.json", `{"id":"x","result":{"type":"agent_info","agent":`+agentJSON("idle")+`}}`)
 	for i, r := range reads {
+		name := "read." + string(rune('1'+i))
 		if i == len(reads)-1 {
-			f.Write(t, "read.last", paneRead(r))
+			name = "read.last"
+		}
+		if r == unreadable {
+			f.Write(t, name, "")
+			f.Write(t, name+".fail", "")
+		} else {
+			f.Write(t, name, paneRead(r))
+		}
+		if i == len(reads)-1 {
 			break
 		}
-		f.Write(t, "read."+string(rune('1'+i)), paneRead(r))
 	}
 	return &harness{Fake: f, pipe: &Pipeline{
 		Herdr:          &herdr.Client{},
@@ -299,5 +315,74 @@ func TestADownProxyDaemonFailsAtStepZero(t *testing.T) {
 		if len(argv) >= 2 && argv[0] == "pane" && argv[1] == "split" {
 			t.Fatal("a pane was split before the proxy answered")
 		}
+	}
+}
+
+// The live failure, in a test: the confirm could not read the pane at all.
+// The goal may well have registered — in the live run it had, and the worker
+// was already claiming — so the spawn fails loud and the pane stays up.
+func TestAnUnreadableConfirmKeepsThePaneAndFailsLoud(t *testing.T) {
+	h := newHarness(t, []string{unreadable}, startRegistered)
+
+	pane, err := h.pipe.Run(context.Background(), req(claudeProfile()))
+	if err == nil {
+		t.Fatal("a confirm that read nothing must fail loud, not pass silently")
+	}
+	if !strings.Contains(err.Error(), "pane_not_found") {
+		t.Fatalf("the error drops what herdr said: %v", err)
+	}
+	var keep *KeepPaneError
+	if !errors.As(err, &keep) {
+		t.Fatalf("an unreadable confirm must be a keep-pane failure, got %T", err)
+	}
+	if n := count(h.verbs(t), "pane close"); n != 0 {
+		t.Fatalf("a worker that could not be read was retired anyway, closed %d times", n)
+	}
+	if pane != "wM:p9" {
+		t.Fatalf("the pane must come back so the dispatcher can hold its binding, got %q", pane)
+	}
+	// It kept looking rather than giving up on the first refusal.
+	if n := count(h.verbs(t), "pane read"); n < 2 {
+		t.Fatalf("only %d reads: an unreadable confirm must retry within the ceiling", n)
+	}
+}
+
+// The contrast, and the reason the rule is not just "never close a pane":
+// a confirm that DID read the screen and found a refusal on it knows the
+// worker never got a goal, so that half-built pane is retired.
+func TestAConfirmThatReadsARefusalRetiresThePane(t *testing.T) {
+	h := newHarness(t, []string{goalRefused + "\n" + promptBox}, strings.Replace(startRefused, "PLACEHOLDER", agentJSON("idle"), 1))
+
+	pane, err := h.pipe.Run(context.Background(), req(claudeProfile()))
+	if err == nil {
+		t.Fatal("a goal that never registered must fail the spawn")
+	}
+	var keep *KeepPaneError
+	if errors.As(err, &keep) {
+		t.Fatal("a refusal that was read is not an unreadable confirm")
+	}
+	if n := count(h.verbs(t), "pane close"); n != 1 {
+		t.Fatalf("a read refusal must retire its pane, closed %d times", n)
+	}
+	if pane != "" {
+		t.Fatalf("a retired pane must not come back for a binding, got %q", pane)
+	}
+}
+
+// A read that fails and then recovers inside the ceiling is not a failure at
+// all: the spawn succeeds, so the binding is recorded and review is still
+// announced later.
+func TestAFlakyReadRecoversWithinTheCeiling(t *testing.T) {
+	h := newHarness(t, []string{unreadable, unreadable, goalActive}, startRegistered)
+
+	pane, err := h.pipe.Run(context.Background(), req(claudeProfile()))
+	if err != nil {
+		t.Fatalf("a read that recovered must not fail the spawn: %v", err)
+	}
+	if pane != "wM:p9" {
+		t.Fatalf("pane: %q", pane)
+	}
+	if n := count(h.verbs(t), "pane close"); n != 0 {
+		t.Fatal("a recovered read must not retire its pane")
 	}
 }

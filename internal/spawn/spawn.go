@@ -48,6 +48,20 @@ var GoalMarkers = []string{"goal set:", "/goal active"}
 // goal causes the first, and a startup dialog causes the second.
 var startCodesMeaningNotReady = map[string]bool{"timeout": true, "agent_not_ready": true}
 
+// KeepPaneError is a spawn failure the pipeline refuses to clean up after.
+// It means the worker could not be READ, not that the goal was refused: a
+// goal that registered puts the worker to work immediately, so a pane the
+// dispatcher cannot see into may hold a worker already claiming its task.
+// Closing that pane kills the task mid-flight, which is strictly worse than
+// leaving a pane up and saying so. The pane and its binding both survive.
+type KeepPaneError struct {
+	Pane string
+	Err  error
+}
+
+func (e *KeepPaneError) Error() string { return e.Err.Error() }
+func (e *KeepPaneError) Unwrap() error { return e.Err }
+
 // Pipeline holds the adapters and the bounds of every wait it makes.
 type Pipeline struct {
 	Herdr *herdr.Client
@@ -84,9 +98,11 @@ type Request struct {
 	Goal string
 }
 
-// Run brings up one worker and returns the pane it lives in. Every failure
-// after the pane exists retires that pane: a half-built worker is worse than
-// none, because the board would see a pane that never claims.
+// Run brings up one worker and returns the pane it lives in. A failure the
+// pipeline could READ retires the pane behind it: a half-built worker is
+// worse than none, because the board would see a pane that never claims. A
+// failure it could not read hands the pane back alongside the error, so the
+// dispatcher keeps the binding and the operator decides.
 func (p *Pipeline) Run(ctx context.Context, req Request) (string, error) {
 	agentArgs := req.Profile.AgentArgs()
 
@@ -113,6 +129,10 @@ func (p *Pipeline) Run(ctx context.Context, req Request) (string, error) {
 	}
 
 	if err := p.build(ctx, req, pane, agentArgs); err != nil {
+		var keep *KeepPaneError
+		if errors.As(err, &keep) {
+			return pane, err
+		}
 		if closeErr := p.Herdr.PaneClose(ctx, pane); closeErr != nil {
 			return "", fmt.Errorf("%w (and the pane could not be retired: %v)", err, closeErr)
 		}
@@ -145,6 +165,11 @@ func (p *Pipeline) build(ctx context.Context, req Request, pane string, agentArg
 		return fmt.Errorf("spawn %s: %w", req.Name, err)
 	}
 	if err := p.confirmGoal(ctx, pane); err != nil {
+		var keep *KeepPaneError
+		if errors.As(err, &keep) {
+			keep.Err = fmt.Errorf("spawn %s: %w", req.Name, keep.Err)
+			return keep
+		}
 		return fmt.Errorf("spawn %s: %w", req.Name, err)
 	}
 	return nil
@@ -157,7 +182,11 @@ func (p *Pipeline) answerStartupDialog(ctx context.Context, pane string) error {
 	for i, n := 0, attempts(p.DialogCeiling, p.Poll); i < n; i++ {
 		text, err := p.Herdr.PaneRead(ctx, pane, p.readLines())
 		if err != nil {
-			return err
+			// A screen that cannot be read is not a dialog, and it is not a
+			// verdict either. Confirming the goal is where unreadability
+			// gets to mean something.
+			p.sleep(p.Poll)
+			continue
 		}
 		if contains(text, GoalMarkers) {
 			return nil // already past any dialog
@@ -172,23 +201,35 @@ func (p *Pipeline) answerStartupDialog(ctx context.Context, pane string) error {
 
 // confirmGoal reads the pane until the goal shows, and falls back to the
 // worker's own status: a registered goal puts it to work immediately.
+//
+// A read that fails is not a refusal, and the difference is the whole point.
+// Failing reads are retried for the rest of the ceiling; if the last one
+// still fails, the goal's fate is unknown and the pane is kept. Only a read
+// that came back — and carried no goal on it — retires a worker.
 func (p *Pipeline) confirmGoal(ctx context.Context, pane string) error {
 	var last string
+	var readErr error
 	for i, n := 0, attempts(p.ConfirmCeiling, p.Poll); i < n; i++ {
 		text, err := p.Herdr.PaneRead(ctx, pane, p.readLines())
-		if err != nil {
-			return err
-		}
-		if contains(text, GoalMarkers) {
-			return nil
-		}
-		if strings.TrimSpace(text) != "" {
-			last = text
+		readErr = err
+		if err == nil {
+			if contains(text, GoalMarkers) {
+				return nil
+			}
+			if strings.TrimSpace(text) != "" {
+				last = text
+			}
 		}
 		if a, err := p.Herdr.AgentGet(ctx, pane); err == nil && a.Status == herdr.StatusWorking {
 			return nil
 		}
 		p.sleep(p.Poll)
+	}
+	if readErr != nil {
+		return &KeepPaneError{Pane: pane, Err: fmt.Errorf(
+			"pane %s could not be read in %s, so whether the goal registered is unknown: %w; "+
+				"the pane is kept because a registered goal means a worker already at work",
+			pane, p.ConfirmCeiling, readErr)}
 	}
 	return fmt.Errorf("the goal never registered in pane %s within %s; the pane last showed: %s",
 		pane, p.ConfirmCeiling, tail(last))

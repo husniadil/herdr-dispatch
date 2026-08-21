@@ -151,16 +151,21 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 		Profile:  profile,
 		Goal:     goal,
 	})
-	if err != nil {
+	if pane == "" {
 		return err
 	}
+	// A pane came back, so a worker is alive in it — including when the
+	// spawn failed loud because it could not be read. The binding is the
+	// only record of which pane was prompted for which task until the worker
+	// claims; drop it and review is never announced for a task that may
+	// already be under way. The error still reaches the operator's log.
 	l.bindings = append(l.bindings, decide.Binding{
 		TaskID:     row.ID,
 		Pane:       pane,
 		PromptedAt: l.now(),
 		Prompts:    1,
 	})
-	return nil
+	return err
 }
 
 // prompt is the backstop, and it carries a nudge rather than the goal: the

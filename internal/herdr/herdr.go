@@ -1,5 +1,7 @@
 // Package herdr drives Herdr the same way the board is driven: shell out to
-// `herdr <verb>`, never open its socket, and parse the JSON it answers with.
+// `herdr <verb>`, never open its socket, and read what it answers with — a
+// JSON envelope for every verb but `pane read`, which answers with the
+// terminal's own text.
 // There is no detection logic here — Herdr's own agent_status is the only
 // truth about a worker this repo accepts.
 package herdr
@@ -79,14 +81,13 @@ func (c *Client) PaneRun(ctx context.Context, pane, command string) error {
 
 // PaneRead returns the pane's detection snapshot: the plain-text bottom
 // buffer, which is where a startup dialog and a goal confirmation both show.
+//
+// This is the one verb whose answer is not a JSON envelope. `herdr pane read`
+// writes the terminal's own text to stdout — box drawing, wrapping and all —
+// so it is taken raw. Parsing it as JSON is what retired a live worker that
+// had already claimed its task.
 func (c *Client) PaneRead(ctx context.Context, pane string, lines int) (string, error) {
-	var res struct {
-		Read struct {
-			Text string `json:"text"`
-		} `json:"read"`
-	}
-	err := c.result(ctx, &res, "pane", "read", pane, "--source", "detection", "--lines", strconv.Itoa(lines))
-	return res.Read.Text, err
+	return c.text(ctx, "pane", "read", pane, "--source", "detection", "--lines", strconv.Itoa(lines))
 }
 
 // PaneSendKeys presses logical keys in a pane.
@@ -166,26 +167,26 @@ func (c *Client) Notify(ctx context.Context, title, body string) error {
 	return c.result(ctx, nil, "notification", "show", title, "--body", body)
 }
 
+// text runs a verb whose answer is the terminal's own output rather than a
+// JSON envelope, and hands back stdout whole.
+func (c *Client) text(ctx context.Context, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, c.bin(), args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if runErr := cmd.Run(); runErr != nil {
+		return "", refusal(runErr, args, stderr)
+	}
+	return stdout.String(), nil
+}
+
 // result runs a verb and unmarshals its `result` object into into, which may
 // be nil when the verb answers with nothing worth reading.
 func (c *Client) result(ctx context.Context, into any, args ...string) error {
 	cmd := exec.CommandContext(ctx, c.bin(), args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	runErr := cmd.Run()
-
-	// A server refusal is a JSON error body on stderr with a non-zero exit.
-	if runErr != nil {
-		var body struct {
-			Error *Error `json:"error"`
-		}
-		if err := json.Unmarshal(bytes.TrimSpace(stderr.Bytes()), &body); err == nil && body.Error != nil {
-			return fmt.Errorf("herdr %s: %w", strings.Join(args, " "), body.Error)
-		}
-		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return fmt.Errorf("herdr %s: %s", strings.Join(args, " "), msg)
-		}
-		return fmt.Errorf("herdr %s: %w", strings.Join(args, " "), runErr)
+	if runErr := cmd.Run(); runErr != nil {
+		return refusal(runErr, args, stderr)
 	}
 
 	if into == nil {
@@ -201,4 +202,20 @@ func (c *Client) result(ctx context.Context, into any, args ...string) error {
 		return fmt.Errorf("herdr %s: unreadable result: %w", strings.Join(args, " "), err)
 	}
 	return nil
+}
+
+// refusal reads what herdr said when a verb exited non-zero: a JSON error
+// body on stderr, carrying the code the caller needs to tell one refusal
+// from another, or failing that whatever it wrote there instead.
+func refusal(runErr error, args []string, stderr bytes.Buffer) error {
+	var body struct {
+		Error *Error `json:"error"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(stderr.Bytes()), &body); err == nil && body.Error != nil {
+		return fmt.Errorf("herdr %s: %w", strings.Join(args, " "), body.Error)
+	}
+	if msg := strings.TrimSpace(stderr.String()); msg != "" {
+		return fmt.Errorf("herdr %s: %s", strings.Join(args, " "), msg)
+	}
+	return fmt.Errorf("herdr %s: %w", strings.Join(args, " "), runErr)
 }

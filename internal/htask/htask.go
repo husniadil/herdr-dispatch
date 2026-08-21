@@ -83,11 +83,19 @@ func (c *Client) Ready(ctx context.Context) ([]Task, error) {
 	return page.Tasks, nil
 }
 
-// Get reads one task by its id or its number.
+// Get reads one task by its id or its number. `task get --json` answers with
+// the row inside an envelope, where `task list` and `doctor` answer flat.
 func (c *Client) Get(ctx context.Context, id string) (Task, error) {
-	var t Task
-	err := c.json(ctx, &t, "task", "get", id, "--json")
-	return t, err
+	var res struct {
+		Task Task `json:"task"`
+	}
+	if err := c.json(ctx, &res, "task", "get", id, "--json"); err != nil {
+		return Task{}, err
+	}
+	if res.Task.ID == "" {
+		return Task{}, fmt.Errorf("htask task get %s: no task in the response", id)
+	}
+	return res.Task, nil
 }
 
 // Goal renders the task as the condition a worker boots with. The one-line

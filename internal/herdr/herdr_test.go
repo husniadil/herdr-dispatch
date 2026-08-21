@@ -40,7 +40,7 @@ func TestPaneSplitReturnsTheNewPane(t *testing.T) {
 func TestPaneRunReadAndClose(t *testing.T) {
 	c, f := client(t)
 	f.Bin(t, "herdr", `case "$2" in
-read) echo '{"id":"x","result":{"type":"pane_read","read":{"pane_id":"wM:p9","workspace_id":"wM","tab_id":"wM:t1","source":"detection","format":"text","text":"Do you trust the files in this folder?","revision":3,"truncated":false}}}' ;;
+read) printf '%s\n' "Do you trust the files in this folder?" "  1. Yes, proceed" ;;
 *) echo '{"id":"x","result":{"type":"ok"}}' ;;
 esac`)
 
@@ -198,5 +198,40 @@ func TestAgentGetReadsOneWorker(t *testing.T) {
 	}
 	if got, want := f.Calls(t)[0], "agent get wM:p9"; got != want {
 		t.Fatalf("argv: got %q, want %q", got, want)
+	}
+}
+
+// `herdr pane read` is the one verb that answers with the terminal's own
+// text and no JSON envelope at all. Reading it as JSON is what killed a live
+// worker: the parse failed, the confirm failed, and the pane was retired
+// while its worker was already claiming. The bytes below are a capture of
+// the real CLI, box drawing and all.
+func TestPaneReadTakesTheCliPlainTextAndNotJson(t *testing.T) {
+	c, f := client(t)
+	const screen = "─────────────────────────────────\n" +
+		"  MacBookPro · ~/github.com/husniadil/herdr-dispatch\n" +
+		"  ⎿  Goal set: do the thing · Done when: ...\n" +
+		"  ◎ /goal active\n"
+	f.Bin(t, "herdr", `printf '%s' '`+screen+`'`)
+
+	text, err := c.PaneRead(context.Background(), "wM:p9", 200)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if text != screen {
+		t.Fatalf("the screen came back changed:\ngot  %q\nwant %q", text, screen)
+	}
+}
+
+// A refusal still arrives the way every other verb's does — a JSON error
+// body on stderr with a non-zero exit — and its code survives the trip.
+func TestPaneReadCarriesTheHerdrErrorCode(t *testing.T) {
+	c, f := client(t)
+	f.Bin(t, "herdr", `echo '{"error":{"code":"pane_not_found","message":"pane wM:p9 not found"},"id":"cli:pane:read"}' >&2; exit 1`)
+
+	_, err := c.PaneRead(context.Background(), "wM:p9", 200)
+	var herr *Error
+	if !errors.As(err, &herr) || herr.Code != "pane_not_found" {
+		t.Fatalf("want a pane_not_found refusal, got %v", err)
 	}
 }
