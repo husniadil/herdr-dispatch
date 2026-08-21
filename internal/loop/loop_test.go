@@ -455,7 +455,7 @@ func codexLoop(t *testing.T) (*Loop, *fake.Fake, string) {
 	l.Config = cfg
 	dir := t.TempDir()
 	l.Spawn.SettingsDir = dir
-	f.Bin(t, "codex-cc-proxy", `echo '{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8787"}}'`)
+	f.Bin(t, "proxenos", `echo '{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8787"}}'`)
 	return l, f, dir
 }
 

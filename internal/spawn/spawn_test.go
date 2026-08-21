@@ -249,7 +249,7 @@ func codexProfile() config.Profile {
 // through the argv, compacted to one line.
 func TestCodexRunsTheTwoMeasuredSteps(t *testing.T) {
 	h := newHarness(t, []string{goalActive}, startRegistered)
-	h.Bin(t, "codex-cc-proxy", "printf '{\\n  \"env\": {\\n    \"ANTHROPIC_BASE_URL\": \"http://127.0.0.1:8787\"\\n  }\\n}\\n'")
+	h.Bin(t, "proxenos", "printf '{\\n  \"env\": {\\n    \"ANTHROPIC_BASE_URL\": \"http://127.0.0.1:8787\"\\n  }\\n}\\n'")
 
 	if _, err := h.pipe.Run(context.Background(), req(codexProfile())); err != nil {
 		t.Fatalf("run: %v", err)
@@ -264,7 +264,7 @@ func TestCodexRunsTheTwoMeasuredSteps(t *testing.T) {
 			start = argv
 		}
 	}
-	if run == nil || run[3] != `eval "$(codex-cc-proxy env)"` {
+	if run == nil || run[3] != `eval "$(proxenos env)"` {
 		t.Fatalf("environment half: got %v", run)
 	}
 	if start == nil {
@@ -302,7 +302,7 @@ func TestCodexRunsTheTwoMeasuredSteps(t *testing.T) {
 // one is refused before any pane exists.
 func TestCodexRefusesAProfileThatAlreadyCarriesSettings(t *testing.T) {
 	h := newHarness(t, []string{goalActive}, startRegistered)
-	h.Bin(t, "codex-cc-proxy", `echo '{}'`)
+	h.Bin(t, "proxenos", `echo '{}'`)
 
 	p := codexProfile()
 	p.Args = []string{"--settings", "/etc/mine.json"}
@@ -319,7 +319,7 @@ func TestCodexRefusesAProfileThatAlreadyCarriesSettings(t *testing.T) {
 // is split — not thirty seconds later as a startup timeout.
 func TestADownProxyDaemonFailsAtStepZero(t *testing.T) {
 	h := newHarness(t, []string{goalActive}, startRegistered)
-	h.Bin(t, "codex-cc-proxy", `echo "Error: the daemon is not answering. Start it with 'codex-cc-proxy run'." >&2; exit 1`)
+	h.Bin(t, "proxenos", `echo "Error: the daemon is not answering. Start it with 'proxenos run'." >&2; exit 1`)
 
 	_, err := h.pipe.Run(context.Background(), req(codexProfile()))
 	if err == nil || !strings.Contains(err.Error(), "the daemon is not answering") {
@@ -424,7 +424,7 @@ fi
 func TestTheCodexSpawnWaitsForItsPanesShellBeforeStartingTheAgent(t *testing.T) {
 	h := newHarness(t, []string{goalActive}, startBusyThen(3, startRegistered))
 	h.pipe.ShellCeiling = 6 * time.Second // six tries at the harness's one-second poll
-	h.Bin(t, "codex-cc-proxy", `echo '{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8787"}}'`)
+	h.Bin(t, "proxenos", `echo '{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8787"}}'`)
 
 	pane, err := h.pipe.Run(context.Background(), req(codexProfile()))
 	if err != nil {
@@ -462,7 +462,7 @@ func TestTheCodexSpawnWaitsForItsPanesShellBeforeStartingTheAgent(t *testing.T) 
 func TestAPaneShellThatNeverFreesFailsLoudAndRetiresThePane(t *testing.T) {
 	h := newHarness(t, []string{goalActive}, startBusyThen(99, startRegistered))
 	h.pipe.ShellCeiling = 3 * time.Second
-	h.Bin(t, "codex-cc-proxy", `echo '{}'`)
+	h.Bin(t, "proxenos", `echo '{}'`)
 
 	pane, err := h.pipe.Run(context.Background(), req(codexProfile()))
 	if err == nil {
@@ -521,7 +521,7 @@ func TestTheConfirmCeilingIsConfigurableAndDefaulted(t *testing.T) {
 	}
 }
 
-// realProxySettings is the document `codex-cc-proxy settings` actually
+// realProxySettings is the document `proxenos settings` actually
 // produced on 2026-08-21, compacted the way the proxy adapter compacts it.
 // It is 473 characters, and the budget below is derived from that number, so
 // the test carries the real thing rather than a stub that would drift.
@@ -582,7 +582,7 @@ func TestTheTypedSpawnLineStaysUnderItsBudgetWithACodexProfile(t *testing.T) {
 	// measure something no spawn ever types.
 	h.pipe.SettingsDir = ""
 	t.Cleanup(func() { h.pipe.Discard("wM:p9") })
-	h.Bin(t, "codex-cc-proxy", `cat "$HDIS_FAKE_DIR/settings.json"`)
+	h.Bin(t, "proxenos", `cat "$HDIS_FAKE_DIR/settings.json"`)
 	h.Write(t, "settings.json", realProxySettings)
 
 	p := codexProfile()
@@ -616,7 +616,7 @@ func TestTheTypedSpawnLineStaysUnderItsBudgetWithACodexProfile(t *testing.T) {
 // deliver it untouched. Nothing here trims, wraps or re-renders it.
 func TestThePipelineDeliversTheConditionItWasGivenUnchanged(t *testing.T) {
 	h := newHarness(t, []string{goalActive}, startRegistered)
-	h.Bin(t, "codex-cc-proxy", `cat "$HDIS_FAKE_DIR/settings.json"`)
+	h.Bin(t, "proxenos", `cat "$HDIS_FAKE_DIR/settings.json"`)
 	h.Write(t, "settings.json", realProxySettings)
 
 	r := req(codexProfile())
@@ -636,7 +636,7 @@ func TestThePipelineDeliversTheConditionItWasGivenUnchanged(t *testing.T) {
 // directory, so nobody else on the machine gets to read it.
 func TestTheSettingsDocumentTravelsAsAFileOnlyItsOwnerCanRead(t *testing.T) {
 	h := newHarness(t, []string{goalActive}, startRegistered)
-	h.Bin(t, "codex-cc-proxy", `cat "$HDIS_FAKE_DIR/settings.json"`)
+	h.Bin(t, "proxenos", `cat "$HDIS_FAKE_DIR/settings.json"`)
 	h.Write(t, "settings.json", realProxySettings)
 
 	if _, err := h.pipe.Run(context.Background(), req(codexProfile())); err != nil {
@@ -671,14 +671,14 @@ func TestTheSettingsDocumentTravelsAsAFileOnlyItsOwnerCanRead(t *testing.T) {
 // retiring one never disarms the other.
 func TestEachSpawnWritesItsOwnSettingsFile(t *testing.T) {
 	first := newHarness(t, []string{goalActive}, startRegistered)
-	first.Bin(t, "codex-cc-proxy", `echo '{"env":{}}'`)
+	first.Bin(t, "proxenos", `echo '{"env":{}}'`)
 	if _, err := first.pipe.Run(context.Background(), req(codexProfile())); err != nil {
 		t.Fatalf("first run: %v", err)
 	}
 	a := agentArgsOf(t, first)[1]
 
 	second := newHarness(t, []string{goalActive}, startRegistered)
-	second.Bin(t, "codex-cc-proxy", `echo '{"env":{}}'`)
+	second.Bin(t, "proxenos", `echo '{"env":{}}'`)
 	if _, err := second.pipe.Run(context.Background(), req(codexProfile())); err != nil {
 		t.Fatalf("second run: %v", err)
 	}
@@ -693,7 +693,7 @@ func TestEachSpawnWritesItsOwnSettingsFile(t *testing.T) {
 // where the file goes. The same call is what a give-up runs.
 func TestRetiringAPaneRemovesItsSettingsFile(t *testing.T) {
 	h := newHarness(t, []string{goalActive}, startRegistered)
-	h.Bin(t, "codex-cc-proxy", `echo '{"env":{}}'`)
+	h.Bin(t, "proxenos", `echo '{"env":{}}'`)
 
 	pane, err := h.pipe.Run(context.Background(), req(codexProfile()))
 	if err != nil {
@@ -716,7 +716,7 @@ func TestRetiringAPaneRemovesItsSettingsFile(t *testing.T) {
 // and the file goes with it.
 func TestAFailedSpawnRemovesItsSettingsFile(t *testing.T) {
 	h := newHarness(t, []string{goalRefused + "\n" + promptBox}, strings.Replace(startRefused, "PLACEHOLDER", agentJSON("idle"), 1))
-	h.Bin(t, "codex-cc-proxy", `echo '{"env":{}}'`)
+	h.Bin(t, "proxenos", `echo '{"env":{}}'`)
 
 	if _, err := h.pipe.Run(context.Background(), req(codexProfile())); err == nil {
 		t.Fatal("a goal that never registered must fail the spawn")
@@ -732,7 +732,7 @@ func TestAFailedSpawnRemovesItsSettingsFile(t *testing.T) {
 // would disarm a live worker to tidy up after it.
 func TestAKeptPaneKeepsItsSettingsFile(t *testing.T) {
 	h := newHarness(t, []string{unreadable}, startRegistered)
-	h.Bin(t, "codex-cc-proxy", `echo '{"env":{}}'`)
+	h.Bin(t, "proxenos", `echo '{"env":{}}'`)
 
 	pane, err := h.pipe.Run(context.Background(), req(codexProfile()))
 	if err == nil {

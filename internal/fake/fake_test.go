@@ -6,12 +6,12 @@ import (
 )
 
 // The guarantee the whole gate rests on: inside a fake environment the real
-// htask, herdr and codex-cc-proxy cannot be resolved at all. A verb whose
+// htask, herdr and proxenos cannot be resolved at all. A verb whose
 // stand-in was never written fails as "not found" rather than reaching the
 // operator's live board, Herdr server or proxy daemon.
 func TestTheRealBinariesAreUnreachable(t *testing.T) {
 	New(t)
-	for _, name := range []string{"htask", "herdr", "codex-cc-proxy"} {
+	for _, name := range []string{"htask", "herdr", "proxenos"} {
 		if path, err := exec.LookPath(name); err == nil {
 			t.Fatalf("%s still resolves, to %s", name, path)
 		}

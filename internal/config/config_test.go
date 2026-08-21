@@ -128,3 +128,27 @@ func TestLoadReportsThePathItFailedOn(t *testing.T) {
 		t.Fatalf("want the path in the error, got %v", err)
 	}
 }
+
+// The codex provider's launcher is a name the config carries, not a word
+// compiled into this binary. It has been renamed once already.
+func TestTheProxyLauncherDefaultsToProxenosAndCanBeOverridden(t *testing.T) {
+	if DefaultProxy != "proxenos" {
+		t.Fatalf("the default launcher is %q", DefaultProxy)
+	}
+
+	c, err := Parse([]byte(`{"default":"a","profiles":{"a":{"provider":"codex"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Proxy; got != DefaultProxy {
+		t.Fatalf("a config that names no launcher must resolve to %q, got %q", DefaultProxy, got)
+	}
+
+	c, err = Parse([]byte(`{"default":"a","proxy":"/opt/bin/proxenos-next","profiles":{"a":{"provider":"codex"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := c.Proxy, "/opt/bin/proxenos-next"; got != want {
+		t.Fatalf("the override was dropped: got %q, want %q", got, want)
+	}
+}

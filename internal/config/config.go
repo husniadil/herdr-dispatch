@@ -18,16 +18,21 @@ type Provider string
 const (
 	// ProviderClaude launches the plain binary.
 	ProviderClaude Provider = "claude"
-	// ProviderCodex launches through codex-cc-proxy, which injects the
-	// routing environment and the settings half. hdis carries no proxy
-	// logic of its own; it only runs the proxy's two documented steps.
+	// ProviderCodex launches through the proxy launcher named by Config's
+	// Proxy field, which injects the routing environment and the settings
+	// half. hdis carries no proxy logic of its own; it only runs the
+	// launcher's two documented steps.
 	ProviderCodex Provider = "codex"
 )
 
-// The two defaults a profile may leave out.
+// The defaults a document may leave out.
 const (
 	DefaultAgent  = "claude"
 	DefaultEffort = "low"
+	// DefaultProxy is the codex provider's launcher binary. It is a name the
+	// config carries rather than a word compiled in here because that binary
+	// has been renamed once already.
+	DefaultProxy = "proxenos"
 )
 
 // Profile is the launch preset for one worker. Model is a tier alias, and an
@@ -46,6 +51,9 @@ type Config struct {
 	Default  string             `json:"default"`
 	Profiles map[string]Profile `json:"profiles"`
 	Projects map[string]string  `json:"projects"`
+	// Proxy is the codex provider's launcher binary, resolved off PATH
+	// unless it is a path. Empty means DefaultProxy.
+	Proxy string `json:"proxy"`
 }
 
 // Parse reads a config document and refuses one it could not resolve later.
@@ -57,6 +65,9 @@ func Parse(b []byte) (Config, error) {
 		return Config{}, fmt.Errorf("hdis config: %w", err)
 	}
 
+	if c.Proxy == "" {
+		c.Proxy = DefaultProxy
+	}
 	if len(c.Profiles) == 0 {
 		return Config{}, fmt.Errorf("hdis config: no profiles")
 	}

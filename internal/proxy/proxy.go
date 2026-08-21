@@ -1,8 +1,8 @@
 // Package proxy is the codex provider's launcher, and nothing more. The
-// routing itself belongs to codex-cc-proxy: this package runs the two steps
-// the proxy documents — the environment half through the pane's shell, the
-// settings half through the worker's argv — and carries no routing logic of
-// its own.
+// routing itself belongs to the launcher binary, which the config names: this
+// package runs the two steps that binary documents — the environment half
+// through the pane's shell, the settings half through the worker's argv — and
+// carries no routing logic of its own.
 package proxy
 
 import (
@@ -12,11 +12,13 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/husniadil/herdr-dispatch/internal/config"
 )
 
-// Client runs the codex-cc-proxy CLI.
+// Client runs the proxy launcher's CLI.
 type Client struct {
-	// Bin is the binary to run; empty means `codex-cc-proxy` off PATH.
+	// Bin is the binary to run; empty means config.DefaultProxy off PATH.
 	Bin string
 }
 
@@ -24,7 +26,7 @@ func (c *Client) bin() string {
 	if c.Bin != "" {
 		return c.Bin
 	}
-	return "codex-cc-proxy"
+	return config.DefaultProxy
 }
 
 // EnvCommand is the shell line that exports the routing environment into a
@@ -44,14 +46,14 @@ func (c *Client) Settings(ctx context.Context) (string, error) {
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
 		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return "", fmt.Errorf("codex-cc-proxy settings: %s", msg)
+			return "", fmt.Errorf("%s settings: %s", c.bin(), msg)
 		}
-		return "", fmt.Errorf("codex-cc-proxy settings: %w", err)
+		return "", fmt.Errorf("%s settings: %w", c.bin(), err)
 	}
 
 	var compact bytes.Buffer
 	if err := json.Compact(&compact, bytes.TrimSpace(stdout.Bytes())); err != nil {
-		return "", fmt.Errorf("codex-cc-proxy settings: unreadable json: %w", err)
+		return "", fmt.Errorf("%s settings: unreadable json: %w", c.bin(), err)
 	}
 	return compact.String(), nil
 }

@@ -12,7 +12,7 @@ import (
 // in an agent argument outright, so it is compacted before it travels.
 func TestSettingsAreCompactedToOneLine(t *testing.T) {
 	f := fake.New(t)
-	f.Bin(t, "codex-cc-proxy", `cat <<'EOF'
+	f.Bin(t, "proxenos", `cat <<'EOF'
 {
   "env": {
     "ANTHROPIC_BASE_URL": "http://127.0.0.1:8787"
@@ -43,9 +43,9 @@ EOF`)
 // own words: they name the socket and say how to start it.
 func TestADownDaemonFailsWithItsOwnMessage(t *testing.T) {
 	f := fake.New(t)
-	f.Bin(t, "codex-cc-proxy", `cat >&2 <<'EOF'
-Error: the daemon is not answering (could not reach the daemon at /tmp/codex-cc-proxy.sock),
-so there is no configuration to start this with. Start it with 'codex-cc-proxy run'.
+	f.Bin(t, "proxenos", `cat >&2 <<'EOF'
+Error: the daemon is not answering (could not reach the daemon at /tmp/proxenos.sock),
+so there is no configuration to start this with. Start it with 'proxenos run'.
 EOF
 exit 1`)
 
@@ -53,7 +53,7 @@ exit 1`)
 	if err == nil {
 		t.Fatal("want an error")
 	}
-	for _, want := range []string{"the daemon is not answering", "codex-cc-proxy run"} {
+	for _, want := range []string{"the daemon is not answering", "proxenos run"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("want %q in the error, got %v", want, err)
 		}
@@ -65,7 +65,7 @@ exit 1`)
 // herdr will refuse later, further from the cause.
 func TestUnreadableSettingsAreRefusedHere(t *testing.T) {
 	f := fake.New(t)
-	f.Bin(t, "codex-cc-proxy", `echo "not json at all"`)
+	f.Bin(t, "proxenos", `echo "not json at all"`)
 
 	if _, err := (&Client{}).Settings(context.Background()); err == nil {
 		t.Fatal("want an error")
@@ -75,7 +75,7 @@ func TestUnreadableSettingsAreRefusedHere(t *testing.T) {
 // The environment half is delivered by the shell, exactly as the proxy's own
 // README spells it, and it names the configured binary.
 func TestEnvCommandIsTheEvalTheProxyDocuments(t *testing.T) {
-	if got, want := (&Client{}).EnvCommand(), `eval "$(codex-cc-proxy env)"`; got != want {
+	if got, want := (&Client{}).EnvCommand(), `eval "$(proxenos env)"`; got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 	if got, want := (&Client{Bin: "/opt/ccp"}).EnvCommand(), `eval "$(/opt/ccp env)"`; got != want {

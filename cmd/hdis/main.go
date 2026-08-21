@@ -113,7 +113,7 @@ func run(argv []string) error {
 		},
 		Spawn: &spawn.Pipeline{
 			Herdr:          pens,
-			Proxy:          &proxy.Client{},
+			Proxy:          &proxy.Client{Bin: cfg.Proxy},
 			StartTimeout:   *startTimeout,
 			DialogCeiling:  20 * time.Second,
 			ConfirmCeiling: *confirmCeiling,

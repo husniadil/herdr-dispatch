@@ -144,7 +144,7 @@ const DefaultShellCeiling = 30 * time.Second
 // DefaultConfirmCeiling bounds the wait for a goal to show on screen when the
 // pipeline carries no bound of its own.
 //
-// Measured on the live codex path — a pane split, `eval "$(codex-cc-proxy
+// Measured on the live codex path — a pane split, `eval "$(proxenos
 // env)"` run in its shell, then a claude started with the goal in its argv —
 // the pane was listed by herdr at 1.14s and the goal marker was on screen at
 // 2.23s. The live dispatcher run that this bound exists for was far slower

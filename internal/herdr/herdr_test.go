@@ -45,7 +45,7 @@ read) printf '%s\n' "Do you trust the files in this folder?" "  1. Yes, proceed"
 esac`)
 
 	ctx := context.Background()
-	if err := c.PaneRun(ctx, "wM:p9", `eval "$(codex-cc-proxy env)"`); err != nil {
+	if err := c.PaneRun(ctx, "wM:p9", `eval "$(proxenos env)"`); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	text, err := c.PaneRead(ctx, "wM:p9", 200)
@@ -63,7 +63,7 @@ esac`)
 	}
 
 	argv := f.Argv(t)
-	if got, want := argv[0], []string{"pane", "run", "wM:p9", `eval "$(codex-cc-proxy env)"`}; !reflect.DeepEqual(got, want) {
+	if got, want := argv[0], []string{"pane", "run", "wM:p9", `eval "$(proxenos env)"`}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("run argv: got %v, want %v", got, want)
 	}
 	rest := []string{

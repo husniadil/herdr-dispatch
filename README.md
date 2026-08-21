@@ -50,11 +50,20 @@ global default, and per-project overrides:
 
 | Field      | Meaning                                                                                                                    |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `provider` | `claude` runs the plain binary. `codex` runs it through `codex-cc-proxy`, which supplies the routing. Required.               |
+| `provider` | `claude` runs the plain binary. `codex` runs it through the proxy launcher named below, which supplies the routing. Required. |
 | `agent`    | The `--agent` name. Defaults to the literal `claude`. Definitions belong to each project's `.claude/agents`; none ship here. |
 | `model`    | A tier alias. Empty means the client's own default.                                                                          |
 | `effort`   | Defaults to `low`.                                                                                                           |
 | `args`     | Extra argv passed through to the worker.                                                                                     |
+
+The `codex` provider's launcher is named by an optional top-level `"proxy"`
+key, and defaults to the literal `proxenos`. It lives in the config rather
+than in this binary because that binary has been renamed once already, and
+the next rename should be one line of JSON:
+
+```json
+{ "proxy": "/opt/homebrew/bin/proxenos" }
+```
 
 Which profile a project gets is decided here and nowhere else. The board
 carries no profile field, deliberately: which agent kind and model a worker
@@ -63,11 +72,11 @@ ledger.
 
 ## What a spawn actually does
 
-1. For a `codex` profile, `codex-cc-proxy settings` first. A daemon that is
+1. For a `codex` profile, `proxenos settings` first. A daemon that is
    down fails here, in the daemon's own words, rather than thirty seconds
    later as a startup timeout with the cause hidden in a pane.
 2. `herdr pane split` off the dispatcher's pane, in the task's own project.
-3. For a `codex` profile, `eval "$(codex-cc-proxy env)"` in that pane: the
+3. For a `codex` profile, `eval "$(proxenos env)"` in that pane: the
    worker inherits the routing environment as a direct child of the shell.
 4. `herdr agent start`, with the profile's argv and a short `/goal` condition
    after the separator. That condition is a **pointer** hdis composes — claim
