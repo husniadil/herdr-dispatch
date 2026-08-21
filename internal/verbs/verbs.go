@@ -9,12 +9,9 @@ package verbs
 // also the socket's and the state dir's.
 const ToolPrefix = "hdis"
 
-// Kinds of argument, in the small vocabulary both doors can render.
-const (
-	String = "string"
-	Int    = "int"
-	Bool   = "bool"
-)
+// String is the only kind of argument the first slice has. A second kind
+// arrives with the first verb that needs one, and not before.
+const String = "string"
 
 // Arg is one parameter of a verb. A positional arg is a CLI positional and an
 // ordinary named field over MCP and the socket.

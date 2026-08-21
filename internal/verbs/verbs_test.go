@@ -17,7 +17,7 @@ func TestEveryVerbIsWholeOnBothDoors(t *testing.T) {
 			if a.Name == "" || a.Desc == "" {
 				t.Errorf("verb %q has an unnamed or undescribed argument", v.Name)
 			}
-			if a.Type != String && a.Type != Int && a.Type != Bool {
+			if a.Type != String {
 				t.Errorf("verb %q argument %q has type %q, which no door can render", v.Name, a.Name, a.Type)
 			}
 		}
