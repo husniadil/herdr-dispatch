@@ -45,6 +45,13 @@ type record struct {
 	PromptedAtMS int64  `json:"prompted_at_ms"`
 	Prompts      int    `json:"prompts"`
 	Notified     bool   `json:"notified"`
+	// Kind is which lane the pane was brought up for. It is omitted for a
+	// worker, so a document this binary writes stays readable to one that
+	// predates the verification lane.
+	Kind string `json:"kind,omitempty"`
+	// Verified says a verifier has already been brought up for the
+	// submission a worker's binding is holding.
+	Verified bool `json:"verified,omitempty"`
 }
 
 // Load reads the bindings. A store nobody has written is an empty set and no
@@ -74,9 +81,20 @@ func (b *Bindings) Load() ([]decide.Binding, error) {
 			PromptedAt: time.UnixMilli(r.PromptedAtMS).UTC(),
 			Prompts:    r.Prompts,
 			Notified:   r.Notified,
+			Kind:       r.Kind,
+			Verified:   r.Verified,
 		})
 	}
 	return out, nil
+}
+
+// kindOf writes a verifier's kind and leaves a worker's off: an absent kind
+// is a worker, which is what every binding was before the lane existed.
+func kindOf(b decide.Binding) string {
+	if b.IsVerifier() {
+		return decide.KindVerifier
+	}
+	return ""
 }
 
 // Save writes the whole set, atomically: a temp file in the same directory,
@@ -92,6 +110,8 @@ func (b *Bindings) Save(bindings []decide.Binding) error {
 			PromptedAtMS: x.PromptedAt.UnixMilli(),
 			Prompts:      x.Prompts,
 			Notified:     x.Notified,
+			Kind:         kindOf(x),
+			Verified:     x.Verified,
 		})
 	}
 	raw, err := json.Marshal(doc)

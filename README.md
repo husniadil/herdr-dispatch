@@ -150,9 +150,26 @@ global default, and per-project overrides:
 | `effort`   | Defaults to `low`.                                                                                                           |
 | `args`     | Extra argv passed through to the worker.                                                                                     |
 
-Two keys sit at the top level beside `profiles`: `"proxy"` names the codex
-provider's launcher, and `"pane"` names the base pane a daemon uses when it
-was not started inside a Herdr pane and was given no `-pane`.
+Three keys sit at the top level beside `profiles`: `"proxy"` names the codex
+provider's launcher, `"pane"` names the base pane a daemon uses when it was
+not started inside a Herdr pane and was given no `-pane`, and `"verify"` is
+the verification lane.
+
+The lane is off unless the document turns it on. On, it names one of the
+profiles above, and every task a worker of this daemon's submits earns a
+verifier launched from it:
+
+```json
+{
+  "verify": { "enabled": true, "profile": "checker" }
+}
+```
+
+A lane that is on and names no defined profile is refused at parse, not at
+the first review that would have needed it. `hdis doctor` reports whether the
+lane is on and which profile it uses, and `hdis status` marks each pane
+`worker` or `verifier`. What a verifier is for, and the line it does not
+cross, is under [The boundary](#the-boundary).
 
 The `codex` provider's launcher is named by an optional top-level `"proxy"`
 key, and defaults to the literal `proxenos`. It lives in the config rather
@@ -285,6 +302,19 @@ second writer racing them is the bug, not a safety net.
 
 The dispatcher stops at review. It never runs `task approve`, `task reject`,
 or any note verb.
+
+The verification lane does not move that line, it works up against it. With
+`"verify"` on, a task one of this dispatcher's own workers submitted earns a
+VERIFIER worker: a fresh pane, the same spawn path, a binding of its own with
+a verifier kind on it. Its condition tells it to reread the report with
+`htask task get`, run the gate with nothing cached, check the report's claims
+against the code, prove the gate still bites, and send what it found with
+`hmail send human` — and never to run `task approve` or `task reject`. One
+submission earns one verifier; a re-submission after a rejection earns
+another. Verification is delegated. Judgment is not: a verifier reports, the
+operator decides, and the board's review gate is still the only thing that
+moves the task. `TestTheBoardAdapterCarriesNoReviewVerb` and
+`TestNoSourceFilePassesAReviewVerbAsAnArgument` pin that from both sides.
 
 ## Building and testing
 

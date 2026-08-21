@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/husniadil/herdr-dispatch/internal/codes"
+	"github.com/husniadil/herdr-dispatch/internal/decide"
 	"github.com/husniadil/herdr-dispatch/internal/htask"
 )
 
@@ -28,6 +29,9 @@ type Worker struct {
 	Title   string `json:"title"`
 	Project string `json:"project"`
 	Pane    string `json:"pane"`
+	// Kind is which lane the pane was brought up for: a worker does the
+	// task, a verifier checks what a worker submitted.
+	Kind string `json:"kind"`
 	// AgentStatus is herdr's own word for the worker, or empty when herdr
 	// no longer lists the pane at all.
 	AgentStatus string `json:"agent_status"`
@@ -142,6 +146,7 @@ func (l *Loop) Status(ctx context.Context) (Status, error) {
 			Title:       row.Title,
 			Project:     row.Project,
 			Pane:        b.Pane,
+			Kind:        kindOf(b),
 			AgentStatus: status,
 			PaneAlive:   alive,
 			PromptedAt:  b.PromptedAt,
@@ -150,6 +155,15 @@ func (l *Loop) Status(ctx context.Context) (Status, error) {
 		})
 	}
 	return st, nil
+}
+
+// kindOf names a binding's lane for a caller. A binding written before the
+// lane existed carries no kind and is a worker.
+func kindOf(b decide.Binding) string {
+	if b.IsVerifier() {
+		return decide.KindVerifier
+	}
+	return decide.KindWorker
 }
 
 // Pending reports the task ids reserved by a dispatch and not yet spawned.

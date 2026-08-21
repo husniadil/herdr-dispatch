@@ -152,3 +152,45 @@ func TestTheProxyLauncherDefaultsToProxenosAndCanBeOverridden(t *testing.T) {
 		t.Fatalf("the override was dropped: got %q, want %q", got, want)
 	}
 }
+
+// The verification lane is off in a document that says nothing about it.
+func TestTheVerificationLaneIsOffUnlessTheDocumentTurnsItOn(t *testing.T) {
+	c, err := Parse([]byte(`{"default":"w","profiles":{"w":{"provider":"claude"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Verify.Enabled {
+		t.Fatal("the lane came on without being asked for")
+	}
+	if _, err := c.VerifyProfile(); err == nil {
+		t.Fatal("a profile was resolved for a lane that is off")
+	}
+}
+
+// On, the lane names a profile of the same shape a worker's is.
+func TestTheVerificationLaneNamesItsOwnProfile(t *testing.T) {
+	c, err := Parse([]byte(`{"default":"w","profiles":{"w":{"provider":"claude"},"v":{"provider":"claude","model":"sonnet","effort":"high"}},"verify":{"enabled":true,"profile":"v"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := c.VerifyProfile()
+	if err != nil {
+		t.Fatalf("verify profile: %v", err)
+	}
+	if p.Model != "sonnet" || p.Effort != "high" {
+		t.Fatalf("verifier profile: %+v", p)
+	}
+}
+
+// A lane turned on with nothing to launch is refused at parse, not at the
+// first review that would have needed it.
+func TestAVerificationLaneWithNoProfileIsRefused(t *testing.T) {
+	for _, doc := range []string{
+		`{"default":"w","profiles":{"w":{"provider":"claude"}},"verify":{"enabled":true}}`,
+		`{"default":"w","profiles":{"w":{"provider":"claude"}},"verify":{"enabled":true,"profile":"nope"}}`,
+	} {
+		if _, err := Parse([]byte(doc)); err == nil {
+			t.Fatalf("accepted %s", doc)
+		}
+	}
+}

@@ -145,3 +145,47 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+// A verifier binding comes back a verifier, and the flag that says a
+// submission already had one comes back with it. Without the kind, a restart
+// would re-adopt a verifier as a worker and start nudging it to claim.
+func TestTheBindingKindAndVerificationRoundTrip(t *testing.T) {
+	b := &Bindings{Path: filepath.Join(t.TempDir(), "bindings.json")}
+	held := []decide.Binding{
+		{TaskID: "t1", Pane: "wM:p9", PromptedAt: time.UnixMilli(1_700_000_000_000).UTC(), Prompts: 1, Notified: true, Verified: true, Kind: decide.KindWorker},
+		{TaskID: "t1", Pane: "wM:p10", PromptedAt: time.UnixMilli(1_700_000_001_000).UTC(), Prompts: 1, Kind: decide.KindVerifier},
+	}
+	if err := b.Save(held); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := b.Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("loaded %d bindings", len(got))
+	}
+	if !got[0].Verified || got[0].IsVerifier() {
+		t.Fatalf("the worker binding came back as %+v", got[0])
+	}
+	if !got[1].IsVerifier() || got[1].Verified {
+		t.Fatalf("the verifier binding came back as %+v", got[1])
+	}
+}
+
+// A document written before the lane existed has no kind on its rows, and
+// every one of them is a worker.
+func TestABindingWrittenBeforeTheLaneReadsAsAWorker(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bindings.json")
+	raw := `{"version":1,"bindings":[{"task":"t1","pane":"wM:p9","prompted_at_ms":1700000000000,"prompts":1,"notified":false}]}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := (&Bindings{Path: path}).Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(got) != 1 || got[0].IsVerifier() {
+		t.Fatalf("read back as %+v", got)
+	}
+}

@@ -131,6 +131,10 @@ func serve(argv []string) error {
 			MaxWorkers:   *maxWorkers,
 			ClaimTimeout: *claimTimeout,
 			MaxPrompts:   *maxPrompts,
+			// The lane is the config document's call, not a flag: which
+			// agent verifies and whether one runs at all is execution
+			// policy, and it lives where the profiles live.
+			Verify: cfg.Verify.Enabled,
 		},
 		Spawn: &spawn.Pipeline{
 			Herdr:          pens,

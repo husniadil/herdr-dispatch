@@ -767,3 +767,39 @@ func TestTheClaudeProviderWritesNoSettingsFile(t *testing.T) {
 		t.Fatalf("the claude provider wrote %d settings files", len(entries))
 	}
 }
+
+// The verifier's condition says in one line what it must never do. It is the
+// only place in this repo that names approve or reject at all, and it names
+// them to forbid them.
+func TestTheVerifierGoalForbidsApprovingAndRejecting(t *testing.T) {
+	goal := VerifierGoal(23)
+	for _, want := range []string{"never run", "task approve", "task reject"} {
+		if !strings.Contains(strings.ToLower(goal), want) {
+			t.Fatalf("the verifier goal does not carry %q: %s", want, goal)
+		}
+	}
+}
+
+// It is a pointer, like the worker's: it names the task, where the report is
+// read from, and how findings leave. None of the criteria travel on it.
+func TestTheVerifierGoalPointsAtTheBoardAndAtHmail(t *testing.T) {
+	goal := VerifierGoal(23)
+	for _, want := range []string{"htask task get 23", "go clean -testcache", "hmail send", "htask task note 23"} {
+		if !strings.Contains(goal, want) {
+			t.Fatalf("the verifier goal does not carry %q: %s", want, goal)
+		}
+	}
+}
+
+// The verifier's line is typed into its pane exactly as a worker's is, so it
+// answers to the same budget.
+func TestTheVerifierLineFitsTheTypedBudget(t *testing.T) {
+	p := config.Profile{Provider: config.ProviderCodex, Agent: "claude", Model: "sonnet", Effort: "high"}
+	args := append(p.AgentArgs(), GoalPrefix+VerifierGoal(23))
+	args = append([]string{"--settings", "/var/folders/ab/cdefghij0k1lmnop2qrstuvw0000gn/T/hdis-settings-1234567890.json"}, args...)
+	line := TypedLine(args)
+	t.Logf("verifier line: %d of %d budgeted, on %q", len(line), TypedLineBudget, line)
+	if len(line) > TypedLineBudget {
+		t.Fatalf("the verifier line is %d characters and the budget is %d: %s", len(line), TypedLineBudget, line)
+	}
+}

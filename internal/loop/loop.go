@@ -132,7 +132,15 @@ func (l *Loop) Adopt(ctx context.Context) (int, error) {
 			l.logf("task %s is %s, dropping the binding a restart found on pane %s", b.TaskID, row.Status, b.Pane)
 			continue
 		}
-		if claimed := row.Pane(); claimed != "" && claimed != b.Pane {
+		if b.IsVerifier() {
+			// A verifier holds no claim, so the claim is not what says its
+			// binding is still real. What it was brought up to read is: the
+			// submission it was checking has to still be in review.
+			if row.Status != "review" {
+				l.logf("task %s is %s, dropping the verifier binding a restart found on pane %s", b.TaskID, row.Status, b.Pane)
+				continue
+			}
+		} else if claimed := row.Pane(); claimed != "" && claimed != b.Pane {
 			l.logf("task %s is held by %s, not by pane %s; dropping the binding a restart found", b.TaskID, claimed, b.Pane)
 			continue
 		}
@@ -269,6 +277,12 @@ func (l *Loop) apply(ctx context.Context, actions []decide.Action) {
 		switch a.Kind {
 		case decide.Spawn:
 			err = l.spawn(ctx, a)
+		case decide.SpawnVerifier:
+			err = l.spawnVerifier(ctx, a)
+		case decide.Rearm:
+			// The submission the announcement and the verification belonged
+			// to has left review. If it comes back, both are due again.
+			l.rearm(a.TaskID)
 		case decide.Prompt:
 			err = l.prompt(ctx, a)
 		case decide.Notify:
@@ -281,10 +295,10 @@ func (l *Loop) apply(ctx context.Context, actions []decide.Action) {
 			// the board's own sweep.
 			l.logf("task %s: pane %s is gone, dropping its binding", a.TaskID, a.Pane)
 			l.Spawn.Discard(a.Pane)
-			l.drop(a.TaskID)
+			l.drop(a.Pane)
 		case decide.GiveUp:
 			l.logf("task %s: %s after %d prompts, retiring pane %s",
-				a.TaskID, a.Reason, l.promptsFor(a.TaskID), a.Pane)
+				a.TaskID, a.Reason, l.promptsFor(a.Pane), a.Pane)
 			err = l.retire(ctx, a)
 		default:
 			err = fmt.Errorf("unknown action %q", a.Kind)
@@ -326,6 +340,7 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 	l.bindings = append(l.bindings, decide.Binding{
 		TaskID:     row.ID,
 		Pane:       pane,
+		Kind:       decide.KindWorker,
 		PromptedAt: l.now(),
 		Prompts:    1,
 	})
@@ -334,6 +349,69 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 	// The reservation is spent the moment the binding exists.
 	l.unreserve(row.ID)
 	return err
+}
+
+// spawnVerifier brings up a VERIFIER for a task one of this dispatcher's own
+// workers submitted: a fresh pane, the same spawn path, its own binding with
+// the verifier's kind on it.
+//
+// The verifier's own condition is what keeps this inside the boundary. It
+// rereads, reruns and reports; it never approves and never rejects, and this
+// binary still runs no review verb of its own. Delegating the reading is not
+// delegating the judgment.
+func (l *Loop) spawnVerifier(ctx context.Context, a decide.Action) error {
+	row, ok := l.row(a.TaskID)
+	if !ok {
+		return fmt.Errorf("no board row to verify")
+	}
+	profile, err := l.Config.VerifyProfile()
+	if err != nil {
+		return err
+	}
+	pane, err := l.Spawn.Run(ctx, spawn.Request{
+		Name:     verifierName(row.Seq),
+		BasePane: l.BasePane,
+		Cwd:      row.Project,
+		Profile:  profile,
+		Goal:     spawn.VerifierGoal(row.Seq),
+	})
+	if pane == "" {
+		// Nothing came up, so the submission has not had its verifier and
+		// the next tick may try again.
+		return err
+	}
+	l.mu.Lock()
+	l.bindings = append(l.bindings, decide.Binding{
+		TaskID:     row.ID,
+		Pane:       pane,
+		Kind:       decide.KindVerifier,
+		PromptedAt: l.now(),
+		Prompts:    1,
+	})
+	// The worker's binding is where "this submission has had its verifier"
+	// is remembered, and Rearm is what clears it.
+	for i := range l.bindings {
+		if l.bindings[i].TaskID == row.ID && !l.bindings[i].IsVerifier() {
+			l.bindings[i].Verified = true
+		}
+	}
+	l.saveLocked()
+	l.mu.Unlock()
+	return err
+}
+
+// rearm forgets the announcement and the verification on a task's worker
+// binding, because the submission they belonged to is no longer in review.
+func (l *Loop) rearm(taskID string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i := range l.bindings {
+		if l.bindings[i].TaskID == taskID && !l.bindings[i].IsVerifier() {
+			l.bindings[i].Notified = false
+			l.bindings[i].Verified = false
+		}
+	}
+	l.saveLocked()
 }
 
 // prompt is the backstop, and it carries a nudge rather than the goal: the
@@ -390,16 +468,19 @@ func (l *Loop) notify(ctx context.Context, a decide.Action) error {
 // board's own, and a second writer racing them is the bug, not a safety net.
 func (l *Loop) retire(ctx context.Context, a decide.Action) error {
 	err := l.Spawn.Retire(ctx, a.Pane)
-	l.drop(a.TaskID)
+	l.drop(a.Pane)
 	return err
 }
 
-func (l *Loop) drop(taskID string) {
+// drop forgets one binding, by the pane it names. The pane is what a binding
+// is unique by: a task in review can hold a worker's binding and its
+// verifier's at once, and dropping by task would take both.
+func (l *Loop) drop(pane string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	kept := l.bindings[:0]
 	for _, b := range l.bindings {
-		if b.TaskID != taskID {
+		if b.Pane != pane {
 			kept = append(kept, b)
 		}
 	}
@@ -407,11 +488,11 @@ func (l *Loop) drop(taskID string) {
 	l.saveLocked()
 }
 
-func (l *Loop) promptsFor(taskID string) int {
+func (l *Loop) promptsFor(pane string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for _, b := range l.bindings {
-		if b.TaskID == taskID {
+		if b.Pane == pane {
 			return b.Prompts
 		}
 	}
@@ -452,6 +533,11 @@ func (l *Loop) taskNumber(taskID string) string {
 // [a-z][a-z0-9_-]{0,31} and to be unique among live agents; one worker per
 // task number is both.
 func workerName(seq int) string { return fmt.Sprintf("hdis-%d", seq) }
+
+// verifierName is the agent name a verifier registers under, apart from the
+// worker's: herdr requires the name to be unique among live agents, and both
+// panes are live at once.
+func verifierName(seq int) string { return fmt.Sprintf("hdis-v-%d", seq) }
 
 func (l *Loop) now() time.Time {
 	if l.Now != nil {

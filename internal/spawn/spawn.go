@@ -76,6 +76,23 @@ func PointerGoal(seq int) string {
 		"htask task submit %d with a report and evidence.", seq, seq, seq, seq)
 }
 
+// VerifierGoal composes the /goal condition a VERIFIER boots with. It is a
+// pointer for the same reason a worker's is: the line is typed into the pane,
+// and nothing long survives it.
+//
+// What it points at is the whole of the verifier's job — reread what was
+// submitted, run the project's gate with nothing cached, check the report
+// against the code, prove the gate can still fail, and send what it found.
+// The last sentence is the boundary this binary does not cross: verification
+// is delegated to a worker, judgment is not delegated at all.
+func VerifierGoal(seq int) string {
+	return fmt.Sprintf("verify task %d: read its report with htask task get %d, run "+
+		"go clean -testcache then the gate CLAUDE.md names, check two report claims against "+
+		"the code, make one COMPILING mutation and show it caught, send findings with "+
+		"hmail send human, or htask task note %d if hmail is gone. "+
+		"Never run task approve or task reject: you report, the operator judges.", seq, seq, seq)
+}
+
 // TypedLineBudget bounds the whole line herdr types into a worker's pane.
 //
 // Everything on that line is now hdis's own choice, so the whole line is what

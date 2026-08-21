@@ -45,6 +45,17 @@ type Profile struct {
 	Args     []string `json:"args"`
 }
 
+// Verify is the verification lane's own policy: whether a task that reaches
+// review earns a VERIFIER worker, and which profile that worker launches
+// with. The lane is execution policy like every other profile choice here,
+// and the board carries no trace of it.
+type Verify struct {
+	Enabled bool `json:"enabled"`
+	// Profile is the name of one of Profiles. It is the verifier's agent
+	// kind, model and effort, in the same shape a worker's is.
+	Profile string `json:"profile"`
+}
+
 // Config is the whole document: named profiles, the one every project gets
 // unless it says otherwise, and the projects that say otherwise.
 type Config struct {
@@ -54,6 +65,8 @@ type Config struct {
 	// Proxy is the codex provider's launcher binary, resolved off PATH
 	// unless it is a path. Empty means DefaultProxy.
 	Proxy string `json:"proxy"`
+	// Verify is the verification lane: off unless the document turns it on.
+	Verify Verify `json:"verify"`
 	// Pane is the pane worker panes are split off, for a daemon that was
 	// not started inside one and was given no -pane. Without it, and
 	// without either of those, nothing can be spawned at all.
@@ -99,6 +112,14 @@ func Parse(b []byte) (Config, error) {
 	if _, ok := c.Profiles[c.Default]; !ok {
 		return Config{}, fmt.Errorf("hdis config: default profile %q is not defined", c.Default)
 	}
+	if c.Verify.Enabled {
+		if c.Verify.Profile == "" {
+			return Config{}, fmt.Errorf("hdis config: the verification lane is on and names no profile")
+		}
+		if _, ok := c.Profiles[c.Verify.Profile]; !ok {
+			return Config{}, fmt.Errorf("hdis config: the verification lane names profile %q, which is not defined", c.Verify.Profile)
+		}
+	}
 	for project, name := range c.Projects {
 		if _, ok := c.Profiles[name]; !ok {
 			return Config{}, fmt.Errorf("hdis config: project %q names profile %q, which is not defined", project, name)
@@ -130,6 +151,20 @@ func (c Config) ProfileFor(project string) (Profile, error) {
 	p, ok := c.Profiles[name]
 	if !ok {
 		return Profile{}, fmt.Errorf("hdis config: profile %q is not defined", name)
+	}
+	return p, nil
+}
+
+// VerifyProfile resolves the profile a verifier launches with. A lane that is
+// off has none, and asking for one is the caller's mistake rather than a
+// default to guess at.
+func (c Config) VerifyProfile() (Profile, error) {
+	if !c.Verify.Enabled {
+		return Profile{}, fmt.Errorf("hdis config: the verification lane is off")
+	}
+	p, ok := c.Profiles[c.Verify.Profile]
+	if !ok {
+		return Profile{}, fmt.Errorf("hdis config: the verifier profile %q is not defined", c.Verify.Profile)
 	}
 	return p, nil
 }

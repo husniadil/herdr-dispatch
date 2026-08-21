@@ -614,3 +614,37 @@ func TestDoctorSaysWhereTheBindingsLiveAndHowManyCameBack(t *testing.T) {
 		t.Errorf("doctor reports %d workers, want the re-adopted one", rep.Workers)
 	}
 }
+
+// doctorOf runs the doctor verb through the daemon and decodes its report.
+func doctorOf(t *testing.T, d *Daemon) DoctorReport {
+	t.Helper()
+	raw, err := call(t, d, protocol.Request{Verb: "doctor"})
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+	var rep DoctorReport
+	if err := json.Unmarshal(raw, &rep); err != nil {
+		t.Fatalf("doctor json: %v", err)
+	}
+	return rep
+}
+
+// Doctor says whether the verification lane is on, and with which profile.
+// An operator asking why a submission earned no verifier reads it here.
+func TestDoctorReportsTheVerificationLane(t *testing.T) {
+	d, _ := newDaemon(t)
+	rep := doctorOf(t, d)
+	if rep.Verify.Enabled {
+		t.Fatalf("the lane reads as on: %+v", rep.Verify)
+	}
+
+	cfg, err := config.Parse([]byte(`{"default":"w","profiles":{"w":{"provider":"claude"},"v":{"provider":"claude","model":"sonnet"}},"verify":{"enabled":true,"profile":"v"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Loop.Config = cfg
+	rep = doctorOf(t, d)
+	if !rep.Verify.Enabled || rep.Verify.Profile != "v" {
+		t.Fatalf("the lane reads as %+v", rep.Verify)
+	}
+}

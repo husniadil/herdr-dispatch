@@ -288,6 +288,15 @@ type DoctorReport struct {
 	Bindings  string      `json:"bindings"`
 	Readopted int         `json:"readopted"`
 	Board     BoardHealth `json:"board"`
+	// Verify is the verification lane: whether a submission earns a
+	// verifier, and which profile that verifier launches with.
+	Verify VerifyHealth `json:"verify"`
+}
+
+// VerifyHealth is the verification lane as doctor reports it.
+type VerifyHealth struct {
+	Enabled bool   `json:"enabled"`
+	Profile string `json:"profile,omitempty"`
 }
 
 // BoardHealth is the board's own report of itself, or why it gave none.
@@ -314,6 +323,10 @@ func (d *Daemon) doctor(ctx context.Context) (DoctorReport, error) {
 		Pending:    len(d.Loop.Pending()),
 		Bindings:   d.Loop.BindingsPath(),
 		Readopted:  d.Loop.Readopted(),
+		Verify: VerifyHealth{
+			Enabled: d.Loop.Config.Verify.Enabled,
+			Profile: d.Loop.Config.Verify.Profile,
+		},
 	}
 	board, err := d.Board.Doctor(ctx)
 	if err != nil {

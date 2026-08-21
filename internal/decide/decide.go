@@ -29,6 +29,21 @@ const (
 	// GiveUp drops the binding and reports that the goal was delivered
 	// MaxPrompts times and never claimed. The pane is retired with it.
 	GiveUp Kind = "giveup"
+	// SpawnVerifier brings up a VERIFIER worker for a task this dispatcher's
+	// own worker submitted: a fresh pane, the same spawn path, its own
+	// binding. It reports findings and never approves or rejects.
+	SpawnVerifier Kind = "spawn_verifier"
+	// Rearm clears the announcement and the verification on a worker's
+	// binding, because its task came back out of review. If it is submitted
+	// again, both are due again.
+	Rearm Kind = "rearm"
+)
+
+// The kinds of worker a binding may name. A binding written before the
+// verification lane existed carries no kind, and reads as a worker.
+const (
+	KindWorker   = "worker"
+	KindVerifier = "verifier"
 )
 
 // Reasons carried on Prompt and Retire actions, for the operator's log.
@@ -37,6 +52,8 @@ const (
 	ReasonStalled   = "worker went idle without submitting"
 	ReasonTakenOver = "task was claimed by another pane"
 	ReasonTerminal  = "task is terminal"
+	ReasonVerified  = "verifier went idle, its findings are sent or they are not coming"
+	ReasonSettled   = "the submission it was checking has left review"
 )
 
 // Task is the slice of a board row the core decides on. ClaimedBy is the
@@ -56,7 +73,19 @@ type Binding struct {
 	PromptedAt time.Time
 	Prompts    int
 	Notified   bool
+	// Kind is which lane the pane was brought up for: KindWorker does the
+	// task, KindVerifier checks what a worker submitted. Empty is a worker,
+	// so a binding written before the lane existed reads as what it was.
+	Kind string
+	// Verified is set on a WORKER's binding when a verifier has been
+	// brought up for the submission it is currently holding. It is what
+	// makes one submission earn one verifier, and Rearm clears it when the
+	// task leaves review.
+	Verified bool
 }
+
+// IsVerifier reports whether the binding names a verifier pane.
+func (b Binding) IsVerifier() bool { return b.Kind == KindVerifier }
 
 // Snapshot is everything a tick may know. Agents maps pane id to Herdr's
 // agent_status for every LIVE pane, whether or not an agent is attached to
@@ -76,6 +105,10 @@ type Policy struct {
 	MaxWorkers   int
 	ClaimTimeout time.Duration
 	MaxPrompts   int
+	// Verify turns the verification lane on. Off, a task reaching review is
+	// announced and nothing else, which is what this dispatcher did before
+	// the lane existed.
+	Verify bool
 }
 
 // Action is one thing for an adapter to do, in the order returned.
@@ -92,6 +125,15 @@ func Decide(s Snapshot, p Policy) []Action {
 	var out []Action
 	live := 0
 
+	// A task that already has a verifier pane up gets no second one, whatever
+	// the worker's binding remembers.
+	verified := make(map[string]bool, len(s.Bindings))
+	for _, b := range s.Bindings {
+		if b.IsVerifier() {
+			verified[b.TaskID] = true
+		}
+	}
+
 	for _, b := range s.Bindings {
 		t, known := s.Tasks[b.TaskID]
 		status, paneAlive := s.Agents[b.Pane]
@@ -105,6 +147,23 @@ func Decide(s Snapshot, p Policy) []Action {
 			out = append(out, Action{Kind: Unbind, TaskID: b.TaskID, Pane: b.Pane})
 			continue
 		}
+
+		if b.IsVerifier() {
+			// A verifier holds no claim on the board, is never nudged, and
+			// announces nothing. It ends when the submission it was reading
+			// is settled, or when it has gone quiet with the reading done.
+			if known && t.Status != "review" {
+				out = append(out, Action{Kind: Retire, TaskID: b.TaskID, Pane: b.Pane, Reason: ReasonSettled})
+				continue
+			}
+			if status == "idle" && s.Now.Sub(b.PromptedAt) >= p.ClaimTimeout {
+				out = append(out, Action{Kind: Retire, TaskID: b.TaskID, Pane: b.Pane, Reason: ReasonVerified})
+				continue
+			}
+			live++
+			continue
+		}
+
 		if known && t.ClaimedBy != "" && t.ClaimedBy != b.Pane {
 			out = append(out, Action{Kind: Retire, TaskID: b.TaskID, Pane: b.Pane, Reason: ReasonTakenOver})
 			continue
@@ -116,7 +175,18 @@ func Decide(s Snapshot, p Policy) []Action {
 			if !b.Notified {
 				out = append(out, Action{Kind: Notify, TaskID: b.TaskID, Pane: b.Pane})
 			}
+			if p.Verify && !b.Verified && !verified[b.TaskID] {
+				out = append(out, Action{Kind: SpawnVerifier, TaskID: b.TaskID})
+				verified[b.TaskID] = true
+				live++
+			}
 			continue
+		}
+		// Out of review with an announcement or a verification still on the
+		// binding: the submission those belonged to is gone, and a new one
+		// earns both again.
+		if known && (b.Notified || b.Verified) {
+			out = append(out, Action{Kind: Rearm, TaskID: b.TaskID, Pane: b.Pane})
 		}
 		if known && t.Status == "todo" {
 			if s.Now.Sub(b.PromptedAt) < p.ClaimTimeout {
