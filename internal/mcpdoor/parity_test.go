@@ -1,0 +1,382 @@
+package mcpdoor
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"log"
+	"os"
+	"sort"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/husniadil/herdr-dispatch/internal/cli"
+	"github.com/husniadil/herdr-dispatch/internal/codes"
+	"github.com/husniadil/herdr-dispatch/internal/config"
+	"github.com/husniadil/herdr-dispatch/internal/daemon"
+	"github.com/husniadil/herdr-dispatch/internal/decide"
+	"github.com/husniadil/herdr-dispatch/internal/fake"
+	"github.com/husniadil/herdr-dispatch/internal/herdr"
+	"github.com/husniadil/herdr-dispatch/internal/htask"
+	"github.com/husniadil/herdr-dispatch/internal/loop"
+	"github.com/husniadil/herdr-dispatch/internal/protocol"
+	"github.com/husniadil/herdr-dispatch/internal/proxy"
+	"github.com/husniadil/herdr-dispatch/internal/spawn"
+	"github.com/husniadil/herdr-dispatch/internal/verbs"
+)
+
+// pinnedTools is the tool list this door publishes. Adding, renaming or
+// removing one is a deliberate change to a surface other harnesses call:
+// it moves this list in the same commit, and it is a breaking change.
+var pinnedTools = []string{
+	"hdis_doctor",
+	"hdis_dispatch",
+	"hdis_status",
+}
+
+// inProcessDaemon is a real daemon over a fake board and a fake herdr. No
+// socket: both doors are tested against the same Handle the socket serves.
+func inProcessDaemon(t *testing.T) (*daemon.Daemon, Caller) {
+	t.Helper()
+	f := fake.New(t)
+	f.Bin(t, "htask", `case "$1 $2" in
+"task list") echo '{"tasks":[{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"todo"}],"count":1}' ;;
+"task get") echo '{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"todo"}}' ;;
+*) echo '{"version":"0.4.0","contract":"0.3","binary":"/bin/htask","socket_live":true,"herdr_reachable":true}' ;;
+esac`)
+	f.Bin(t, "herdr", `echo '{"id":"x","result":{"type":"pane_list","panes":[]}}'`)
+	t.Setenv("HERDR_PANE_ID", "wM:p1")
+
+	cfg, err := config.Parse([]byte(`{"default":"worker","profiles":{"worker":{"provider":"claude"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := &daemon.Daemon{
+		Loop: &loop.Loop{
+			Board:  &htask.Client{},
+			Herdr:  &herdr.Client{},
+			Config: cfg,
+			Policy: decide.Policy{MaxWorkers: 2, ClaimTimeout: time.Minute, MaxPrompts: 2},
+			Spawn: &spawn.Pipeline{
+				Herdr: &herdr.Client{}, Proxy: &proxy.Client{},
+				StartTimeout: time.Second, Poll: time.Second, Sleep: func(time.Duration) {},
+			},
+			BasePane: "wM:p1",
+			Log:      log.New(io.Discard, "", 0),
+		},
+		Board:    &htask.Client{},
+		Interval: time.Hour,
+		Version:  "0.1.0",
+		Log:      log.New(io.Discard, "", 0),
+	}
+	return d, func(req protocol.Request) (json.RawMessage, error) {
+		return d.Handle(context.Background(), req)
+	}
+}
+
+// session connects an in-memory MCP client to the door.
+func session(t *testing.T, call Caller) *mcp.ClientSession {
+	t.Helper()
+	srv := New("0.1.0", call)
+	ct, st := mcp.NewInMemoryTransports()
+	ctx := context.Background()
+	if _, err := srv.Connect(ctx, st, nil); err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	sess, err := mcp.NewClient(&mcp.Implementation{Name: "parity-test", Version: "0"}, nil).Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	t.Cleanup(func() { sess.Close() })
+	return sess
+}
+
+func text(res *mcp.CallToolResult) string {
+	for _, c := range res.Content {
+		if tc, ok := c.(*mcp.TextContent); ok {
+			return tc.Text
+		}
+	}
+	return ""
+}
+
+// The list a caller on another harness binds to. It moves only on purpose.
+func TestTheServedToolListIsPinned(t *testing.T) {
+	_, call := inProcessDaemon(t)
+	sess := session(t, call)
+
+	tools, err := sess.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	var got []string
+	for _, tl := range tools.Tools {
+		got = append(got, tl.Name)
+	}
+	sort.Strings(got)
+	want := append([]string(nil), pinnedTools...)
+	sort.Strings(want)
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("the served tool list moved.\n got: %v\nwant: %v\nIf this is intended, move pinnedTools in the same commit.", got, want)
+	}
+}
+
+// The parity guard: every verb reaches both doors, under the same name, and
+// neither door carries one the other does not.
+func TestNeitherDoorCarriesAVerbTheOtherLacks(t *testing.T) {
+	_, call := inProcessDaemon(t)
+	sess := session(t, call)
+	tools, err := sess.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+
+	served := map[string]*mcp.Tool{}
+	for _, tl := range tools.Tools {
+		served[tl.Name] = tl
+	}
+	for _, v := range verbs.All {
+		if _, ok := verbs.ByCLI(v.CLI); !ok {
+			t.Errorf("verb %q has no CLI subcommand", v.Name)
+		}
+		tl, ok := served[v.MCP]
+		if !ok {
+			t.Errorf("verb %q is a CLI subcommand and no MCP tool", v.Name)
+			continue
+		}
+		if !strings.HasPrefix(tl.Name, verbs.ToolPrefix+"_") {
+			t.Errorf("tool %q is not named %s_<verb>", tl.Name, verbs.ToolPrefix)
+		}
+		delete(served, v.MCP)
+	}
+	for name := range served {
+		t.Errorf("tool %q is served and is no verb in the table", name)
+	}
+}
+
+// Same arguments on both doors: the schema is rendered from the same Args the
+// CLI reads its positionals from, and nothing else may appear in it.
+func TestTheSchemaDeclaresExactlyWhatTheCLITakes(t *testing.T) {
+	_, call := inProcessDaemon(t)
+	sess := session(t, call)
+	tools, err := sess.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+
+	byName := map[string]*mcp.Tool{}
+	for _, tl := range tools.Tools {
+		byName[tl.Name] = tl
+	}
+	for _, v := range verbs.All {
+		raw, err := json.Marshal(byName[v.MCP].InputSchema)
+		if err != nil {
+			t.Fatalf("schema for %q: %v", v.MCP, err)
+		}
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+			Required   []string                   `json:"required"`
+		}
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			t.Fatalf("schema for %q: %v", v.MCP, err)
+		}
+		if len(schema.Properties) != len(v.Args) {
+			t.Errorf("tool %q declares %d arguments and the CLI takes %d", v.MCP, len(schema.Properties), len(v.Args))
+		}
+		for _, a := range v.Args {
+			if _, ok := schema.Properties[a.Name]; !ok {
+				t.Errorf("tool %q is missing the %q argument the CLI takes", v.MCP, a.Name)
+			}
+			required := false
+			for _, name := range schema.Required {
+				required = required || name == a.Name
+			}
+			if a.Required != required {
+				t.Errorf("tool %q requires %q: %t, and the CLI requires it: %t", v.MCP, a.Name, required, a.Required)
+			}
+		}
+	}
+}
+
+// Both doors build the same request out of the same call. This is what makes
+// one verb table a guarantee rather than a convention.
+func TestBothDoorsBuildTheSameRequest(t *testing.T) {
+	cases := []struct {
+		verb string
+		argv []string
+		args map[string]any
+	}{
+		{"doctor", nil, map[string]any{}},
+		{"status", nil, map[string]any{}},
+		{"dispatch", []string{"7"}, map[string]any{"task": "7"}},
+	}
+	for _, tc := range cases {
+		v, ok := verbs.ByName(tc.verb)
+		if !ok {
+			t.Fatalf("no verb named %q", tc.verb)
+		}
+
+		fromCLI, _, err := cli.Request(v, tc.argv)
+		if err != nil {
+			t.Fatalf("cli %s: %v", tc.verb, err)
+		}
+
+		var fromMCP protocol.Request
+		catch := func(req protocol.Request) (json.RawMessage, error) {
+			fromMCP = req
+			return json.RawMessage(`{}`), nil
+		}
+		sess := session(t, catch)
+		if _, err := sess.CallTool(context.Background(), &mcp.CallToolParams{Name: v.MCP, Arguments: tc.args}); err != nil {
+			t.Fatalf("mcp %s: %v", tc.verb, err)
+		}
+
+		if fromCLI.Verb != fromMCP.Verb {
+			t.Errorf("%s: the cli asks for %q and the mcp door for %q", tc.verb, fromCLI.Verb, fromMCP.Verb)
+		}
+		cliArgs, _ := json.Marshal(fromCLI.Args)
+		mcpArgs, _ := json.Marshal(fromMCP.Args)
+		if string(cliArgs) != string(mcpArgs) {
+			t.Errorf("%s: the cli sends %s and the mcp door %s", tc.verb, cliArgs, mcpArgs)
+		}
+		if fromCLI.Pane != fromMCP.Pane {
+			t.Errorf("%s: the doors derive different panes, %q and %q", tc.verb, fromCLI.Pane, fromMCP.Pane)
+		}
+		if fromCLI.Door != cli.Door || fromMCP.Door != Door {
+			t.Errorf("%s: the doors do not name themselves: %q and %q", tc.verb, fromCLI.Door, fromMCP.Door)
+		}
+	}
+}
+
+// The same document reaches both callers: what --json prints is what the tool
+// hands back, byte for byte.
+func TestBothDoorsHandBackTheSameDocument(t *testing.T) {
+	_, call := inProcessDaemon(t)
+
+	fromCLI, err := call(protocol.Request{Verb: "status", Args: map[string]any{}})
+	if err != nil {
+		t.Fatalf("cli status: %v", err)
+	}
+	var printed strings.Builder
+	if err := cli.Write("status", fromCLI, true, &printed); err != nil {
+		t.Fatalf("cli render: %v", err)
+	}
+
+	sess := session(t, call)
+	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{Name: "hdis_status"})
+	if err != nil {
+		t.Fatalf("mcp status: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("mcp status: %s", text(res))
+	}
+	if got, want := text(res), strings.TrimSpace(printed.String()); got != want {
+		t.Fatalf("the doors disagree:\nmcp: %s\ncli: %s", got, want)
+	}
+}
+
+// A refusal is a tool error carrying the daemon's own code, never a protocol
+// error the caller cannot read.
+func TestARefusalReachesTheCallerAsAToolErrorWithItsCode(t *testing.T) {
+	d, call := inProcessDaemon(t)
+	d.Loop.BasePane = ""
+	sess := session(t, call)
+
+	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "hdis_dispatch", Arguments: map[string]any{"task": "7"}})
+	if err != nil {
+		t.Fatalf("CallTool returned a protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("a dispatch with no base pane succeeded: %s", text(res))
+	}
+	var body struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(text(res)), &body); err != nil {
+		t.Fatalf("error body: %v", err)
+	}
+	if body.Error.Code != string(codes.NoBasePane) {
+		t.Fatalf("error body: %+v", body.Error)
+	}
+	if strings.Contains(body.Error.Message, string(codes.NoBasePane)) {
+		t.Errorf("the message repeats the code: %q", body.Error.Message)
+	}
+}
+
+// The door holds itself to the schema it published: an argument no verb
+// declares is refused rather than dropped in silence.
+func TestTheDoorRefusesAnArgumentItsSchemaForbids(t *testing.T) {
+	_, call := inProcessDaemon(t)
+	sess := session(t, call)
+
+	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "hdis_dispatch", Arguments: map[string]any{"task": "7", "profile": "routed"}})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("the door took an argument it never declared: %s", text(res))
+	}
+	if !strings.Contains(text(res), string(codes.Invalid)) {
+		t.Fatalf("refusal: %s", text(res))
+	}
+}
+
+func TestARequiredArgumentIsRefusedWhenItIsMissing(t *testing.T) {
+	_, call := inProcessDaemon(t)
+	sess := session(t, call)
+
+	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{Name: "hdis_dispatch"})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError || !strings.Contains(text(res), string(codes.Invalid)) {
+		t.Fatalf("dispatch with no task: %s", text(res))
+	}
+}
+
+// The registration name is the repository an operator wires in; the tool
+// prefix is the binary's short name. They are different things.
+func TestTheServerRegistersUnderTheRepositoryAndPrefixesToolsWithTheShortName(t *testing.T) {
+	if ServerName == verbs.ToolPrefix {
+		t.Fatal("the registration name and the tool prefix have become one constant")
+	}
+	if ServerName != "herdr-dispatch" || verbs.ToolPrefix != "hdis" {
+		t.Fatalf("registered as %q with tools prefixed %q", ServerName, verbs.ToolPrefix)
+	}
+	for _, want := range []string{"hdis_dispatch", "hdis_status", "review", "claims"} {
+		if !strings.Contains(Instructions, want) {
+			t.Errorf("the instructions do not mention %q", want)
+		}
+	}
+}
+
+// A door is spawned per client session, so it must take nothing from the
+// process that spawned it beyond the pane it was told about.
+func TestTheDoorKeepsNoStateOfItsOwn(t *testing.T) {
+	_, call := inProcessDaemon(t)
+	first := New("0.1.0", call)
+	second := New("0.1.0", call)
+	if first == second {
+		t.Fatal("two sessions share one server")
+	}
+	os.Unsetenv("HERDR_PANE_ID")
+	var got protocol.Request
+	sess := session(t, func(req protocol.Request) (json.RawMessage, error) {
+		got = req
+		return json.RawMessage(`{}`), nil
+	})
+	if _, err := sess.CallTool(context.Background(), &mcp.CallToolParams{Name: "hdis_status"}); err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if got.Pane != "" {
+		t.Fatalf("a door outside a pane claimed pane %q", got.Pane)
+	}
+}

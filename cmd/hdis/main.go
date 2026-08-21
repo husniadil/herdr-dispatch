@@ -9,26 +9,23 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
-	"github.com/husniadil/herdr-dispatch/internal/client"
-	"github.com/husniadil/herdr-dispatch/internal/codes"
+	"github.com/husniadil/herdr-dispatch/internal/cli"
 	"github.com/husniadil/herdr-dispatch/internal/config"
 	"github.com/husniadil/herdr-dispatch/internal/daemon"
 	"github.com/husniadil/herdr-dispatch/internal/decide"
 	"github.com/husniadil/herdr-dispatch/internal/herdr"
 	"github.com/husniadil/herdr-dispatch/internal/htask"
 	"github.com/husniadil/herdr-dispatch/internal/loop"
-	"github.com/husniadil/herdr-dispatch/internal/protocol"
+	"github.com/husniadil/herdr-dispatch/internal/mcpdoor"
 	"github.com/husniadil/herdr-dispatch/internal/proxy"
 	"github.com/husniadil/herdr-dispatch/internal/spawn"
 	"github.com/husniadil/herdr-dispatch/internal/verbs"
@@ -42,7 +39,7 @@ func main() {
 	log.SetPrefix("hdis: ")
 
 	if len(os.Args) < 2 {
-		fmt.Fprint(os.Stderr, usage())
+		fmt.Fprint(os.Stderr, cli.Usage())
 		os.Exit(2)
 	}
 	switch os.Args[1] {
@@ -50,138 +47,25 @@ func main() {
 		if err := serve(os.Args[2:]); err != nil {
 			log.Fatal(err)
 		}
+	case "mcp":
+		if err := mcpdoor.Serve(context.Background(), Version, nil); err != nil {
+			log.Fatal(err)
+		}
 	case "version":
 		fmt.Println(Version)
 	case "-h", "--help", "help":
-		fmt.Print(usage())
+		fmt.Print(cli.Usage())
 	default:
 		v, ok := verbs.ByCLI(os.Args[1:2])
 		if !ok {
-			fmt.Fprintf(os.Stderr, "hdis: unknown command %q\n\n%s", os.Args[1], usage())
+			fmt.Fprintf(os.Stderr, "hdis: unknown command %q\n\n%s", os.Args[1], cli.Usage())
 			os.Exit(2)
 		}
-		if err := ask(v, os.Args[2:]); err != nil {
+		if err := cli.Run(v, os.Args[2:], os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "hdis: %s\n", err)
 			os.Exit(1)
 		}
 	}
-}
-
-func usage() string {
-	var b strings.Builder
-	b.WriteString("hdis — the dispatcher for the htask board.\n\nUsage:\n")
-	for _, v := range verbs.All {
-		line := "  hdis " + strings.Join(v.CLI, " ")
-		for _, a := range v.Args {
-			if a.Positional {
-				line += " <" + a.Name + ">"
-			}
-		}
-		b.WriteString(fmt.Sprintf("  %-22s %s\n", strings.TrimSpace(line), v.Short))
-	}
-	b.WriteString("  daemon                 own the tick and answer both doors (`run` is the same)\n")
-	b.WriteString("  version                print the version\n")
-	b.WriteString("\nRun `hdis daemon -h` for the dispatcher's knobs.\n")
-	return b.String()
-}
-
-// ask is the CLI door: build the same request the MCP door builds, send it to
-// the daemon, and print what comes back.
-func ask(v verbs.Verb, argv []string) error {
-	fs := flag.NewFlagSet("hdis "+strings.Join(v.CLI, " "), flag.ExitOnError)
-	asJSON := fs.Bool("json", false, "print the daemon's answer as it came")
-	if err := fs.Parse(argv); err != nil {
-		return err
-	}
-
-	req := protocol.Request{
-		Verb: v.Name,
-		Args: map[string]any{},
-		Pane: os.Getenv("HERDR_PANE_ID"),
-		Door: "cli",
-	}
-	rest := fs.Args()
-	for _, a := range v.Args {
-		if !a.Positional {
-			continue
-		}
-		if len(rest) == 0 {
-			if a.Required {
-				return codes.Errorf(codes.Invalid, "%s needs <%s>", strings.Join(v.CLI, " "), a.Name)
-			}
-			continue
-		}
-		req.Args[a.Name], rest = rest[0], rest[1:]
-	}
-	if len(rest) > 0 {
-		return codes.Errorf(codes.Invalid, "%s takes no argument %q", strings.Join(v.CLI, " "), rest[0])
-	}
-
-	c := &client.Client{}
-	result, err := c.Call(req)
-	if err != nil {
-		return err
-	}
-	if *asJSON {
-		fmt.Println(string(result))
-		return nil
-	}
-	return render(v.Name, result)
-}
-
-func render(verb string, result json.RawMessage) error {
-	switch verb {
-	case "doctor":
-		var rep daemon.DoctorReport
-		if err := json.Unmarshal(result, &rep); err != nil {
-			return err
-		}
-		fmt.Printf("hdis %s on %s\n", rep.Version, rep.Socket)
-		fmt.Printf("  base pane   %s\n", orNone(rep.BasePane, "none: dispatch will refuse"))
-		fmt.Printf("  workers     %d live, %d reserved, max %d\n", rep.Workers, rep.Pending, rep.MaxWorkers)
-		fmt.Printf("  tick        every %s\n", rep.Interval)
-		if rep.Board.Error != "" {
-			fmt.Printf("  board       unreachable: %s\n", rep.Board.Error)
-			return nil
-		}
-		fmt.Printf("  board       htask %s (contract %s), herdr reachable: %t\n",
-			rep.Board.Version, rep.Board.Contract, rep.Board.HerdrReachable)
-	case "dispatch":
-		var res loop.Reservation
-		if err := json.Unmarshal(result, &res); err != nil {
-			return err
-		}
-		fmt.Printf("task #%d %q is reserved; its worker comes up on the next tick\n", res.Seq, res.Title)
-	case "status":
-		var st loop.Status
-		if err := json.Unmarshal(result, &st); err != nil {
-			return err
-		}
-		if len(st.Workers) == 0 && len(st.Pending) == 0 {
-			fmt.Printf("nothing is being driven (max %d workers, base pane %s)\n",
-				st.MaxWorkers, orNone(st.BasePane, "none"))
-			return nil
-		}
-		for _, w := range st.Workers {
-			state := w.AgentStatus
-			if !w.PaneAlive {
-				state = "pane gone"
-			}
-			fmt.Printf("#%-4d %-10s %-9s %s prompts=%d notified=%t %s\n",
-				w.Seq, w.Pane, state, w.PromptedAt.Format(time.RFC3339), w.Prompts, w.Notified, w.Title)
-		}
-		for _, id := range st.Pending {
-			fmt.Printf("%-5s %-10s reserved, not yet spawned\n", "", id)
-		}
-	}
-	return nil
-}
-
-func orNone(s, none string) string {
-	if s == "" {
-		return none
-	}
-	return s
 }
 
 // serve is the daemon: it owns the tick and the bindings, and answers the
