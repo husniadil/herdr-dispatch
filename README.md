@@ -309,7 +309,8 @@ VERIFIER worker: a fresh pane, the same spawn path, a binding of its own with
 a verifier kind on it. Its condition tells it to reread the report with
 `htask task get`, run the gate with nothing cached, check the report's claims
 against the code, prove the gate still bites, and send what it found with
-`hmail send human` — and never to run `task approve` or `task reject`. One
+`hmail send human`, or a board note when hmail is not installed — and never to
+run `task approve` or `task reject`. One
 submission earns one verifier; a re-submission after a rejection earns
 another. Verification is delegated. Judgment is not: a verifier reports, the
 operator decides, and the board's review gate is still the only thing that

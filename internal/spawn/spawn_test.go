@@ -784,7 +784,7 @@ func TestTheVerifierGoalForbidsApprovingAndRejecting(t *testing.T) {
 // read from, and how findings leave. None of the criteria travel on it.
 func TestTheVerifierGoalPointsAtTheBoardAndAtHmail(t *testing.T) {
 	goal := VerifierGoal(23)
-	for _, want := range []string{"htask task get 23", "go clean -testcache", "hmail send", "htask task note 23"} {
+	for _, want := range []string{"htask task get 23", "go clean -testcache", "hmail send", "htask note add for task 23"} {
 		if !strings.Contains(goal, want) {
 			t.Fatalf("the verifier goal does not carry %q: %s", want, goal)
 		}

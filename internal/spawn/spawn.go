@@ -85,11 +85,20 @@ func PointerGoal(seq int) string {
 // against the code, prove the gate can still fail, and send what it found.
 // The last sentence is the boundary this binary does not cross: verification
 // is delegated to a worker, judgment is not delegated at all.
+//
+// The fallback is `htask note add` because there is no `htask task note`:
+// htask carries `task release`, which takes a note and hands the task back,
+// and a separate `note` verb group for the board. A verifier holds nothing to
+// hand back, so the board note is the one that fits.
+//
+// Rendered with a codex settings path and a profile of --agent claude --model
+// sonnet --effort high, the whole typed line is 477 of the 512 budgeted for a
+// two-digit task; TestTheVerifierLineFitsTheTypedBudget holds it there.
 func VerifierGoal(seq int) string {
-	return fmt.Sprintf("verify task %d: read its report with htask task get %d, run "+
-		"go clean -testcache then the gate CLAUDE.md names, check two report claims against "+
-		"the code, make one COMPILING mutation and show it caught, send findings with "+
-		"hmail send human, or htask task note %d if hmail is gone. "+
+	return fmt.Sprintf("verify task %d: read its report: htask task get %d, run "+
+		"go clean -testcache then the gate CLAUDE.md names, check two claims against the "+
+		"code, make one COMPILING mutation, show it caught, send findings with "+
+		"hmail send human, else htask note add for task %d. "+
 		"Never run task approve or task reject: you report, the operator judges.", seq, seq, seq)
 }
 
