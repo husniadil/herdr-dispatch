@@ -15,8 +15,9 @@ const Name = "hdis"
 const EnvPrefix = "HDIS_"
 
 // StateDir is HDIS_STATE_DIR, else ${XDG_STATE_HOME:-~/.local/state}/hdis.
-// The socket and the lock live there; nothing else does, because the
-// bindings are the dispatcher's only state and they stay in memory.
+// The socket, the lock and the log of a daemon nobody is watching live
+// there. No board fact does: the bindings are the dispatcher's only state
+// and they stay in memory.
 func StateDir() string {
 	return dirFrom(EnvPrefix+"STATE_DIR", "XDG_STATE_HOME", filepath.Join(".local", "state"))
 }
@@ -37,6 +38,10 @@ func LockPath() string { return filepath.Join(StateDir(), Name+".lock") }
 
 // ConfigPath is <config_dir>/hdis.json, where the profiles already live.
 func ConfigPath() string { return filepath.Join(ConfigDir(), Name+".json") }
+
+// LogPath is <state_dir>/hdis.log, where a daemon started by a door writes:
+// it has no terminal, and a dispatcher nobody can hear is worse than none.
+func LogPath() string { return filepath.Join(StateDir(), Name+".log") }
 
 // EnsureStateDir creates the state dir, private to the user: the socket in
 // it is a door onto the operator's own panes.

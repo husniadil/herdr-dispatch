@@ -115,7 +115,17 @@ func (d *Daemon) Serve(ctx context.Context, ln net.Listener) error {
 }
 
 // tick runs the loop on its interval, and early whenever a dispatch asks.
+//
+// A daemon with no pane to split a worker off does not tick at all. Every
+// spawn it could reach for would fail on the same missing pane, once per
+// interval for as long as it runs, and a log of one error repeated is a log
+// nobody reads. Both doors still answer, and dispatch says why with a name.
 func (d *Daemon) tick(ctx context.Context) {
+	if d.Loop.BasePane == "" {
+		d.logf("no base pane: not ticking, and dispatch will refuse with %s", codes.NoBasePane)
+		<-ctx.Done()
+		return
+	}
 	t := time.NewTicker(d.Interval)
 	defer t.Stop()
 	for {

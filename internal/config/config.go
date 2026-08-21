@@ -54,6 +54,10 @@ type Config struct {
 	// Proxy is the codex provider's launcher binary, resolved off PATH
 	// unless it is a path. Empty means DefaultProxy.
 	Proxy string `json:"proxy"`
+	// Pane is the pane worker panes are split off, for a daemon that was
+	// not started inside one and was given no -pane. Without it, and
+	// without either of those, nothing can be spawned at all.
+	Pane string `json:"pane"`
 }
 
 // Parse reads a config document and refuses one it could not resolve later.

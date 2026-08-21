@@ -402,3 +402,42 @@ func TestARefusalTravelsAsANamedCode(t *testing.T) {
 		t.Fatalf("response: %+v", resp)
 	}
 }
+
+// A daemon with no pane to split a worker off would fail every spawn on the
+// same missing pane, forever. It does not try, and it says so.
+func TestADaemonWithNoBasePaneDoesNotTick(t *testing.T) {
+	stateDir(t)
+	d, f := newDaemon(t)
+	d.Loop.BasePane = ""
+	ln, err := Listen()
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan struct{})
+	go func() { defer close(served); d.Serve(ctx, ln) }()
+
+	// One round trip is enough to know the daemon is up and the tick has had
+	// its chance to run.
+	if _, err := (&net.Dialer{}).Dial("unix", config.SocketPath()); err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	raw, err := call(t, d, protocol.Request{Verb: "status"})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	var st loop.Status
+	if err := json.Unmarshal(raw, &st); err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Workers) != 0 {
+		t.Fatalf("a daemon with no base pane drove %d workers", len(st.Workers))
+	}
+	for _, c := range f.Calls(t) {
+		if len(c) >= 10 && c[:10] == "pane split" {
+			t.Fatalf("a daemon with no base pane tried to split one: %v", c)
+		}
+	}
+	cancel()
+	<-served
+}
