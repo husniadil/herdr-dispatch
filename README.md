@@ -49,7 +49,7 @@ it leaves the daemon running. Stopping writes nothing to the board.
 The manifest's version is the version `hdis version` prints, and a named test
 fails the gate when the two drift apart.
 
-This plugin satisfies **version 0.4.0-draft** of the Herdr plugin contract.
+This plugin satisfies **version 0.4.0** of the Herdr plugin contract.
 `hdis doctor` says so in both its shapes, as its own top-level `contract`
 field, distinct from the `board.contract` it relays from `htask`.
 
