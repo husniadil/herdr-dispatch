@@ -36,9 +36,9 @@ import (
 // TestStopIsServedOnTheCLIDoorOnly for why the operator's brake stays off a
 // door every agent session holds one of.
 var pinnedTools = []string{
-	"hdis_doctor",
-	"hdis_dispatch",
-	"hdis_status",
+	"doctor",
+	"dispatch",
+	"status",
 }
 
 // inProcessDaemon is a real daemon over a fake board and a fake herdr. No
@@ -149,20 +149,20 @@ func TestNeitherDoorCarriesAVerbTheOtherLacks(t *testing.T) {
 		// A CLI-only verb is the one asymmetry the table may declare, and
 		// declaring it is what keeps it from being an accident.
 		if v.CLIOnly {
-			if _, ok := served[v.MCP]; ok {
+			if _, ok := served[v.Name]; ok {
 				t.Errorf("verb %q is declared CLI-only and served over MCP", v.Name)
 			}
 			continue
 		}
-		tl, ok := served[v.MCP]
+		tl, ok := served[v.Name]
 		if !ok {
 			t.Errorf("verb %q is a CLI subcommand and no MCP tool", v.Name)
 			continue
 		}
-		if !strings.HasPrefix(tl.Name, verbs.ToolPrefix+"_") {
-			t.Errorf("tool %q is not named %s_<verb>", tl.Name, verbs.ToolPrefix)
+		if tl.Name != v.Name {
+			t.Errorf("tool %q is served for verb %q: the tool name is the bare verb", tl.Name, v.Name)
 		}
-		delete(served, v.MCP)
+		delete(served, v.Name)
 	}
 	for name := range served {
 		t.Errorf("tool %q is served and is no verb in the table", name)
@@ -187,30 +187,30 @@ func TestTheSchemaDeclaresExactlyWhatTheCLITakes(t *testing.T) {
 		if v.CLIOnly {
 			continue
 		}
-		raw, err := json.Marshal(byName[v.MCP].InputSchema)
+		raw, err := json.Marshal(byName[v.Name].InputSchema)
 		if err != nil {
-			t.Fatalf("schema for %q: %v", v.MCP, err)
+			t.Fatalf("schema for %q: %v", v.Name, err)
 		}
 		var schema struct {
 			Properties map[string]json.RawMessage `json:"properties"`
 			Required   []string                   `json:"required"`
 		}
 		if err := json.Unmarshal(raw, &schema); err != nil {
-			t.Fatalf("schema for %q: %v", v.MCP, err)
+			t.Fatalf("schema for %q: %v", v.Name, err)
 		}
 		if len(schema.Properties) != len(v.Args) {
-			t.Errorf("tool %q declares %d arguments and the CLI takes %d", v.MCP, len(schema.Properties), len(v.Args))
+			t.Errorf("tool %q declares %d arguments and the CLI takes %d", v.Name, len(schema.Properties), len(v.Args))
 		}
 		for _, a := range v.Args {
 			if _, ok := schema.Properties[a.Name]; !ok {
-				t.Errorf("tool %q is missing the %q argument the CLI takes", v.MCP, a.Name)
+				t.Errorf("tool %q is missing the %q argument the CLI takes", v.Name, a.Name)
 			}
 			required := false
 			for _, name := range schema.Required {
 				required = required || name == a.Name
 			}
 			if a.Required != required {
-				t.Errorf("tool %q requires %q: %t, and the CLI requires it: %t", v.MCP, a.Name, required, a.Required)
+				t.Errorf("tool %q requires %q: %t, and the CLI requires it: %t", v.Name, a.Name, required, a.Required)
 			}
 		}
 	}
@@ -245,7 +245,7 @@ func TestBothDoorsBuildTheSameRequest(t *testing.T) {
 			return json.RawMessage(`{}`), nil
 		}
 		sess := session(t, catch)
-		if _, err := sess.CallTool(context.Background(), &mcp.CallToolParams{Name: v.MCP, Arguments: tc.args}); err != nil {
+		if _, err := sess.CallTool(context.Background(), &mcp.CallToolParams{Name: v.Name, Arguments: tc.args}); err != nil {
 			t.Fatalf("mcp %s: %v", tc.verb, err)
 		}
 
@@ -281,7 +281,7 @@ func TestBothDoorsHandBackTheSameDocument(t *testing.T) {
 	}
 
 	sess := session(t, call)
-	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{Name: "hdis_status"})
+	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{Name: "status"})
 	if err != nil {
 		t.Fatalf("mcp status: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestARefusalReachesTheCallerAsAToolErrorWithItsCode(t *testing.T) {
 	sess := session(t, call)
 
 	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "hdis_dispatch", Arguments: map[string]any{"task": "7"}})
+		Name: "dispatch", Arguments: map[string]any{"task": "7"}})
 	if err != nil {
 		t.Fatalf("CallTool returned a protocol error: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestTheDoorRefusesAnArgumentItsSchemaForbids(t *testing.T) {
 	sess := session(t, call)
 
 	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "hdis_dispatch", Arguments: map[string]any{"task": "7", "profile": "routed"}})
+		Name: "dispatch", Arguments: map[string]any{"task": "7", "profile": "routed"}})
 	if err != nil {
 		t.Fatalf("CallTool: %v", err)
 	}
@@ -348,7 +348,7 @@ func TestARequiredArgumentIsRefusedWhenItIsMissing(t *testing.T) {
 	_, call := inProcessDaemon(t)
 	sess := session(t, call)
 
-	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{Name: "hdis_dispatch"})
+	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{Name: "dispatch"})
 	if err != nil {
 		t.Fatalf("CallTool: %v", err)
 	}
@@ -357,16 +357,14 @@ func TestARequiredArgumentIsRefusedWhenItIsMissing(t *testing.T) {
 	}
 }
 
-// The registration name is the repository an operator wires in; the tool
-// prefix is the binary's short name. They are different things.
-func TestTheServerRegistersUnderTheRepositoryAndPrefixesToolsWithTheShortName(t *testing.T) {
-	if ServerName == verbs.ToolPrefix {
-		t.Fatal("the registration name and the tool prefix have become one constant")
+// The registration name is the repository an operator wires in, and the tools
+// are bare verbs under it: a caller reads them as herdr-dispatch's dispatch,
+// not as a name that repeats the binary.
+func TestTheServerRegistersUnderTheRepositoryAndServesBareVerbs(t *testing.T) {
+	if ServerName != "herdr-dispatch" {
+		t.Fatalf("registered as %q", ServerName)
 	}
-	if ServerName != "herdr-dispatch" || verbs.ToolPrefix != "hdis" {
-		t.Fatalf("registered as %q with tools prefixed %q", ServerName, verbs.ToolPrefix)
-	}
-	for _, want := range []string{"hdis_dispatch", "hdis_status", "review", "claims"} {
+	for _, want := range []string{"dispatch", "status", "review", "claims"} {
 		if !strings.Contains(Instructions, want) {
 			t.Errorf("the instructions do not mention %q", want)
 		}
@@ -388,7 +386,7 @@ func TestTheDoorKeepsNoStateOfItsOwn(t *testing.T) {
 		got = req
 		return json.RawMessage(`{}`), nil
 	})
-	if _, err := sess.CallTool(context.Background(), &mcp.CallToolParams{Name: "hdis_status"}); err != nil {
+	if _, err := sess.CallTool(context.Background(), &mcp.CallToolParams{Name: "status"}); err != nil {
 		t.Fatalf("CallTool: %v", err)
 	}
 	if got.Pane != "" {
@@ -420,11 +418,11 @@ func TestStopIsServedOnTheCLIDoorOnly(t *testing.T) {
 		t.Fatalf("ListTools: %v", err)
 	}
 	for _, tl := range tools.Tools {
-		if tl.Name == v.MCP {
+		if tl.Name == v.Name {
 			t.Fatalf("stop is served over MCP as %q", tl.Name)
 		}
 	}
-	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{Name: v.MCP})
+	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{Name: v.Name})
 	if err == nil && !res.IsError {
 		t.Fatal("the MCP door answered a stop call")
 	}

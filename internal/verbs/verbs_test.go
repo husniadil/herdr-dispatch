@@ -1,6 +1,9 @@
 package verbs
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestEveryVerbIsWholeOnBothDoors(t *testing.T) {
 	for _, v := range All {
@@ -10,8 +13,8 @@ func TestEveryVerbIsWholeOnBothDoors(t *testing.T) {
 		if len(v.CLI) == 0 {
 			t.Errorf("verb %q has no CLI subcommand", v.Name)
 		}
-		if want := ToolPrefix + "_" + v.Name; v.MCP != want {
-			t.Errorf("verb %q has MCP tool %q, want %q", v.Name, v.MCP, want)
+		if strings.ContainsAny(v.Name, "_ ") {
+			t.Errorf("verb %q is not a bare word, and the MCP tool name is the verb", v.Name)
 		}
 		for _, a := range v.Args {
 			if a.Name == "" || a.Desc == "" {

@@ -5,10 +5,6 @@
 // something an operator discovers.
 package verbs
 
-// ToolPrefix is the MCP tool-name prefix: the binary's short name, which is
-// also the socket's and the state dir's.
-const ToolPrefix = "hdis"
-
 // String is the only kind of argument the first slice has. A second kind
 // arrives with the first verb that needs one, and not before.
 const String = "string"
@@ -25,12 +21,12 @@ type Arg struct {
 
 // Verb is one operation, in every surface it appears in.
 type Verb struct {
-	// Name is the verb on the socket, and the suffix of the MCP tool.
+	// Name is the verb on the socket, and the MCP tool name: the door serves
+	// bare verbs, so a caller reads dispatch as herdr-dispatch's dispatch
+	// rather than as a name that repeats the binary.
 	Name string
 	// CLI is the subcommand path, e.g. {"status"}.
 	CLI []string
-	// MCP is the tool name, always ToolPrefix + "_" + Name.
-	MCP string
 	// Short is the one-line help both doors show.
 	Short string
 	// Long is what the MCP tool description adds for a caller that cannot
@@ -51,13 +47,13 @@ type Verb struct {
 // All is the registry. Order is the order the CLI lists them in.
 var All = []Verb{
 	{
-		Name: "doctor", CLI: []string{"doctor"}, MCP: "hdis_doctor",
+		Name: "doctor", CLI: []string{"doctor"},
 		Short: "Report whether the dispatcher can work at all",
 		Long: "Answers with the daemon's version, its base pane, the board's " +
 			"reachability and herdr's. Run it first when a dispatch refuses.",
 	},
 	{
-		Name: "dispatch", CLI: []string{"dispatch"}, MCP: "hdis_dispatch",
+		Name: "dispatch", CLI: []string{"dispatch"},
 		Short: "Bring a worker up for one ready task, now",
 		Long: "Reserves the task for the next tick and returns at once: bringing " +
 			"a worker up takes minutes, and this call does not wait for it. Read " +
@@ -69,7 +65,7 @@ var All = []Verb{
 		},
 	},
 	{
-		Name: "stop", CLI: []string{"stop"}, MCP: "hdis_stop",
+		Name: "stop", CLI: []string{"stop"},
 		Short: "Ask the running daemon to shut down",
 		Long: "The daemon stops ticking, closes its socket, drops its lock and " +
 			"exits; it writes nothing to the board on the way out, and the tasks " +
@@ -79,7 +75,7 @@ var All = []Verb{
 		CLIOnly: true, NoAutostart: true,
 	},
 	{
-		Name: "status", CLI: []string{"status"}, MCP: "hdis_status",
+		Name: "status", CLI: []string{"status"},
 		Short: "List what the dispatcher is driving",
 		Long: "One row per binding: the task, the pane its worker lives in, when " +
 			"the goal was delivered, how often, whether review was announced, and " +

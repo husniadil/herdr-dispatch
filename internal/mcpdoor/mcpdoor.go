@@ -35,11 +35,11 @@ const Door = "mcp"
 const Instructions = "herdr-dispatch drives the htask board's ready work: it brings a worker agent " +
 	"up in a Herdr pane for a task, delivers the task's goal, tracks the worker, and stops at " +
 	"review, where the board's own review gate takes over. `pane`, `agent` and `agent_status` mean " +
-	"what Herdr says they mean. hdis_dispatch reserves one ready task and returns at once — bringing " +
-	"a worker up runs to minutes, so read the outcome with hdis_status rather than waiting on the " +
+	"what Herdr says they mean. dispatch reserves one ready task and returns at once — bringing " +
+	"a worker up runs to minutes, so read the outcome with status rather than waiting on the " +
 	"call. The worker claims the task itself; nothing here claims, approves or rejects on its " +
 	"behalf. Which agent kind, model and effort a worker launches with is this binary's config and " +
-	"is not selectable per call. hdis_doctor says why a dispatch would refuse."
+	"is not selectable per call. doctor says why a dispatch would refuse."
 
 // Caller is what the door needs to reach the daemon. The default dials the
 // real socket, starting a daemon when none answers; a test swaps in something
@@ -95,7 +95,7 @@ func tool(v verbs.Verb) *mcp.Tool {
 	if v.Long != "" {
 		description += ". " + v.Long
 	}
-	return &mcp.Tool{Name: v.MCP, Description: description, InputSchema: schema}
+	return &mcp.Tool{Name: v.Name, Description: description, InputSchema: schema}
 }
 
 // handlerFor turns a tool call into the same daemon call the CLI makes.
@@ -144,23 +144,23 @@ func check(v verbs.Verb, args map[string]any) error {
 	}
 	for name := range args {
 		if _, ok := declared[name]; !ok {
-			return codes.Errorf(codes.Invalid, "%s takes no argument named %q", v.MCP, name)
+			return codes.Errorf(codes.Invalid, "%s takes no argument named %q", v.Name, name)
 		}
 	}
 	for _, a := range v.Args {
 		raw, ok := args[a.Name]
 		if !ok || raw == nil {
 			if a.Required {
-				return codes.Errorf(codes.Invalid, "%s needs %s", v.MCP, a.Name)
+				return codes.Errorf(codes.Invalid, "%s needs %s", v.Name, a.Name)
 			}
 			continue
 		}
 		s, ok := raw.(string)
 		if !ok {
-			return codes.Errorf(codes.Invalid, "%s wants %s as a string", v.MCP, a.Name)
+			return codes.Errorf(codes.Invalid, "%s wants %s as a string", v.Name, a.Name)
 		}
 		if a.Required && s == "" {
-			return codes.Errorf(codes.Invalid, "%s needs %s", v.MCP, a.Name)
+			return codes.Errorf(codes.Invalid, "%s needs %s", v.Name, a.Name)
 		}
 	}
 	return nil

@@ -43,12 +43,12 @@ Both are generated from one verb table, and a parity test drives a live MCP
 session against it: a verb on one door and not the other fails the gate,
 unless the table declares the asymmetry itself.
 
-| Verb                  | MCP tool        | What it does                                     |
-| --------------------- | --------------- | ------------------------------------------------ |
-| `hdis doctor`         | `hdis_doctor`   | Why a dispatch would refuse, before one is tried |
-| `hdis dispatch <task>`| `hdis_dispatch` | Reserve one ready task for the next tick         |
-| `hdis stop`           | none, on purpose| Ask the running daemon to shut down              |
-| `hdis status`         | `hdis_status`   | What the dispatcher is driving now               |
+| Verb                  | MCP tool         | What it does                                     |
+| --------------------- | ---------------- | ------------------------------------------------ |
+| `hdis doctor`         | `doctor`         | Why a dispatch would refuse, before one is tried |
+| `hdis dispatch <task>`| `dispatch`       | Reserve one ready task for the next tick         |
+| `hdis stop`           | none, on purpose | Ask the running daemon to shut down              |
+| `hdis status`         | `status`         | What the dispatcher is driving now               |
 
 `stop` is the one CLI-only verb. Every other verb is about one task, and an
 MCP door is spawned once per client session, so an agent holding one would be
