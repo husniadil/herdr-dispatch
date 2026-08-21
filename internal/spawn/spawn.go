@@ -2,7 +2,7 @@
 // up, its agent starts with the task's goal already in its argv, and the
 // pipeline confirms the goal took before the dispatcher records a binding.
 //
-// Four measured facts shape it, and every one of them is a fact to re-check
+// Five measured facts shape it, and every one of them is a fact to re-check
 // rather than a constant to trust forever:
 //
 //   - herdr refuses an agent argument containing a newline, outright, before
@@ -17,13 +17,19 @@
 //   - `pane run` returns when the line is typed, not when it finishes. On
 //     the codex path that leaves the environment eval still owning the
 //     shell, and `agent start` into a busy shell is refused outright.
+//   - the launch line is TYPED into the pane, so its length is a risk. Past
+//     roughly two thousand characters it intermittently arrives broken. The
+//     settings document is the part of it that can leave, and it does: see
+//     TypedLineOverheadBudget.
 package spawn
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/husniadil/herdr-dispatch/internal/config"
@@ -37,6 +43,73 @@ const Kind = "claude"
 
 // GoalPrefix turns a condition into the slash command that arms it.
 const GoalPrefix = "/goal "
+
+// SettingsFileMode is what a spawn's settings file is created with. The
+// document carries the proxy's auth token and the base URL of the daemon
+// that answers with the operator's own quota, and the file lands in a
+// directory the whole machine can list.
+const SettingsFileMode = 0o600
+
+// TypedLineOverheadBudget bounds everything hdis puts on the line herdr types
+// into a worker's pane, except the goal itself.
+//
+// That line is TYPED, character by character, into a terminal. A long one
+// intermittently arrives broken: in two live codex runs the ~2.2k-character
+// line — the settings JSON inline, the profile's flags, and a ~1.3k one-line
+// goal — came out with the goal cut mid-criterion and the command's own start
+// typed over what followed, the pane showing
+//
+//	htask task submit claude --settings '{"disabl
+//
+// Measured on 2026-08-21 against the real tools, with a codex profile of
+// --agent claude --model haiku --effort low:
+//
+//	`codex-cc-proxy settings` compacts to 473 characters. Single-quoted
+//	after the flag it costs 487 of the typed line, and the whole
+//	hdis-chosen part comes to 536.
+//
+//	The same document written to a file under this machine's TMPDIR (49
+//	characters) costs 90, and the whole part 139.
+//
+// The budget sits at 256: comfortably above the measured file form, so a
+// longer temp path or another flag still fits, and less than half the inline
+// form, which can never come back. The goal is deliberately outside it — it
+// is the board's text, it has to reach the slash-command parser whole, and a
+// budget that counted it would be a budget on someone else's prose.
+const TypedLineOverheadBudget = 256
+
+// TypedLine reconstructs the command line herdr types into a worker's pane
+// for an agent argv: the client's own name, then every argument, quoted the
+// way the live panes showed it — `claude --settings '{"disabl…`.
+func TypedLine(agentArgs []string) string {
+	parts := make([]string, 0, len(agentArgs)+1)
+	parts = append(parts, Kind)
+	for _, a := range agentArgs {
+		parts = append(parts, shellQuote(a))
+	}
+	return strings.Join(parts, " ")
+}
+
+// TypedOverhead is the length of that line without its last argument, which
+// is the goal, plus the space that would separate them: the part hdis
+// chooses, and the only part a budget can honestly bound.
+func TypedOverhead(agentArgs []string) int {
+	if len(agentArgs) == 0 {
+		return len(TypedLine(nil))
+	}
+	return len(TypedLine(agentArgs[:len(agentArgs)-1])) + 1
+}
+
+// shellSafe are the characters a shell passes through untouched, so an
+// argument made only of them is typed bare.
+const shellSafe = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_@%+=:,./-"
+
+func shellQuote(s string) string {
+	if s != "" && strings.Trim(s, shellSafe) == "" {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
 
 // TrustDialogMarkers are the phrases Claude Code's trust-folder dialog puts
 // on screen. Seeing one is the only thing that earns an Enter.
@@ -99,6 +172,9 @@ type Pipeline struct {
 
 	// Direction the worker pane is split in; empty means to the right.
 	Direction string
+	// SettingsDir is where a codex spawn writes its settings file; empty
+	// means the system temp directory.
+	SettingsDir string
 	// StartTimeout is how long herdr waits for interactive readiness. It is
 	// spent in full on every registering goal, which is the normal case.
 	StartTimeout time.Duration
@@ -116,6 +192,12 @@ type Pipeline struct {
 	ReadLines int
 	// Sleep is time.Sleep unless a test replaces it.
 	Sleep func(time.Duration)
+
+	// settings is the pane each spawn's settings file was written for, and
+	// the only thing keeping the file findable: nothing else in this repo
+	// knows the path, so a pane retired any other way leaks it.
+	mu       sync.Mutex
+	settings map[string]string
 }
 
 // Request is one worker to bring up.
@@ -142,19 +224,21 @@ func (p *Pipeline) Run(ctx context.Context, req Request) (string, error) {
 
 	// Step zero for the codex provider, before anything is built: the proxy
 	// publishes the client-policy half, and a down daemon says so here.
+	var settingsDoc string
 	if req.Profile.Provider == config.ProviderCodex {
 		if req.Profile.HasSettingsArg() {
 			return "", fmt.Errorf("spawn %s: the profile already carries --settings, which the codex provider must splice itself; the client keeps only the last of two and drops the first without saying so", req.Name)
 		}
-		settings, err := p.Proxy.Settings(ctx)
+		doc, err := p.Proxy.Settings(ctx)
 		if err != nil {
 			return "", fmt.Errorf("spawn %s: %w", req.Name, err)
 		}
-		agentArgs = append([]string{"--settings", settings}, agentArgs...)
+		settingsDoc = doc
 	}
 
 	// Claude Code takes its initial prompt positionally, and the goal is the
-	// whole of it.
+	// whole of it. It stays here whole: it has to reach the slash-command
+	// parser, and shortening the typed line is the settings document's job.
 	agentArgs = append(agentArgs, GoalPrefix+req.Goal)
 
 	pane, err := p.Herdr.PaneSplit(ctx, req.BasePane, p.direction(), req.Cwd)
@@ -162,12 +246,14 @@ func (p *Pipeline) Run(ctx context.Context, req Request) (string, error) {
 		return "", fmt.Errorf("spawn %s: %w", req.Name, err)
 	}
 
-	if err := p.build(ctx, req, pane, agentArgs); err != nil {
+	if err := p.build(ctx, req, pane, settingsDoc, agentArgs); err != nil {
 		var keep *KeepPaneError
 		if errors.As(err, &keep) {
+			// The settings file stays with the pane: the worker may be at
+			// work already, and Claude Code re-reads it during a session.
 			return pane, err
 		}
-		if closeErr := p.Herdr.PaneClose(ctx, pane); closeErr != nil {
+		if closeErr := p.Retire(ctx, pane); closeErr != nil {
 			return "", fmt.Errorf("%w (and the pane could not be retired: %v)", err, closeErr)
 		}
 		return "", err
@@ -175,10 +261,76 @@ func (p *Pipeline) Run(ctx context.Context, req Request) (string, error) {
 	return pane, nil
 }
 
-func (p *Pipeline) build(ctx context.Context, req Request, pane string, agentArgs []string) error {
-	// The environment half of the codex launch belongs to the pane's shell,
-	// which the agent then inherits as a direct child.
+// Retire closes a worker's pane and removes the settings file its spawn
+// wrote. It is the only way a pane this pipeline opened should be closed:
+// closing it any other way leaves the file behind, and nothing else knows
+// where it is.
+func (p *Pipeline) Retire(ctx context.Context, pane string) error {
+	err := p.Herdr.PaneClose(ctx, pane)
+	p.Discard(pane)
+	return err
+}
+
+// Discard removes the settings file a spawn wrote for a pane, if it wrote
+// one. It is for the pane that is already gone, which has no worker left to
+// read it; Retire is for the pane that still has to be closed.
+func (p *Pipeline) Discard(pane string) {
+	p.mu.Lock()
+	path := p.settings[pane]
+	delete(p.settings, pane)
+	p.mu.Unlock()
+	if path != "" {
+		os.Remove(path)
+	}
+}
+
+// writeSettings puts the proxy's document where the worker can read it and
+// remembers the path against the pane, so retiring the pane takes the file
+// with it.
+func (p *Pipeline) writeSettings(pane, doc string) (string, error) {
+	f, err := os.CreateTemp(p.SettingsDir, "hdis-settings-*.json")
+	if err != nil {
+		return "", fmt.Errorf("settings file: %w", err)
+	}
+	path := f.Name()
+	err = f.Chmod(SettingsFileMode)
+	if err == nil {
+		_, err = f.WriteString(doc)
+	}
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		os.Remove(path)
+		return "", fmt.Errorf("settings file %s: %w", path, err)
+	}
+
+	p.mu.Lock()
+	if p.settings == nil {
+		p.settings = make(map[string]string)
+	}
+	p.settings[pane] = path
+	p.mu.Unlock()
+	return path, nil
+}
+
+func (p *Pipeline) build(ctx context.Context, req Request, pane, settingsDoc string, agentArgs []string) error {
 	if req.Profile.Provider == config.ProviderCodex {
+		// The settings half travels as a file rather than inline, because
+		// the argv is typed into the pane and the document is most of what
+		// made that line long enough to break. `claude --settings <path>`
+		// loads a path exactly as it loads the same JSON inline, measured
+		// against claude 2.1.238: the same document in a file and on the
+		// command line produced the same behaviour, and a path that does
+		// not exist is refused with "Settings file not found: <path>".
+		path, err := p.writeSettings(pane, settingsDoc)
+		if err != nil {
+			return fmt.Errorf("spawn %s: %w", req.Name, err)
+		}
+		agentArgs = append([]string{"--settings", path}, agentArgs...)
+
+		// The environment half belongs to the pane's shell, which the agent
+		// then inherits as a direct child.
 		if err := p.Herdr.PaneRun(ctx, pane, p.Proxy.EnvCommand()); err != nil {
 			return fmt.Errorf("spawn %s: %w", req.Name, err)
 		}

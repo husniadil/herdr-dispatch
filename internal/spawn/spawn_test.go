@@ -3,6 +3,8 @@ package spawn
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -94,6 +96,7 @@ func newHarness(t *testing.T, reads []string, start string) *harness {
 	return &harness{Fake: f, pipe: &Pipeline{
 		Herdr:          &herdr.Client{},
 		Proxy:          &proxy.Client{},
+		SettingsDir:    t.TempDir(),
 		StartTimeout:   45 * time.Second,
 		DialogCeiling:  4 * time.Second,
 		ConfirmCeiling: 4 * time.Second,
@@ -277,10 +280,16 @@ func TestCodexRunsTheTwoMeasuredSteps(t *testing.T) {
 	if sep < 0 || start[sep+1] != "--settings" {
 		t.Fatalf("--settings must lead the agent argv: %v", start)
 	}
-	if got, want := start[sep+2], `{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8787"}}`; got != want {
+	// The settings half travels as a file the worker reads, so what the argv
+	// carries is a path and what the document has to be is on disk.
+	body, err := os.ReadFile(start[sep+2])
+	if err != nil {
+		t.Fatalf("the worker's settings file: %v", err)
+	}
+	if got, want := string(body), `{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8787"}}`; got != want {
 		t.Fatalf("settings: got %q, want %q", got, want)
 	}
-	if strings.ContainsAny(start[sep+2], "\n\r") {
+	if strings.ContainsAny(string(body), "\n\r") {
 		t.Fatal("the settings document was not compacted")
 	}
 	// A shell that is already free costs one attempt and no waiting.
@@ -509,5 +518,223 @@ func TestTheConfirmCeilingIsConfigurableAndDefaulted(t *testing.T) {
 	p.ConfirmCeiling = 7 * time.Second
 	if got := p.confirmCeiling(); got != 7*time.Second {
 		t.Fatalf("a set ceiling must be honoured, got %s", got)
+	}
+}
+
+// realProxySettings is the document `codex-cc-proxy settings` actually
+// produced on 2026-08-21, compacted the way the proxy adapter compacts it.
+// It is 473 characters, and the budget below is derived from that number, so
+// the test carries the real thing rather than a stub that would drift.
+const realProxySettings = `{"disableClaudeAiConnectors":true,"env":{"ANTHROPIC_AUTH_TOKEN":"unused","ANTHROPIC_BASE_URL":"http://127.0.0.1:8787","ANTHROPIC_DEFAULT_FABLE_MODEL":"gpt-5.6-sol","ANTHROPIC_DEFAULT_HAIKU_MODEL":"gpt-5.6-luna","ANTHROPIC_DEFAULT_OPUS_MODEL":"gpt-5.6-luna","ANTHROPIC_DEFAULT_SONNET_MODEL":"gpt-5.6-luna","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"258400","CLAUDE_CODE_DISABLE_1M_CONTEXT":"1","CLAUDE_CODE_MAX_CONTEXT_TOKENS":"258400"},"permissions":{"deny":["Skill(claude-api)"]}}`
+
+// agentArgsOf returns the argv herdr forwarded to the worker: everything
+// after the `--` separator of the recorded `agent start`.
+func agentArgsOf(t *testing.T, h *harness) []string {
+	t.Helper()
+	for _, argv := range h.Argv(t) {
+		if len(argv) < 2 || argv[0] != "agent" || argv[1] != "start" {
+			continue
+		}
+		for i, a := range argv {
+			if a == "--" {
+				return argv[i+1:]
+			}
+		}
+	}
+	t.Fatal("agent start carried no agent argv")
+	return nil
+}
+
+// The line herdr types into a worker's pane is typed, character by character,
+// and a long one intermittently arrives broken. This is the regression guard
+// on the only part of it hdis chooses.
+func TestTheTypedSpawnLineStaysUnderItsBudgetWithACodexProfile(t *testing.T) {
+	h := newHarness(t, []string{goalActive}, startRegistered)
+	// The real temp directory, because the path's own length is what is
+	// being measured. A t.TempDir() path carries the test's name and would
+	// measure something no spawn ever types.
+	h.pipe.SettingsDir = ""
+	t.Cleanup(func() { h.pipe.Discard("wM:p9") })
+	h.Bin(t, "codex-cc-proxy", `cat "$HDIS_FAKE_DIR/settings.json"`)
+	h.Write(t, "settings.json", realProxySettings)
+
+	p := codexProfile()
+	p.Model = "haiku"
+	if _, err := h.pipe.Run(context.Background(), req(p)); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	args := agentArgsOf(t, h)
+	measured := TypedOverhead(args)
+	t.Logf("typed overhead: %d of %d budgeted, on %q", measured, TypedLineOverheadBudget, TypedLine(args[:len(args)-1]))
+	if measured > TypedLineOverheadBudget {
+		t.Fatalf("the typed line's hdis-chosen part is %d characters, over the %d budget:\n%s",
+			measured, TypedLineOverheadBudget, TypedLine(args))
+	}
+
+	// And the budget bites: the same document inline, which is what the two
+	// corrupted live runs typed, is well past it.
+	inline := append([]string{"--settings", realProxySettings}, args[2:]...)
+	inlineOverhead := TypedOverhead(inline)
+	t.Logf("the inline form the corrupted live runs typed measures %d", inlineOverhead)
+	if inlineOverhead <= TypedLineOverheadBudget {
+		t.Fatalf("the inline form measures %d, which the budget of %d would have allowed",
+			inlineOverhead, TypedLineOverheadBudget)
+	}
+}
+
+// The goal is the board's, and it has to reach the slash-command parser
+// whole. Only the settings leave the line.
+func TestTheGoalIsNeverShortenedToMakeRoom(t *testing.T) {
+	h := newHarness(t, []string{goalActive}, startRegistered)
+	h.Bin(t, "codex-cc-proxy", `cat "$HDIS_FAKE_DIR/settings.json"`)
+	h.Write(t, "settings.json", realProxySettings)
+
+	r := req(codexProfile())
+	r.Goal = strings.Repeat("x", 1300) + " · Done when: the goal arrived whole"
+	if _, err := h.pipe.Run(context.Background(), r); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	args := agentArgsOf(t, h)
+	if got, want := args[len(args)-1], GoalPrefix+r.Goal; got != want {
+		t.Fatalf("the goal did not travel whole: got %d characters, want %d", len(got), len(want))
+	}
+}
+
+// The settings document leaves the typed line for a file the worker reads.
+// The file carries the proxy's auth token and lands in a shared temp
+// directory, so nobody else on the machine gets to read it.
+func TestTheSettingsDocumentTravelsAsAFileOnlyItsOwnerCanRead(t *testing.T) {
+	h := newHarness(t, []string{goalActive}, startRegistered)
+	h.Bin(t, "codex-cc-proxy", `cat "$HDIS_FAKE_DIR/settings.json"`)
+	h.Write(t, "settings.json", realProxySettings)
+
+	if _, err := h.pipe.Run(context.Background(), req(codexProfile())); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	args := agentArgsOf(t, h)
+	if args[0] != "--settings" {
+		t.Fatalf("--settings must lead the agent argv: %v", args)
+	}
+	path := args[1]
+	if !filepath.IsAbs(path) {
+		t.Fatalf("--settings must carry an absolute path, got %q", path)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("the worker's settings file: %v", err)
+	}
+	if string(body) != realProxySettings {
+		t.Fatalf("the file does not carry the proxy's document:\n%s", body)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != SettingsFileMode {
+		t.Fatalf("settings file mode is %04o, want %04o", got, SettingsFileMode)
+	}
+}
+
+// Every spawn writes its own, so two live workers never share one file and
+// retiring one never disarms the other.
+func TestEachSpawnWritesItsOwnSettingsFile(t *testing.T) {
+	first := newHarness(t, []string{goalActive}, startRegistered)
+	first.Bin(t, "codex-cc-proxy", `echo '{"env":{}}'`)
+	if _, err := first.pipe.Run(context.Background(), req(codexProfile())); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	a := agentArgsOf(t, first)[1]
+
+	second := newHarness(t, []string{goalActive}, startRegistered)
+	second.Bin(t, "codex-cc-proxy", `echo '{"env":{}}'`)
+	if _, err := second.pipe.Run(context.Background(), req(codexProfile())); err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	b := agentArgsOf(t, second)[1]
+
+	if a == b {
+		t.Fatalf("two spawns shared one settings file: %s", a)
+	}
+}
+
+// Retiring a pane is what ends the worker that was reading the file, so it is
+// where the file goes. The same call is what a give-up runs.
+func TestRetiringAPaneRemovesItsSettingsFile(t *testing.T) {
+	h := newHarness(t, []string{goalActive}, startRegistered)
+	h.Bin(t, "codex-cc-proxy", `echo '{"env":{}}'`)
+
+	pane, err := h.pipe.Run(context.Background(), req(codexProfile()))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	path := agentArgsOf(t, h)[1]
+
+	if err := h.pipe.Retire(context.Background(), pane); err != nil {
+		t.Fatalf("retire: %v", err)
+	}
+	if n := count(h.verbs(t), "pane close"); n != 1 {
+		t.Fatalf("retire must close the pane, closed %d times", n)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("the settings file outlived its worker: %v", err)
+	}
+}
+
+// A spawn that fails in a way it could READ retires its own half-built pane,
+// and the file goes with it.
+func TestAFailedSpawnRemovesItsSettingsFile(t *testing.T) {
+	h := newHarness(t, []string{goalRefused + "\n" + promptBox}, strings.Replace(startRefused, "PLACEHOLDER", agentJSON("idle"), 1))
+	h.Bin(t, "codex-cc-proxy", `echo '{"env":{}}'`)
+
+	if _, err := h.pipe.Run(context.Background(), req(codexProfile())); err == nil {
+		t.Fatal("a goal that never registered must fail the spawn")
+	}
+	path := agentArgsOf(t, h)[1]
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("a retired spawn left its settings file behind: %v", err)
+	}
+}
+
+// The contrast: a pane that is KEPT may hold a worker already at work, and
+// Claude Code re-reads its settings file during a session. Removing it there
+// would disarm a live worker to tidy up after it.
+func TestAKeptPaneKeepsItsSettingsFile(t *testing.T) {
+	h := newHarness(t, []string{unreadable}, startRegistered)
+	h.Bin(t, "codex-cc-proxy", `echo '{"env":{}}'`)
+
+	pane, err := h.pipe.Run(context.Background(), req(codexProfile()))
+	if err == nil {
+		t.Fatal("a confirm that read nothing must fail loud")
+	}
+	if pane != "wM:p9" {
+		t.Fatalf("the pane must come back, got %q", pane)
+	}
+	path := agentArgsOf(t, h)[1]
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("a kept pane's settings file was removed anyway: %v", err)
+	}
+}
+
+// The claude provider types no settings at all, so it writes no file.
+func TestTheClaudeProviderWritesNoSettingsFile(t *testing.T) {
+	h := newHarness(t, []string{goalActive}, startRegistered)
+
+	if _, err := h.pipe.Run(context.Background(), req(claudeProfile())); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	for _, a := range agentArgsOf(t, h) {
+		if a == "--settings" {
+			t.Fatalf("the claude provider spliced a --settings: %v", agentArgsOf(t, h))
+		}
+	}
+	entries, err := os.ReadDir(h.pipe.SettingsDir)
+	if err != nil {
+		t.Fatalf("read settings dir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("the claude provider wrote %d settings files", len(entries))
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -436,5 +437,87 @@ func TestAKeptPaneStillGoallessPastTheLargerCeilingIsGivenUp(t *testing.T) {
 	}
 	if len(l.bindings) != 0 {
 		t.Fatalf("the binding outlived the give-up: %+v", l.bindings)
+	}
+}
+
+// codexLoop is the same loop with the codex profile, so its spawns write the
+// settings file the typed line no longer carries.
+func codexLoop(t *testing.T) (*Loop, *fake.Fake, string) {
+	t.Helper()
+	l, f := newLoop(t)
+	cfg, err := config.Parse([]byte(`{"default":"worker","profiles":{"worker":{"provider":"codex"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.Config = cfg
+	dir := t.TempDir()
+	l.Spawn.SettingsDir = dir
+	f.Bin(t, "codex-cc-proxy", `echo '{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8787"}}'`)
+	return l, f, dir
+}
+
+func settingsFiles(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read settings dir: %v", err)
+	}
+	var out []string
+	for _, e := range entries {
+		out = append(out, e.Name())
+	}
+	return out
+}
+
+// The settings file belongs to the pane, so the give-up that retires the pane
+// is what takes it away. Left behind it is the proxy's auth token sitting in
+// a shared temp directory for as long as the machine is up.
+func TestGivingUpOnACodexWorkerRemovesItsSettingsFile(t *testing.T) {
+	l, f, dir := codexLoop(t)
+	f.Write(t, "screen.txt", "❯ \n  ? for shortcuts\n") // readable, and no goal on it
+	f.Write(t, "agentget.json", `{"id":"x","result":{"type":"agent_info","agent":{"pane_id":"wM:p9","agent_status":"unknown","interactive_ready":false,"focused":false,"launch_pending":true,"revision":1,"screen_detection_skipped":false}}}`)
+
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	if got := settingsFiles(t, dir); len(got) != 1 {
+		t.Fatalf("a codex spawn wrote %d settings files: %v", len(got), got)
+	}
+	f.Write(t, "panes.json", panesWith("idle"))
+
+	for _, at := range []time.Duration{10 * time.Minute, 20 * time.Minute} {
+		l.Now = func() time.Time { return clock.Add(at) }
+		if err := l.Tick(context.Background()); err != nil {
+			t.Fatalf("tick at %s: %v", at, err)
+		}
+	}
+	if got := calls(t, f, "pane close"); len(got) != 1 {
+		t.Fatalf("the pane was closed %d times", len(got))
+	}
+	if got := settingsFiles(t, dir); len(got) != 0 {
+		t.Fatalf("the settings file outlived the give-up: %v", got)
+	}
+}
+
+// A pane that is already gone has no worker left to read the file either, and
+// nothing else in the repo knows where it is.
+func TestAGoneCodexPaneTakesItsSettingsFileWithIt(t *testing.T) {
+	l, f, dir := codexLoop(t)
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	if got := settingsFiles(t, dir); len(got) != 1 {
+		t.Fatalf("a codex spawn wrote %d settings files: %v", len(got), got)
+	}
+	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
+
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	if len(l.bindings) != 0 {
+		t.Fatalf("bindings: %+v", l.bindings)
+	}
+	if got := settingsFiles(t, dir); len(got) != 0 {
+		t.Fatalf("a gone pane left its settings file behind: %v", got)
 	}
 }

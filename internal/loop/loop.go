@@ -114,9 +114,11 @@ func (l *Loop) apply(ctx context.Context, actions []decide.Action) {
 		case decide.Retire:
 			err = l.retire(ctx, a)
 		case decide.Unbind:
-			// The pane is gone. Dropping the binding is all there is to do:
-			// releasing the lease is the board's own sweep.
+			// The pane is gone. Dropping the binding and the settings file
+			// its spawn wrote is all there is to do: releasing the lease is
+			// the board's own sweep.
 			l.logf("task %s: pane %s is gone, dropping its binding", a.TaskID, a.Pane)
+			l.Spawn.Discard(a.Pane)
 			l.drop(a.TaskID)
 		case decide.GiveUp:
 			l.logf("task %s: %s after %d prompts, retiring pane %s",
@@ -210,11 +212,12 @@ func (l *Loop) notify(ctx context.Context, a decide.Action) error {
 	return nil
 }
 
-// retire closes the worker's pane and drops the binding. It never releases
-// the task's lease: pane-gone sweeps and the lease timer are the board's own,
-// and a second writer racing them is the bug, not a safety net.
+// retire closes the worker's pane through the spawn pipeline, which takes the
+// settings file the spawn wrote with it, and drops the binding. It never
+// releases the task's lease: pane-gone sweeps and the lease timer are the
+// board's own, and a second writer racing them is the bug, not a safety net.
 func (l *Loop) retire(ctx context.Context, a decide.Action) error {
-	err := l.Herdr.PaneClose(ctx, a.Pane)
+	err := l.Spawn.Retire(ctx, a.Pane)
 	l.drop(a.TaskID)
 	return err
 }
