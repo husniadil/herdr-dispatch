@@ -90,6 +90,7 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 			return err
 		}
 		fmt.Fprintf(out, "hdis %s on %s\n", rep.Version, rep.Socket)
+		fmt.Fprintf(out, "  contract    %s satisfied by this plugin\n", rep.Contract)
 		fmt.Fprintf(out, "  base pane   %s\n", or(rep.BasePane, "none: nothing is spawned and dispatch refuses"))
 		fmt.Fprintf(out, "  workers     %d live, %d reserved, max %d\n", rep.Workers, rep.Pending, rep.MaxWorkers)
 		fmt.Fprintf(out, "  tick        every %s\n", rep.Interval)

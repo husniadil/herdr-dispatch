@@ -37,6 +37,22 @@ At startup it reads `htask doctor --json` and says what is unreachable. It
 says it rather than obeying it: a board that is down comes back, and `doctor`
 and `status` are exactly what an operator wants to ask while it is down.
 
+## As a Herdr plugin
+
+`herdr-plugin.toml` at the root is what Herdr installs: it compiles
+`./bin/hdis`, starts the daemon through `scripts/start.sh` — which detaches it,
+so it outlives the pane that opened it — and offers **Stop the dispatcher** and
+**Restart the dispatcher** as workspace actions. Herdr has no shutdown hook, so
+those two actions are the route to actually turning the plugin off; unlinking
+it leaves the daemon running. Stopping writes nothing to the board.
+
+The manifest's version is the version `hdis version` prints, and a named test
+fails the gate when the two drift apart.
+
+This plugin satisfies **version 0.4.0-draft** of the Herdr plugin contract.
+`hdis doctor` says so in both its shapes, as its own top-level `contract`
+field, distinct from the `board.contract` it relays from `htask`.
+
 ## The two doors
 
 Both are generated from one verb table, and a parity test drives a live MCP
@@ -158,19 +174,28 @@ ledger.
    down fails here, in the daemon's own words, rather than thirty seconds
    later as a startup timeout with the cause hidden in a pane.
 2. `herdr pane split` off the dispatcher's pane, in the task's own project.
-3. For a `codex` profile, `eval "$(proxenos env)"` in that pane: the
-   worker inherits the routing environment as a direct child of the shell.
-4. `herdr agent start`, with the profile's argv and a short `/goal` condition
-   after the separator. That condition is a **pointer** hdis composes — claim
-   the task with `htask task claim <n>`, read its full criteria with
-   `htask task get <n>`, and finish by submitting it for review with a report
-   and evidence — and never the board's rendered goal document. The line is
+3. For a `codex` profile, the routing arrives in two halves. The settings
+   document goes to a private file and is spliced into the worker's argv as
+   `--settings <path>`, because that argv is TYPED into the pane and the
+   document inline was most of what made the line long enough to break.
+   `eval "$(proxenos env)"` runs in the pane itself, so the worker inherits
+   the environment half as a direct child of the shell.
+4. `herdr agent start`, once herdr agrees the pane's shell is free to take it
+   — `agent_pane_busy` is herdr's own refusal and the only signal worth
+   retrying on, since the `eval` above is still running when the start would
+   otherwise arrive. It carries the profile's argv and a short `/goal`
+   condition after the separator. That condition is a **pointer** hdis
+   composes — claim the task with `htask task claim <n>`, read its full
+   criteria with `htask task get <n>`, and finish by submitting it for review
+   with a report and evidence — and never the board's rendered goal document.
+   The line is
    TYPED into the pane, character by character, and a long one intermittently
    arrives broken: two live runs came out with the condition cut mid-word and
    the command's own start typed over what followed, one at ~2.2k characters
    and one at ~1.4k, while the same text piped into a bare shell was clean to
    a megabyte. So the criteria stay on the board, where the worker reads them
-   whole and no shell ever types them, and the whole typed line is held under
+   whole and no shell ever types them, the settings document travels as a
+   path rather than inline, and what is left of the typed line is held under
    a budget (`spawn.TypedLineBudget`) that a named test measures.
 
    `htask task goal <id> --one-line` is no longer part of this pipeline. It

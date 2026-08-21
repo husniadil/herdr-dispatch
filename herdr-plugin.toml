@@ -1,0 +1,36 @@
+id = "herdr-dispatch"
+name = "Dispatch"
+version = "0.1.0"
+min_herdr_version = "0.8.0"
+description = "Takes ready tasks off the htask board to review with no human in the middle: a worker pane per task, the goal delivered, the worker tracked, and a stop at review"
+platforms = ["macos", "linux"]
+
+# One statically linked Go binary is the daemon, the CLI and the MCP server.
+# Compiling on install keeps the repository free of release artefacts, and Go's
+# build cache makes the second install fast.
+[[build]]
+id = "binary"
+command = ["go", "build", "-o", "./bin/hdis", "./cmd/hdis"]
+
+# Starts the daemon and exits, which is what Herdr expects of a startup
+# command. The daemon detaches, so it survives the pane that opened it, and it
+# inherits that pane as the one worker panes are split off.
+[[startup]]
+id = "daemon"
+command = ["./scripts/start.sh"]
+
+# Herdr has no shutdown hook, so disabling or unlinking the plugin leaves the
+# daemon running. This is the way to actually turn it off. Stopping writes
+# nothing to the board: a worker mid-task keeps its claim and its lease, which
+# are htask's to time out.
+[[actions]]
+id = "stop"
+title = "Stop the dispatcher"
+contexts = ["workspace"]
+command = ["./scripts/stop.sh"]
+
+[[actions]]
+id = "restart"
+title = "Restart the dispatcher"
+contexts = ["workspace"]
+command = ["./scripts/restart.sh"]

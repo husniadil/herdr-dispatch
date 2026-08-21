@@ -29,10 +29,8 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/proxy"
 	"github.com/husniadil/herdr-dispatch/internal/spawn"
 	"github.com/husniadil/herdr-dispatch/internal/verbs"
+	"github.com/husniadil/herdr-dispatch/internal/version"
 )
-
-// Version is the dispatcher's own version.
-const Version = "0.1.0"
 
 func main() {
 	log.SetFlags(log.LstdFlags)
@@ -48,11 +46,11 @@ func main() {
 			log.Fatal(err)
 		}
 	case "mcp":
-		if err := mcpdoor.Serve(context.Background(), Version, nil); err != nil {
+		if err := mcpdoor.Serve(context.Background(), version.Version, nil); err != nil {
 			log.Fatal(err)
 		}
 	case "version":
-		fmt.Println(Version)
+		fmt.Println(version.Version)
 	case "-h", "--help", "help":
 		fmt.Print(cli.Usage())
 	default:
@@ -161,7 +159,7 @@ func serve(argv []string) error {
 		Loop:     l,
 		Board:    board,
 		Interval: *interval,
-		Version:  Version,
+		Version:  version.Version,
 		Log:      log.Default(),
 	}
 	err = d.Serve(ctx, ln)

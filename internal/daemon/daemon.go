@@ -26,6 +26,7 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/loop"
 	"github.com/husniadil/herdr-dispatch/internal/protocol"
 	"github.com/husniadil/herdr-dispatch/internal/verbs"
+	"github.com/husniadil/herdr-dispatch/internal/version"
 )
 
 // SocketMode is what the socket is created with. It is a door onto the
@@ -272,7 +273,10 @@ type StopReport struct {
 // DoctorReport is what doctor answers with: enough to say why a dispatch
 // would refuse, before one is tried.
 type DoctorReport struct {
-	Version    string      `json:"version"`
+	Version string `json:"version"`
+	// Contract is the plugin contract THIS binary satisfies, which is not
+	// the board's: Board.Contract below is htask's own, relayed.
+	Contract   string      `json:"contract"`
 	Socket     string      `json:"socket"`
 	BasePane   string      `json:"base_pane"`
 	MaxWorkers int         `json:"max_workers"`
@@ -297,6 +301,7 @@ type BoardHealth struct {
 func (d *Daemon) doctor(ctx context.Context) (DoctorReport, error) {
 	rep := DoctorReport{
 		Version:    d.Version,
+		Contract:   version.Contract,
 		Socket:     config.SocketPath(),
 		BasePane:   d.Loop.BasePane,
 		MaxWorkers: d.Loop.Policy.MaxWorkers,

@@ -22,6 +22,7 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/protocol"
 	"github.com/husniadil/herdr-dispatch/internal/proxy"
 	"github.com/husniadil/herdr-dispatch/internal/spawn"
+	"github.com/husniadil/herdr-dispatch/internal/version"
 )
 
 const htaskScript = `case "$1 $2" in
@@ -211,6 +212,33 @@ func TestDoctorReportsTheBoardItCanReach(t *testing.T) {
 	}
 	if !rep.Board.Reachable || rep.Board.Version != "0.4.0" || !rep.Board.HerdrReachable {
 		t.Fatalf("doctor report: %+v", rep)
+	}
+}
+
+// The plugin's own conformance is a distinct field from the board's relayed
+// contract, and a caller branching on it needs the name to stay put.
+func TestDoctorDeclaresTheContractThisPluginSatisfies(t *testing.T) {
+	stateDir(t)
+	d, _ := newDaemon(t)
+
+	raw, err := call(t, d, protocol.Request{Verb: "doctor"})
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+	var doc struct {
+		Contract string `json:"contract"`
+		Board    struct {
+			Contract string `json:"contract"`
+		} `json:"board"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("doctor json: %v", err)
+	}
+	if doc.Contract != version.Contract {
+		t.Errorf("doctor declares contract %q, want %q", doc.Contract, version.Contract)
+	}
+	if doc.Board.Contract != "0.3" {
+		t.Errorf("the board's own contract %q was not relayed beside it", doc.Board.Contract)
 	}
 }
 
