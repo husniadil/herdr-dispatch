@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/husniadil/herdr-dispatch/internal/config"
@@ -35,9 +36,20 @@ type Loop struct {
 	// Log is where the operator hears about anything that went wrong.
 	Log *log.Logger
 
+	// mu guards everything below it. The tick runs on the daemon's own
+	// goroutine while dispatch and status answer on a door's, so the
+	// bindings are read and written from more than one at a time. Nothing
+	// slow is done under this lock: a spawn runs to minutes, and it runs
+	// with the lock released.
+	mu       sync.Mutex
 	bindings []decide.Binding
-	// rows is this tick's board rows, by task id: the project a worker runs
-	// in and the number an operator reads. Rebuilt every tick, never kept.
+	// pending is the task ids an on-demand dispatch reserved and no tick has
+	// spawned yet. A reservation is what keeps the watching loop and the
+	// dispatch verb from both taking the same task.
+	pending []string
+	// rows is the last tick's board rows, by task id: the project a worker
+	// runs in, the number an operator reads, the title status prints. It is
+	// a cache of board facts and never a source of them.
 	rows map[string]htask.Task
 }
 
@@ -54,18 +66,25 @@ func (l *Loop) Tick(ctx context.Context) error {
 
 // Bindings reports what the dispatcher currently believes it is driving.
 func (l *Loop) Bindings() []decide.Binding {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	return append([]decide.Binding(nil), l.bindings...)
 }
 
 func (l *Loop) snapshot(ctx context.Context) (decide.Snapshot, error) {
+	l.mu.Lock()
+	bindings := append([]decide.Binding(nil), l.bindings...)
+	pending := append([]string(nil), l.pending...)
+	l.mu.Unlock()
+
 	snap := decide.Snapshot{
 		Tasks: make(map[string]decide.Task),
 		Now:   l.now(),
 	}
-	l.rows = make(map[string]htask.Task)
+	rows := make(map[string]htask.Task)
 
-	bound := make(map[string]bool, len(l.bindings))
-	for _, b := range l.bindings {
+	bound := make(map[string]bool, len(bindings))
+	for _, b := range bindings {
 		bound[b.TaskID] = true
 		row, err := l.Board.Get(ctx, b.TaskID)
 		if err != nil {
@@ -74,7 +93,7 @@ func (l *Loop) snapshot(ctx context.Context) (decide.Snapshot, error) {
 			l.logf("task %s: cannot be read, holding its binding: %v", b.TaskID, err)
 			continue
 		}
-		l.rows[row.ID] = row
+		rows[row.ID] = row
 		snap.Tasks[row.ID] = decide.Task{ID: row.ID, Status: row.Status, ClaimedBy: row.Pane()}
 	}
 
@@ -82,13 +101,37 @@ func (l *Loop) snapshot(ctx context.Context) (decide.Snapshot, error) {
 	if err != nil {
 		return decide.Snapshot{}, err
 	}
+	offered := make(map[string]htask.Task, len(ready))
+	for _, row := range ready {
+		offered[row.ID] = row
+	}
+
+	// Reservations go first: an on-demand dispatch is a caller asking for
+	// this task now, ahead of whatever order the board lists.
+	reserved := make(map[string]bool, len(pending))
+	for _, id := range pending {
+		row, ok := offered[id]
+		if bound[id] || !ok {
+			// A worker is already on it, or the board has taken it back.
+			// Either way the reservation has nothing left to buy.
+			if !bound[id] {
+				l.logf("task %s: was reserved for dispatch, but the board no longer offers it; dropping the reservation", id)
+			}
+			l.unreserve(id)
+			continue
+		}
+		reserved[row.ID] = true
+		rows[row.ID] = row
+		snap.Ready = append(snap.Ready, row.ID)
+	}
+
 	for _, row := range ready {
 		// A task stays ready until its worker claims, so a task already
 		// bound is a task already dispatched, not a task to dispatch again.
-		if bound[row.ID] {
+		if bound[row.ID] || reserved[row.ID] {
 			continue
 		}
-		l.rows[row.ID] = row
+		rows[row.ID] = row
 		snap.Ready = append(snap.Ready, row.ID)
 	}
 
@@ -97,7 +140,11 @@ func (l *Loop) snapshot(ctx context.Context) (decide.Snapshot, error) {
 		return decide.Snapshot{}, err
 	}
 	snap.Agents = panes
-	snap.Bindings = l.bindings
+	snap.Bindings = bindings
+
+	l.mu.Lock()
+	l.rows = rows
+	l.mu.Unlock()
 	return snap, nil
 }
 
@@ -134,7 +181,7 @@ func (l *Loop) apply(ctx context.Context, actions []decide.Action) {
 }
 
 func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
-	row, ok := l.rows[a.TaskID]
+	row, ok := l.row(a.TaskID)
 	if !ok {
 		return fmt.Errorf("no board row to spawn from")
 	}
@@ -160,12 +207,16 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 	// only record of which pane was prompted for which task until the worker
 	// claims; drop it and review is never announced for a task that may
 	// already be under way. The error still reaches the operator's log.
+	l.mu.Lock()
 	l.bindings = append(l.bindings, decide.Binding{
 		TaskID:     row.ID,
 		Pane:       pane,
 		PromptedAt: l.now(),
 		Prompts:    1,
 	})
+	l.mu.Unlock()
+	// The reservation is spent the moment the binding exists.
+	l.unreserve(row.ID)
 	return err
 }
 
@@ -176,6 +227,8 @@ func (l *Loop) prompt(ctx context.Context, a decide.Action) error {
 	if err := l.Herdr.AgentPrompt(ctx, a.Pane, l.nudge(a)); err != nil {
 		return err
 	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	for i := range l.bindings {
 		if l.bindings[i].TaskID == a.TaskID {
 			l.bindings[i].Prompts++
@@ -203,6 +256,8 @@ func (l *Loop) notify(ctx context.Context, a decide.Action) error {
 	if err != nil {
 		return err
 	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	for i := range l.bindings {
 		if l.bindings[i].TaskID == a.TaskID {
 			l.bindings[i].Notified = true
@@ -222,6 +277,8 @@ func (l *Loop) retire(ctx context.Context, a decide.Action) error {
 }
 
 func (l *Loop) drop(taskID string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	kept := l.bindings[:0]
 	for _, b := range l.bindings {
 		if b.TaskID != taskID {
@@ -232,6 +289,8 @@ func (l *Loop) drop(taskID string) {
 }
 
 func (l *Loop) promptsFor(taskID string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	for _, b := range l.bindings {
 		if b.TaskID == taskID {
 			return b.Prompts
@@ -240,12 +299,23 @@ func (l *Loop) promptsFor(taskID string) int {
 	return 0
 }
 
-func (l *Loop) seqFor(taskID string) int { return l.rows[taskID].Seq }
+// row reads the last tick's board row for a task.
+func (l *Loop) row(taskID string) (htask.Task, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	row, ok := l.rows[taskID]
+	return row, ok
+}
+
+func (l *Loop) seqFor(taskID string) int {
+	row, _ := l.row(taskID)
+	return row.Seq
+}
 
 // taskName is what an operator would call the task: its number and title
 // when the row is at hand, its id when it is not.
 func (l *Loop) taskName(taskID string) string {
-	row, ok := l.rows[taskID]
+	row, ok := l.row(taskID)
 	if !ok {
 		return "task " + taskID
 	}
@@ -253,7 +323,7 @@ func (l *Loop) taskName(taskID string) string {
 }
 
 func (l *Loop) taskNumber(taskID string) string {
-	if row, ok := l.rows[taskID]; ok {
+	if row, ok := l.row(taskID); ok {
 		return fmt.Sprintf("%d", row.Seq)
 	}
 	return taskID
