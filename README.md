@@ -478,7 +478,12 @@ for:
 - A **verifier** gets a detached checkout at the commit that was SUBMITTED,
   which is the tip of the branch its worker committed on. The project's own
   HEAD is not that commit now that a worker no longer commits to it, and a
-  gate run means nothing when the tree is not the commit under review.
+  gate run means nothing when the tree is not the commit under review. When
+  no binding names a branch — a restart rebinds a live pane from what the
+  board says now, and the board does not know which branch the work is on —
+  there is nothing to read and no verifier is spawned. `Loop.Worktrees` is an
+  interface so that choice can be pinned where it is MADE: a pin one layer
+  down only proves the manager honours whatever commit it is handed.
 
 **hdis integrates nothing.** It creates a branch and it removes checkouts.
 Bringing the work home — fast-forward, merge, cherry-pick, push — and deleting
@@ -503,6 +508,8 @@ working. `TestAVerifierIsGivenAWorktreeAndNeverTheProjectDirectory`,
 `TestTheWorkerIsGivenAWorktreeOfItsOwnOnItsOwnBranch`,
 `TestAWorkerIsSpawnedInItsOwnWorktreeNeverTheProjectDirectory`,
 `TestAVerifierDetachesAtTheCommitItIsGivenNotTheProjectsHead`,
+`TestTheVerifierIsSentToTheWorkersBranchAndNeverToHead`,
+`TestNoVerifierIsSpawnedForAWorkerBindingThatNamesNoBranch`,
 `TestWithoutAWorktreeNothingIsSpawned` and `TestARunLeavesNoWorktreeBehind`
 pin each half.
 

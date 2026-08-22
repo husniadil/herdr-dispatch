@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -705,5 +706,116 @@ func TestAVerifierIsAddressedAtTheTasksPaneOfOrigin(t *testing.T) {
 		if strings.Contains(got, spawn.DispatcherPaneVar+"="+l.BasePane) {
 			t.Errorf("split %d still addresses the daemon: %q", i, got)
 		}
+	}
+}
+
+// recordingTrees is a real Manager that remembers which commit each verifier
+// checkout was asked for. The commit is CHOSEN at the call site, so a pin
+// that cannot see the argument the loop passes cannot pin the choice: a
+// verifier made from the project's HEAD reads the wrong tree while every
+// test one layer down still passes.
+type recordingTrees struct {
+	*worktree.Manager
+	mu       sync.Mutex
+	verifier []string
+	worker   []string
+}
+
+func (r *recordingTrees) Worker(ctx context.Context, project string, seq int) (string, string, error) {
+	r.mu.Lock()
+	r.worker = append(r.worker, project)
+	r.mu.Unlock()
+	return r.Manager.Worker(ctx, project, seq)
+}
+
+func (r *recordingTrees) Verifier(ctx context.Context, project string, seq int, commit string) (string, error) {
+	r.mu.Lock()
+	r.verifier = append(r.verifier, commit)
+	r.mu.Unlock()
+	return r.Manager.Verifier(ctx, project, seq, commit)
+}
+
+func (r *recordingTrees) commits() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.verifier...)
+}
+
+// recording swaps the loop's Manager for one that records what it is asked.
+func recording(t *testing.T, l *Loop) *recordingTrees {
+	t.Helper()
+	m, ok := l.Worktrees.(*worktree.Manager)
+	if !ok {
+		t.Fatalf("the loop is not holding a real manager: %T", l.Worktrees)
+	}
+	rec := &recordingTrees{Manager: m}
+	l.Worktrees = rec
+	return rec
+}
+
+// The commit a verifier reads is chosen HERE, and it is the branch its
+// worker committed on. The project's HEAD is not that commit, and a gate run
+// means nothing when the tree is not the commit under review.
+func TestTheVerifierIsSentToTheWorkersBranchAndNeverToHead(t *testing.T) {
+	l, f, project := newVerifyLoop(t, true)
+	rec := recording(t, l)
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	submitted(t, f, project)
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+
+	got := rec.commits()
+	if len(got) != 1 {
+		t.Fatalf("asked for %d verifier checkouts: %v", len(got), got)
+	}
+	if got[0] == "HEAD" {
+		t.Fatalf("the verifier was sent to the project's HEAD, not to what was submitted")
+	}
+	if want := worktree.Branch(7); got[0] != want {
+		t.Fatalf("the verifier was sent to read %q; its worker committed on %q", got[0], want)
+	}
+}
+
+// A worker binding that names no branch is the real case the refusal exists
+// for: a restart rebinds a live pane from what the board says now, and the
+// board does not know which branch the work is on. There is nothing to read,
+// so nothing is spawned — falling back to the project's HEAD here restores
+// the whole defect and reports a clean gate over the wrong tree.
+func TestNoVerifierIsSpawnedForAWorkerBindingThatNamesNoBranch(t *testing.T) {
+	l, f, project := newVerifyLoop(t, true)
+	rec := recording(t, l)
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	// What a restart leaves: the pane and the task, and no branch.
+	l.mu.Lock()
+	for i := range l.bindings {
+		l.bindings[i].Branch = ""
+	}
+	l.mu.Unlock()
+
+	var logged strings.Builder
+	l.Log = log.New(&logged, "", 0)
+	submitted(t, f, project)
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+
+	if got := splits(t, f); len(got) != 1 {
+		t.Fatalf("split %d panes with no commit to read: %v", len(got), got)
+	}
+	for _, b := range l.Bindings() {
+		if b.IsVerifier() {
+			t.Fatalf("a verifier was bound with no commit to read: %+v", b)
+		}
+	}
+	if got := rec.commits(); len(got) == 1 && got[0] == "HEAD" {
+		t.Fatalf("the loop fell back to the project's HEAD: %v", got)
+	}
+	if !strings.Contains(logged.String(), "submitted") {
+		t.Fatalf("the operator was not told why: %q", logged.String())
 	}
 }

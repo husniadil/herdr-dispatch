@@ -47,6 +47,11 @@ type Manager struct {
 	Git string
 }
 
+// RootDir is where this manager creates its checkouts. The reap is bounded
+// by it, and it is a method rather than the field so a caller can hold a
+// manager behind an interface.
+func (m *Manager) RootDir() string { return m.Root }
+
 func (m *Manager) git() string {
 	if m.Git != "" {
 		return m.Git

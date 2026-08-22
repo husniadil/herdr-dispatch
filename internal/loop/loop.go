@@ -29,6 +29,23 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/worktree"
 )
 
+// Trees is the checkouts this dispatcher hands out, as the loop needs them.
+// worktree.Manager is the one implementation; a test stands in front of it
+// to record what it was asked for.
+type Trees interface {
+	// Worker checks the project out on a branch named for the task and
+	// returns the directory and the branch.
+	Worker(ctx context.Context, project string, seq int) (string, string, error)
+	// Verifier checks the given commit out, detached, and returns the
+	// directory. An empty commit is refused rather than read as HEAD.
+	Verifier(ctx context.Context, project string, seq int, commit string) (string, error)
+	// Remove takes a checkout and git's record of it.
+	Remove(ctx context.Context, dir string) error
+	// RootDir is the directory the checkouts are made under, which is what
+	// bounds the reap.
+	RootDir() string
+}
+
 // Loop holds the adapters, the policy, and the bindings.
 type Loop struct {
 	Board  *htask.Client
@@ -36,10 +53,15 @@ type Loop struct {
 	Spawn  *spawn.Pipeline
 	Config config.Config
 	Policy decide.Policy
-	// Worktrees hands each verifier the checkout it works in. The
-	// verification lane needs it: a verifier with nowhere of its own to work
-	// is not spawned at all.
-	Worktrees *worktree.Manager
+	// Worktrees hands each pane the checkout it works in. Nothing is
+	// spawned without one: an agent with nowhere of its own to work would
+	// have to work in the tree the operator sits in.
+	//
+	// It is an interface so a test can see the ARGUMENTS a spawn passes,
+	// above all which commit a verifier is sent to read. That choice is made
+	// here, and a pin one layer down only proves the manager honours
+	// whatever it is handed.
+	Worktrees Trees
 	// Store is where the bindings outlive the process. A nil Store keeps
 	// them in memory only, which is a test that does not care and never a
 	// running daemon.
@@ -396,13 +418,13 @@ func (l *Loop) release(ctx context.Context) {
 // this daemon names them with. A directory under that root that hdis did not
 // create is not hdis's to remove.
 func (l *Loop) reap(ctx context.Context) {
-	if l.Worktrees == nil || l.Worktrees.Root == "" {
+	if l.Worktrees == nil || l.Worktrees.RootDir() == "" {
 		return
 	}
-	entries, err := os.ReadDir(l.Worktrees.Root)
+	entries, err := os.ReadDir(l.Worktrees.RootDir())
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
-			l.logf("the worktree root %s could not be read, so nothing is reaped: %v", l.Worktrees.Root, err)
+			l.logf("the worktree root %s could not be read, so nothing is reaped: %v", l.Worktrees.RootDir(), err)
 		}
 		return
 	}
@@ -420,7 +442,7 @@ func (l *Loop) reap(ctx context.Context) {
 		if !e.IsDir() || !strings.HasPrefix(e.Name(), worktree.Prefix) {
 			continue
 		}
-		dir := filepath.Join(l.Worktrees.Root, e.Name())
+		dir := filepath.Join(l.Worktrees.RootDir(), e.Name())
 		if named[dir] {
 			continue
 		}

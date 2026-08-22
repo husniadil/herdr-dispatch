@@ -618,8 +618,8 @@ func TestAWorkerIsSpawnedInItsOwnWorktreeNeverTheProjectDirectory(t *testing.T) 
 	if cwd == "/src/p" {
 		t.Fatalf("the worker was put in the shared checkout %s", cwd)
 	}
-	if !strings.HasPrefix(cwd, l.Worktrees.Root) {
-		t.Fatalf("the worker's cwd %s is not under this daemon's worktree root %s", cwd, l.Worktrees.Root)
+	if !strings.HasPrefix(cwd, l.Worktrees.RootDir()) {
+		t.Fatalf("the worker's cwd %s is not under this daemon's worktree root %s", cwd, l.Worktrees.RootDir())
 	}
 	if len(l.bindings) != 1 {
 		t.Fatalf("bindings: %+v", l.bindings)
