@@ -286,10 +286,10 @@ It is an address and nothing more. It says where to answer — normally the pane
 the task was filed from, and the daemon's own pane only when nothing with a
 pane filed it — never who the reader is: the sender stamped on any message the
 agent then writes comes from the mail daemon's own reading of `HERDR_PANE_ID`,
-which is Herdr's word
-about the pane it runs in, and never from this variable. Publishing the
-address is the whole of hdis's part — nothing in this binary imports, reads or
-runs herdr-mail, and a named test walks the source to keep it that way.
+which is Herdr's word about the pane it runs in, and never from this variable.
+Publishing the address is the whole of hdis's part — nothing in this binary
+imports, reads or runs herdr-mail, and a named test walks the source to keep it
+that way.
 
 ## The worker's prompt cache
 
