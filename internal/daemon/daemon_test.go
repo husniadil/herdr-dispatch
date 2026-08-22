@@ -24,6 +24,7 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/spawn"
 	"github.com/husniadil/herdr-dispatch/internal/store"
 	"github.com/husniadil/herdr-dispatch/internal/version"
+	"github.com/husniadil/herdr-dispatch/internal/worktree"
 )
 
 const htaskScript = `case "$1 $2" in
@@ -45,6 +46,22 @@ esac`
 // stateDir keeps the socket path short. A unix socket path has a hard length
 // limit near a hundred characters and the temp dir a test is handed can eat
 // most of it on its own.
+// gitScript is the loop package's fake git, kept here too because a daemon
+// case stands up its own Loop.
+const gitScript = `prev=""; last=""
+for a in "$@"; do prev=$last; last=$a; done
+case "$3" in
+rev-parse)
+  [ "$4" = --verify ] && exit 1
+  echo "$2" ;;
+worktree)
+  case "$4" in
+  add) mkdir -p "$prev" ;;
+  remove) rm -rf "$last" ;;
+  esac ;;
+esac
+exit 0`
+
 func stateDir(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "hdis-")
@@ -61,6 +78,10 @@ func newDaemon(t *testing.T) (*Daemon, *fake.Fake) {
 	f := fake.New(t)
 	f.Bin(t, "htask", htaskScript)
 	f.Bin(t, "herdr", herdrScript)
+	// A git that answers for a project which is not a real repository: it
+	// makes the directory a `worktree add` names and removes the one a
+	// `worktree remove` names, which is all a spawn needs to be observed.
+	f.Bin(t, "git", gitScript)
 	f.Write(t, "ready.json", `{"tasks":[{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"todo"}],"count":1}`)
 	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"todo"}}`)
 	f.Write(t, "doctor.json", `{"version":"0.4.0","contract":"0.3","binary":"/bin/htask","socket_live":true,"herdr_reachable":true}`)
@@ -80,9 +101,10 @@ func newDaemon(t *testing.T) (*Daemon, *fake.Fake) {
 				StartTimeout: time.Second, DialogCeiling: time.Second, ConfirmCeiling: 2 * time.Second,
 				Poll: time.Second, Sleep: func(time.Duration) {},
 			},
-			Store:    &store.Bindings{Path: filepath.Join(t.TempDir(), "hdis-bindings.json")},
-			BasePane: "wM:p1",
-			Log:      log.New(io.Discard, "", 0),
+			Store:     &store.Bindings{Path: filepath.Join(t.TempDir(), "hdis-bindings.json")},
+			Worktrees: &worktree.Manager{Root: t.TempDir(), Git: filepath.Join(f.Dir, "git")},
+			BasePane:  "wM:p1",
+			Log:       log.New(io.Discard, "", 0),
 		},
 		Board:    &htask.Client{},
 		Interval: time.Hour,

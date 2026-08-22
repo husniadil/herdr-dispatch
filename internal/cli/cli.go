@@ -130,8 +130,9 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 			if !w.PaneAlive {
 				state = "pane gone"
 			}
-			fmt.Fprintf(out, "#%-4d %-10s %-10s prompted %s x%d notified=%t  %s\n",
-				w.Seq, w.Pane, or(state, "unknown"), w.PromptedAt.Format(time.RFC3339), w.Prompts, w.Notified, w.Title)
+			fmt.Fprintf(out, "#%-4d %-10s %-10s %-14s prompted %s x%d notified=%t  %s\n",
+				w.Seq, w.Pane, or(state, "unknown"), or(w.Branch, "detached"),
+				w.PromptedAt.Format(time.RFC3339), w.Prompts, w.Notified, w.Title)
 		}
 		for _, id := range st.Pending {
 			fmt.Fprintf(out, "%-5s %-10s reserved, not yet spawned\n", "", id)

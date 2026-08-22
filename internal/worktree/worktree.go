@@ -1,4 +1,4 @@
-// Package worktree is the throwaway checkout a verifier works in.
+// Package worktree is the checkout an agent this dispatcher spawns works in.
 //
 // The verification lane used to run in the project directory itself, the one
 // its worker still holds and the operator reviews in, and the first live run
@@ -25,7 +25,18 @@ import (
 // Prefix is what every directory this package creates is named with. A
 // restart reaps by it: a directory under the root carrying it is one hdis
 // made, and anything else under there is not hdis's to remove.
-const Prefix = "hdis-verify-"
+const Prefix = "hdis-"
+
+// WorkPrefix names a worker's checkout and VerifyPrefix a verifier's. Both
+// carry Prefix, so one reap covers both lanes.
+const (
+	WorkPrefix   = Prefix + "work-"
+	VerifyPrefix = Prefix + "verify-"
+)
+
+// Branch is the branch a worker's checkout is put on: named for the task, so
+// an operator reading `git branch` sees which task each one carries.
+func Branch(seq int) string { return fmt.Sprintf("hdis/task-%d", seq) }
 
 // Manager creates and removes the worktrees verifiers work in.
 type Manager struct {
@@ -43,32 +54,73 @@ func (m *Manager) git() string {
 	return "git"
 }
 
-// Create checks the project out at its committed HEAD in a directory of its
-// own and returns that directory.
+// Worker checks the project out in a directory of its own, on a branch named
+// for the task, and returns both.
+//
+// A worker commits, so it needs somewhere its commits can live: a branch,
+// created at the project's current HEAD. Removing the directory later leaves
+// the branch and everything committed on it reachable from the project,
+// which is what makes reaping a worker's checkout safe.
+//
+// A task dispatched again — a rejection reworked in a new pane — continues
+// the branch it already has rather than starting a second one.
+func (m *Manager) Worker(ctx context.Context, project string, seq int) (string, string, error) {
+	root, dir, err := m.prepare(ctx, project, WorkPrefix, seq)
+	if err != nil {
+		return "", "", err
+	}
+	branch := Branch(seq)
+	args := []string{"worktree", "add", "-b", branch, dir, "HEAD"}
+	if _, err := m.run(ctx, root, "rev-parse", "--verify", "--quiet", branch); err == nil {
+		args = []string{"worktree", "add", dir, branch}
+	}
+	if _, err := m.run(ctx, root, args...); err != nil {
+		os.RemoveAll(dir)
+		return "", "", fmt.Errorf("no worktree for %s: %w", project, err)
+	}
+	return dir, branch, nil
+}
+
+// Verifier checks the SUBMITTED commit out in a directory of its own and
+// returns it. The commit is named by the caller — the branch the worker
+// committed on — because the project's own HEAD is not what was submitted
+// once a worker stopped committing to it, and a gate run means nothing when
+// the tree is not the commit under review.
 //
 // The checkout is detached on purpose: nothing done in it can move the
-// branch the worker's commits live on, and the verifier reads the commit
-// that was submitted rather than whatever the shared tree happens to hold.
-func (m *Manager) Create(ctx context.Context, project string, seq int) (string, error) {
-	root, err := m.run(ctx, project, "rev-parse", "--show-toplevel")
+// branch the worker's commits live on.
+func (m *Manager) Verifier(ctx context.Context, project string, seq int, commit string) (string, error) {
+	if commit == "" {
+		return "", fmt.Errorf("no worktree for %s: nothing names the commit that was submitted", project)
+	}
+	root, dir, err := m.prepare(ctx, project, VerifyPrefix, seq)
 	if err != nil {
-		return "", fmt.Errorf("no worktree for %s: %w", project, err)
+		return "", err
 	}
-
-	if m.Root != "" {
-		if err := os.MkdirAll(m.Root, 0o700); err != nil {
-			return "", fmt.Errorf("no worktree for %s: %w", project, err)
-		}
-	}
-	dir, err := os.MkdirTemp(m.Root, fmt.Sprintf(Prefix+"%d-*", seq))
-	if err != nil {
-		return "", fmt.Errorf("no worktree for %s: %w", project, err)
-	}
-	if _, err := m.run(ctx, root, "worktree", "add", "--detach", dir, "HEAD"); err != nil {
+	if _, err := m.run(ctx, root, "worktree", "add", "--detach", dir, commit); err != nil {
 		os.RemoveAll(dir)
 		return "", fmt.Errorf("no worktree for %s: %w", project, err)
 	}
 	return dir, nil
+}
+
+// prepare finds the project's repository root and makes the empty directory
+// its checkout goes in.
+func (m *Manager) prepare(ctx context.Context, project, prefix string, seq int) (string, string, error) {
+	root, err := m.run(ctx, project, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", "", fmt.Errorf("no worktree for %s: %w", project, err)
+	}
+	if m.Root != "" {
+		if err := os.MkdirAll(m.Root, 0o700); err != nil {
+			return "", "", fmt.Errorf("no worktree for %s: %w", project, err)
+		}
+	}
+	dir, err := os.MkdirTemp(m.Root, fmt.Sprintf(prefix+"%d-*", seq))
+	if err != nil {
+		return "", "", fmt.Errorf("no worktree for %s: %w", project, err)
+	}
+	return root, dir, nil
 }
 
 // Remove takes the worktree directory and git's own record of it. A

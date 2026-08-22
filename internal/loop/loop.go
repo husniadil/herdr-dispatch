@@ -384,10 +384,12 @@ func (l *Loop) release(ctx context.Context) {
 }
 
 // reap removes the checkouts under this daemon's own worktree root that no
-// binding names. A verifier's binding is the only record of where its
-// checkout is, so a restart that loses the binding — a pane retired while the
-// daemon was down, a store written before the create — leaves the directory
-// with nothing left to remove it.
+// binding names. A binding is the only record of where a checkout is, so a
+// restart that loses one — a pane retired while the daemon was down, a store
+// written before the create — leaves the directory with nothing left to
+// remove it. Both lanes are covered: a worker's checkout is as reapable as a
+// verifier's, because a worker's commits are on a branch and the branch
+// outlives the directory.
 //
 // It is bounded twice over, and deliberately: only inside the root this
 // daemon creates its own checkouts in, and only entries carrying the prefix
@@ -422,7 +424,7 @@ func (l *Loop) reap(ctx context.Context) {
 		if named[dir] {
 			continue
 		}
-		l.logf("worktree %s: no binding names it, so the verifier it belonged to is gone; removing it", dir)
+		l.logf("worktree %s: no binding names it, so the agent it belonged to is gone; removing it", dir)
 		if err := l.Worktrees.Remove(ctx, dir); err != nil {
 			l.logf("worktree %s could not be removed: %v", dir, err)
 		}
@@ -590,6 +592,19 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 	if err != nil {
 		return err
 	}
+	// The checkout comes first, and no checkout means no worker. A worker
+	// edits, stages and commits, so the project directory — the one the
+	// operator sits in and every other worker would otherwise hold — is the
+	// one place it must never run: two workers in that tree is how one
+	// task's commit swept up another task's uncommitted work. Not
+	// dispatching is the better failure, and the next tick may try again.
+	if l.Worktrees == nil {
+		return fmt.Errorf("no worktree manager, so nothing works on task %s in a tree of its own", row.Project)
+	}
+	tree, branch, err := l.Worktrees.Worker(ctx, row.Project, row.Seq)
+	if err != nil {
+		return err
+	}
 	// The condition is composed here, not rendered from the board: it travels
 	// on a line herdr TYPES into the pane, and the board's own goal document
 	// is far too long to type intact. The worker reads the criteria itself.
@@ -597,11 +612,18 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 		Name:       workerName(row.Seq),
 		BasePane:   l.BasePane,
 		OriginPane: row.PaneID,
-		Cwd:        row.Project,
+		Cwd:        tree,
 		Profile:    profile,
 		Goal:       spawn.PointerGoal(row.Seq),
 	})
 	if pane == "" {
+		// Nothing came up, so the task has not had its worker and the next
+		// tick may try again. The checkout it would have worked in goes with
+		// it; the branch stays, because a branch costs nothing and a second
+		// attempt continues the one it already has.
+		if rmErr := l.Worktrees.Remove(ctx, tree); rmErr != nil {
+			l.logf("task %s: %v", row.ID, rmErr)
+		}
 		return err
 	}
 	// A pane came back, so a worker is alive in it — including when the
@@ -614,6 +636,8 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 		TaskID:     row.ID,
 		Pane:       pane,
 		Kind:       decide.KindWorker,
+		Worktree:   tree,
+		Branch:     branch,
 		PromptedAt: l.now(),
 		Prompts:    1,
 	})
@@ -643,15 +667,19 @@ func (l *Loop) spawnVerifier(ctx context.Context, a decide.Action) error {
 	}
 	// The checkout comes first, and no checkout means no verifier. A
 	// verifier reads and mutates the tree it is put in, so the project's own
-	// directory — which its worker still holds and the operator reviews in —
-	// is the one place it must never run: the lane's first live run restored
-	// that tree from HEAD, destroyed the operator's uncommitted work, and
-	// then reported a gate result measured on it. Not verifying is the
-	// better failure, and the next tick may try again.
+	// directory — which the operator reviews in — is the one place it must
+	// never run: the lane's first live run restored that tree from HEAD,
+	// destroyed the operator's uncommitted work, and then reported a gate
+	// result measured on it. Not verifying is the better failure, and the
+	// next tick may try again.
 	if l.Worktrees == nil {
 		return fmt.Errorf("no worktree manager, so nothing verifies task %s in a tree of its own", row.Project)
 	}
-	tree, err := l.Worktrees.Create(ctx, row.Project, row.Seq)
+	// And it reads the commit that was SUBMITTED, which is the tip of the
+	// branch its worker committed on. The project's own HEAD is not that
+	// commit now that a worker no longer commits to it, and a gate run means
+	// nothing when the tree is not the commit under review.
+	tree, err := l.Worktrees.Verifier(ctx, row.Project, row.Seq, l.branchFor(row.ID))
 	if err != nil {
 		return err
 	}
@@ -691,6 +719,19 @@ func (l *Loop) spawnVerifier(ctx context.Context, a decide.Action) error {
 	l.saveLocked()
 	l.mu.Unlock()
 	return err
+}
+
+// branchFor is the branch the worker of a task committed on, or empty when
+// no worker binding of this daemon's names one.
+func (l *Loop) branchFor(taskID string) string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, b := range l.bindings {
+		if b.TaskID == taskID && !b.IsVerifier() {
+			return b.Branch
+		}
+	}
+	return ""
 }
 
 // rearm forgets the announcement and the verification on a task's worker

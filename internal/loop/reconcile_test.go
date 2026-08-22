@@ -241,3 +241,34 @@ func TestARestartKeepsWhatItDidNotStrand(t *testing.T) {
 		}
 	}
 }
+
+// A worker's checkout is reaped by the same rule as a verifier's: under this
+// daemon's own root, carrying the prefix this daemon names them with, and
+// named by no binding. A directory hdis did not make is left where it is.
+func TestARestartReapsAWorkerCheckoutAndLeavesWhatItDidNotMake(t *testing.T) {
+	l, f := newLoop(t)
+	root := t.TempDir()
+	l.Worktrees = &worktree.Manager{Root: root, Git: fakeGit(t, f)}
+	stranded := filepath.Join(root, worktree.WorkPrefix+"7-abc")
+	foreign := filepath.Join(root, "the-operators-own-checkout")
+	for _, d := range []string{stranded, foreign} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var said strings.Builder
+	l.Log = log.New(&said, "", 0)
+	if _, err := l.Adopt(context.Background()); err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+	if _, err := os.Stat(stranded); !os.IsNotExist(err) {
+		t.Fatalf("the stranded worker checkout is still there: %v", err)
+	}
+	if _, err := os.Stat(foreign); err != nil {
+		t.Fatalf("a directory hdis did not make was removed: %v", err)
+	}
+	if !strings.Contains(said.String(), filepath.Base(stranded)) {
+		t.Fatalf("the operator was not told what was reaped: %q", said.String())
+	}
+}

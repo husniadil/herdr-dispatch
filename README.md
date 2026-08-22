@@ -357,7 +357,8 @@ names — `hdis-<task>` for a worker, `hdis-v-<task>` for a verifier — carry t
 task number, so the name is what says a live pane is its own and which row to
 read. The persisted bindings are a hint on top of that, never the frame: they
 carry what Herdr cannot — when the goal was delivered, how often, whether
-review was announced, which checkout a verifier was given — and they cover the
+review was announced, which checkout a pane was given and which branch a
+worker's commits are on — and they cover the
 seconds after a `pane split` in which the agent has not registered yet.
 
 The answers, all of them consequences of the one question:
@@ -391,9 +392,11 @@ is still keeping for this daemon that no adopted pane is working is stale by
 construction: it is handed back with `task release` and a note saying the
 dispatcher went down before a worker came up, so the task returns to the ready
 list instead of sitting reserved forever. And a checkout under
-`<state_dir>/worktrees` that no binding names is removed: a verifier's binding
-is the only record of where its checkout is, so a binding lost while the
-daemon was down leaves the directory with nothing to remove it. Every one is
+`<state_dir>/worktrees` that no binding names is removed, a worker's as
+readily as a verifier's: the binding is the only record of where a checkout
+is, so one lost while the daemon was down leaves the directory with nothing to
+remove it. A worker's commits are on its branch, and the branch outlives the
+directory, so reaping one strands no work. Every one is
 logged with the reason.
 
 **What a restart will never touch.** A pane this daemon did not open — one
@@ -402,7 +405,8 @@ never adopted and never closed. A hold carrying another daemon's principal is
 never released: `task list --mine` is scoped to the principal, so a peer's row
 is not even in the answer, and a reservation record naming a peer is left for
 it. Anything outside `<state_dir>/worktrees` is never removed, and inside it
-only entries carrying the `hdis-verify-` prefix hdis names its own with.
+only entries carrying the `hdis-` prefix hdis names its own with —
+`hdis-work-` for a worker's checkout, `hdis-verify-` for a verifier's.
 Lease release stays htask's own — a single stale hold this daemon itself is
 named on is handed back, and the pane-gone sweep and the lease timer are never
 reimplemented here.
@@ -461,25 +465,52 @@ operator decides, and the board's review gate is still the only thing that
 moves the task. `TestTheBoardAdapterCarriesNoReviewVerb` and
 `TestNoSourceFilePassesAReviewVerbAsAnArgument` pin that from both sides.
 
-A verifier works in a checkout of its own, and never in the project
-directory. Its pane is opened in a detached `git worktree` of the project at
-its committed HEAD, made under `<state_dir>/worktrees`, and removed when the
-binding that owns it is dropped. The worker keeps the project directory
-itself, because its commits belong on the branch.
+Every pane this dispatcher opens works in a checkout of its own, and never in
+the project directory. Both are made under `<state_dir>/worktrees` and removed
+when the binding that owns them is dropped, and they differ in what they are
+for:
 
-The split is not tidiness. The lane's first live run had the verifier, the
-worker and the operator all mutating one tree: the verifier restored it from
+- A **worker** gets a `git worktree` on a branch named for its task,
+  `hdis/task-<seq>`, created at the project's current HEAD. It commits, so it
+  needs somewhere its commits can live. Removing the directory later leaves
+  the branch and every commit on it reachable from the project, which is what
+  makes reaping a worker's checkout safe.
+- A **verifier** gets a detached checkout at the commit that was SUBMITTED,
+  which is the tip of the branch its worker committed on. The project's own
+  HEAD is not that commit now that a worker no longer commits to it, and a
+  gate run means nothing when the tree is not the commit under review.
+
+**hdis integrates nothing.** It creates a branch and it removes checkouts.
+Bringing the work home — fast-forward, merge, cherry-pick, push — and deleting
+the branch afterwards are the operator's own acts, after review, on their own
+judgment. `TestNoSourceFilePassesAMergePushOrBranchDeleteAsAnArgument` pins
+that the way the review-verb guard pins the board boundary.
+
+The split is not tidiness. It has bitten twice. Two workers sharing the
+project directory is how one task's commit swept up another task's
+uncommitted prose: nothing was lost that night only because both changes were
+wanted, and the next collision would have been two workers editing one file.
+And the verification lane's first live run had the verifier, the worker and
+the operator all mutating one tree: the verifier restored it from
 HEAD and destroyed the operator's uncommitted work, then reported a gate
 result it had measured over that debris rather than over the commit under
 review. A gate run means nothing when the tree is not the commit. So the
 worktree is a precondition rather than a convenience: when it cannot be made
-— the project is not a git repository, or git refuses — no verifier is
-spawned at all, the reason is logged, and the task simply stays in review for
-the operator. Verifying in the shared tree is worse than not verifying.
-`TestAVerifierIsGivenAWorktreeAndNeverTheProjectDirectory`,
-`TestTheWorkerIsGivenTheProjectDirectoryItself`,
-`TestWithoutAWorktreeNoVerifierIsSpawned` and `TestARunLeavesNoWorktreeBehind`
+— the project is not a git repository, or git refuses — nothing is spawned at
+all, the reason is logged, and the task simply stays where it is for a tick
+that can hand out a checkout. Working in the shared tree is worse than not
+working. `TestAVerifierIsGivenAWorktreeAndNeverTheProjectDirectory`,
+`TestTheWorkerIsGivenAWorktreeOfItsOwnOnItsOwnBranch`,
+`TestAWorkerIsSpawnedInItsOwnWorktreeNeverTheProjectDirectory`,
+`TestAVerifierDetachesAtTheCommitItIsGivenNotTheProjectsHead`,
+`TestWithoutAWorktreeNothingIsSpawned` and `TestARunLeavesNoWorktreeBehind`
 pin each half.
+
+**What the operator now does by hand.** A worker's commits land on
+`hdis/task-<seq>` and nowhere else, so approving a task no longer leaves the
+work on the project's own branch. Merging that branch, and deleting it
+afterwards, is a step that did not exist before. `hdis status` names the
+branch beside the pane so it can be found without reading the bindings file.
 
 ## Building and testing
 

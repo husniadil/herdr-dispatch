@@ -7,6 +7,7 @@ import (
 
 	"github.com/husniadil/herdr-dispatch/internal/codes"
 	"github.com/husniadil/herdr-dispatch/internal/decide"
+	"github.com/husniadil/herdr-dispatch/internal/worktree"
 )
 
 // The whole point of the on-demand verb: it reserves the task and comes back,
@@ -361,5 +362,26 @@ func TestDispatchStillRefusesATaskThatIsNotReadyOnAnotherBoard(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "agent:wM:p4") {
 		t.Fatalf("the refusal lost who holds the task: %v", err)
+	}
+}
+
+// An operator reading status has to be able to find the work, which is now
+// on a branch rather than in the project directory. So status names it.
+func TestStatusNamesTheBranchBesideThePane(t *testing.T) {
+	l, f := newLoop(t)
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9","name":"n","agent":"claude","agent_status":"working","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
+
+	st, err := l.Status(context.Background())
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if len(st.Workers) != 1 {
+		t.Fatalf("workers: %+v", st.Workers)
+	}
+	if got, want := st.Workers[0].Branch, worktree.Branch(7); got != want {
+		t.Fatalf("status names branch %q, the worker is on %q", got, want)
 	}
 }

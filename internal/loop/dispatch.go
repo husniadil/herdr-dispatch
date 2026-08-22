@@ -38,6 +38,9 @@ type Worker struct {
 	AgentStatus string `json:"agent_status"`
 	// PaneAlive is whether herdr still lists the pane. A binding whose pane
 	// is gone is dropped by the next tick.
+	// Branch is where a worker's commits are, so an operator reading status
+	// can find the work; a verifier works detached and has none.
+	Branch     string    `json:"branch,omitempty"`
 	PaneAlive  bool      `json:"pane_alive"`
 	PromptedAt time.Time `json:"prompted_at"`
 	Prompts    int       `json:"prompts"`
@@ -156,6 +159,7 @@ func (l *Loop) Status(ctx context.Context) (Status, error) {
 			Pane:        b.Pane,
 			Kind:        kindOf(b),
 			AgentStatus: status,
+			Branch:      b.Branch,
 			PaneAlive:   alive,
 			PromptedAt:  b.PromptedAt,
 			Prompts:     b.Prompts,

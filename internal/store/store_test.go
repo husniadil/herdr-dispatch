@@ -256,3 +256,31 @@ func TestAVerifiersWorktreeSurvivesARoundTrip(t *testing.T) {
 		t.Fatalf("the checkout was forgotten: %+v", got.Bindings)
 	}
 }
+
+// The branch a worker's commits live on is remembered beside the checkout
+// they were made in: a restart that lost it could not tell a verifier which
+// commit was submitted, and could not tell the operator where the work is.
+func TestABindingsBranchAndWorktreeBothSurviveARestart(t *testing.T) {
+	b := &Bindings{Path: filepath.Join(t.TempDir(), "hdis-bindings.json")}
+	want := decide.Binding{
+		TaskID: "01AAA", Pane: "wM:p9", Kind: decide.KindWorker,
+		Worktree: "/state/hdis-work-7-abc", Branch: "hdis/task-7",
+		PromptedAt: time.UnixMilli(1_700_000_000_000).UTC(), Prompts: 1,
+	}
+	if err := b.Save(State{Bindings: []decide.Binding{want}}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	back, err := (&Bindings{Path: b.Path}).Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(back.Bindings) != 1 {
+		t.Fatalf("bindings: %+v", back.Bindings)
+	}
+	// The kind comes back empty, which is what an absent kind means: the
+	// document stays readable to an hdis that predates the verifier lane.
+	want.Kind = ""
+	if got := back.Bindings[0]; got != want {
+		t.Fatalf("the binding came back as %+v, want %+v", got, want)
+	}
+}

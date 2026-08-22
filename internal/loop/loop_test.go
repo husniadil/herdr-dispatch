@@ -18,6 +18,7 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/proxy"
 	"github.com/husniadil/herdr-dispatch/internal/spawn"
 	"github.com/husniadil/herdr-dispatch/internal/store"
+	"github.com/husniadil/herdr-dispatch/internal/worktree"
 )
 
 var clock = time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
@@ -51,6 +52,31 @@ esac`
 
 const readyOne = `{"tasks":[{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"todo"}],"count":1}`
 
+// gitScript stands in for the git a worktree Manager runs: it answers
+// rev-parse with the directory it was asked in, creates the directory a
+// `worktree add` names, and removes the one a `worktree remove` names. A
+// fake that only exits zero makes nothing, and a test standing on one passes
+// whether the code created a checkout or not.
+const gitScript = `prev=""; last=""
+for a in "$@"; do prev=$last; last=$a; done
+case "$3" in
+rev-parse)
+  [ "$4" = --verify ] && exit 1
+  echo "$2" ;;
+worktree)
+  case "$4" in
+  add) mkdir -p "$prev" ;;
+  remove) rm -rf "$last" ;;
+  esac ;;
+esac
+exit 0`
+
+func fakeGit(t *testing.T, f *fake.Fake) string {
+	t.Helper()
+	f.Bin(t, "git", gitScript)
+	return filepath.Join(f.Dir, "git")
+}
+
 func newLoop(t *testing.T) (*Loop, *fake.Fake) {
 	t.Helper()
 	f := fake.New(t)
@@ -79,10 +105,11 @@ func newLoop(t *testing.T) (*Loop, *fake.Fake) {
 			StartTimeout: time.Second, DialogCeiling: time.Second, ConfirmCeiling: 5 * time.Second,
 			Poll: time.Second, Sleep: func(time.Duration) {},
 		},
-		Store:    &store.Bindings{Path: filepath.Join(t.TempDir(), "hdis-bindings.json")},
-		BasePane: "wM:p1",
-		Now:      func() time.Time { return clock },
-		Log:      log.New(io.Discard, "", 0),
+		Store:     &store.Bindings{Path: filepath.Join(t.TempDir(), "hdis-bindings.json")},
+		Worktrees: &worktree.Manager{Root: t.TempDir(), Git: fakeGit(t, f)},
+		BasePane:  "wM:p1",
+		Now:       func() time.Time { return clock },
+		Log:       log.New(io.Discard, "", 0),
 	}
 	return l, f
 }
@@ -570,5 +597,56 @@ esac`)
 	}
 	if !l.bindings[0].Notified {
 		t.Fatal("the binding does not remember that review was announced")
+	}
+}
+
+// A worker edits, stages and commits, so it works in a checkout of its own on
+// a branch of its own. The shared project directory — the one the operator
+// sits in and every other worker would otherwise hold — is never its Cwd.
+func TestAWorkerIsSpawnedInItsOwnWorktreeNeverTheProjectDirectory(t *testing.T) {
+	l, f := newLoop(t)
+
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+
+	split := splits(t, f)
+	if len(split) != 1 {
+		t.Fatalf("pane split ran %d times: %v", len(split), split)
+	}
+	cwd := cwdOf(t, split[0])
+	if cwd == "/src/p" {
+		t.Fatalf("the worker was put in the shared checkout %s", cwd)
+	}
+	if !strings.HasPrefix(cwd, l.Worktrees.Root) {
+		t.Fatalf("the worker's cwd %s is not under this daemon's worktree root %s", cwd, l.Worktrees.Root)
+	}
+	if len(l.bindings) != 1 {
+		t.Fatalf("bindings: %+v", l.bindings)
+	}
+	b := l.bindings[0]
+	if b.Worktree != cwd {
+		t.Fatalf("the binding records worktree %q, the worker was put in %q", b.Worktree, cwd)
+	}
+	if b.Branch != worktree.Branch(7) {
+		t.Fatalf("the binding records branch %q, want %q", b.Branch, worktree.Branch(7))
+	}
+}
+
+// No checkout is no worker. Falling back to the project directory is the
+// defect this lane exists to close, so the spawn refuses and the task stays
+// ready for a tick that can give it a tree of its own.
+func TestAWorkerIsNotSpawnedAtAllWhenItCanBeGivenNoWorktree(t *testing.T) {
+	l, f := newLoop(t)
+	l.Worktrees = nil
+
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if got := calls(t, f, "pane split"); len(got) != 0 {
+		t.Fatalf("a worker came up with nowhere of its own to work: %v", got)
+	}
+	if len(l.bindings) != 0 {
+		t.Fatalf("a binding was written for a worker that never came up: %+v", l.bindings)
 	}
 }

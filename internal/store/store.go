@@ -90,6 +90,11 @@ type record struct {
 	// remove it, and a startup reap would take it while the verifier is
 	// still working in it.
 	Worktree string `json:"worktree,omitempty"`
+	// Branch is where a worker's commits are. The checkout is removed when
+	// the pane is retired and the branch is not, so a binding that comes
+	// back without it leaves an operator with no name for the work and a
+	// verifier with no way to say which commit was submitted.
+	Branch string `json:"branch,omitempty"`
 }
 
 // Load reads the bindings. A store nobody has written is an empty set and no
@@ -122,6 +127,7 @@ func (b *Bindings) Load() (State, error) {
 			Kind:       r.Kind,
 			Verified:   r.Verified,
 			Worktree:   r.Worktree,
+			Branch:     r.Branch,
 		})
 	}
 	held := make([]Reservation, 0, len(doc.Reservations))
@@ -160,6 +166,7 @@ func (b *Bindings) Save(state State) error {
 			Kind:         kindOf(x),
 			Verified:     x.Verified,
 			Worktree:     x.Worktree,
+			Branch:       x.Branch,
 		})
 	}
 	for _, x := range state.Reservations {

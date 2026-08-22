@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -453,8 +454,9 @@ func TestAVerifierIsGivenAWorktreeAndNeverTheProjectDirectory(t *testing.T) {
 	if strings.HasPrefix(cwd, project+string(filepath.Separator)) {
 		t.Fatalf("the verifier's worktree is inside the project: %s", cwd)
 	}
+	// Two checkouts now: the worker's and this one. Neither is the project.
 	held := worktreesOf(t, project)
-	if len(held) != 1 || held[0] != cwd {
+	if len(held) != 2 || !slices.Contains(held, cwd) {
 		t.Fatalf("git records %v, the verifier was given %s", held, cwd)
 	}
 	if b, ok := bindingFor(l, "wM:p10"); !ok || b.Worktree != cwd {
@@ -462,8 +464,10 @@ func TestAVerifierIsGivenAWorktreeAndNeverTheProjectDirectory(t *testing.T) {
 	}
 }
 
-// The worker keeps the project directory: its commits belong on the branch.
-func TestTheWorkerIsGivenTheProjectDirectoryItself(t *testing.T) {
+// The worker gets a checkout of its own too, on a branch named for the task
+// and starting at the project's HEAD. Two workers in the shared tree is how
+// one task's commit swept up another task's uncommitted work.
+func TestTheWorkerIsGivenAWorktreeOfItsOwnOnItsOwnBranch(t *testing.T) {
 	l, f, project := newVerifyLoop(t, true)
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("first tick: %v", err)
@@ -472,17 +476,31 @@ func TestTheWorkerIsGivenTheProjectDirectoryItself(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("split %d panes: %v", len(got), got)
 	}
-	if cwd := cwdOf(t, got[0]); cwd != project {
-		t.Fatalf("the worker was given %s, not the project %s", cwd, project)
+	cwd := cwdOf(t, got[0])
+	if cwd == project || strings.HasPrefix(cwd, project+string(filepath.Separator)) {
+		t.Fatalf("the worker was put in the project directory: %s", cwd)
 	}
-	if held := worktreesOf(t, project); len(held) != 0 {
-		t.Fatalf("a worker earned a worktree: %v", held)
+	if held := worktreesOf(t, project); len(held) != 1 || held[0] != cwd {
+		t.Fatalf("git records %v, the worker was given %s", held, cwd)
+	}
+	branch := worktree.Branch(7)
+	out, err := exec.Command("git", "-C", cwd, "symbolic-ref", "--short", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("the worker's checkout is detached: %v", err)
+	}
+	if on := strings.TrimSpace(string(out)); on != branch {
+		t.Fatalf("the worker is on %q, want %q", on, branch)
+	}
+	b, ok := bindingFor(l, "wM:p9")
+	if !ok || b.Worktree != cwd || b.Branch != branch {
+		t.Fatalf("the binding does not carry the checkout and its branch: %+v", b)
 	}
 }
 
-// No worktree, no verifier. Verifying in the shared tree is worse than not
-// verifying, so the reason is logged and the task simply stays in review.
-func TestWithoutAWorktreeNoVerifierIsSpawned(t *testing.T) {
+// No worktree, nothing spawns. Working in the shared tree is worse than not
+// working at all, so the reason is logged and the task simply stays where it
+// is for a tick that can hand out a checkout.
+func TestWithoutAWorktreeNothingIsSpawned(t *testing.T) {
 	plain := t.TempDir() // a project directory that is not a git repository
 	l, f, project := newVerifyLoopIn(t, true, plain)
 	var logged strings.Builder
@@ -495,20 +513,14 @@ func TestWithoutAWorktreeNoVerifierIsSpawned(t *testing.T) {
 		t.Fatalf("second tick: %v", err)
 	}
 
-	if got := splits(t, f); len(got) != 1 {
+	if got := splits(t, f); len(got) != 0 {
 		t.Fatalf("split %d panes with no worktree to be had: %v", len(got), got)
 	}
-	for _, b := range l.Bindings() {
-		if b.IsVerifier() {
-			t.Fatalf("a verifier was bound without a worktree: %+v", b)
-		}
+	if len(l.Bindings()) != 0 {
+		t.Fatalf("something was bound without a worktree: %+v", l.Bindings())
 	}
 	if !strings.Contains(logged.String(), plain) {
 		t.Fatalf("the operator was not told why: %q", logged.String())
-	}
-	// Review was still announced: the submission is the operator's to judge.
-	if got := calls(t, f, "notification show"); len(got) != 1 {
-		t.Fatalf("announced review %d times: %v", len(got), got)
 	}
 	// And the board was left alone.
 	for _, verb := range []string{"task approve", "task reject"} {
@@ -518,7 +530,8 @@ func TestWithoutAWorktreeNoVerifierIsSpawned(t *testing.T) {
 	}
 }
 
-// A run leaves nothing behind: the worktree goes with the binding.
+// A retire leaves nothing behind: the worktree goes with the binding it
+// belonged to, and only that one.
 func TestARunLeavesNoWorktreeBehind(t *testing.T) {
 	l, f, project := newVerifyLoop(t, true)
 	if err := l.Tick(context.Background()); err != nil {
@@ -528,9 +541,13 @@ func TestARunLeavesNoWorktreeBehind(t *testing.T) {
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("second tick: %v", err)
 	}
-	held := worktreesOf(t, project)
-	if len(held) != 1 {
-		t.Fatalf("the verifier has no worktree: %v", held)
+	v, ok := bindingFor(l, "wM:p10")
+	if !ok || v.Worktree == "" {
+		t.Fatalf("the verifier has no worktree: %+v", l.Bindings())
+	}
+	w, ok := bindingFor(l, "wM:p9")
+	if !ok || w.Worktree == "" {
+		t.Fatalf("the worker has no worktree: %+v", l.Bindings())
 	}
 
 	// The verifier goes quiet past the grace and is retired.
@@ -539,10 +556,10 @@ func TestARunLeavesNoWorktreeBehind(t *testing.T) {
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("third tick: %v", err)
 	}
-	if left := worktreesOf(t, project); len(left) != 0 {
-		t.Fatalf("git still records %v", left)
+	if left := worktreesOf(t, project); slices.Contains(left, v.Worktree) {
+		t.Fatalf("git still records the retired verifier's checkout: %v", left)
 	}
-	if _, err := os.Stat(held[0]); !os.IsNotExist(err) {
+	if _, err := os.Stat(v.Worktree); !os.IsNotExist(err) {
 		t.Fatalf("the worktree directory outlived the binding: %v", err)
 	}
 }
@@ -558,12 +575,16 @@ func TestAVanishedVerifierPaneTakesItsWorktreeWithIt(t *testing.T) {
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("second tick: %v", err)
 	}
+	v, ok := bindingFor(l, "wM:p10")
+	if !ok || v.Worktree == "" {
+		t.Fatalf("the verifier has no worktree: %+v", l.Bindings())
+	}
 	f.Write(t, "panes.json", paneList("wM:p9", "idle")) // the verifier's pane is gone
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("third tick: %v", err)
 	}
-	if left := worktreesOf(t, project); len(left) != 0 {
-		t.Fatalf("git still records %v", left)
+	if left := worktreesOf(t, project); slices.Contains(left, v.Worktree) {
+		t.Fatalf("git still records the vanished verifier's checkout: %v", left)
 	}
 }
 

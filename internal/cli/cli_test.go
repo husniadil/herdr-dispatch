@@ -217,3 +217,22 @@ func TestDoctorNamesTheLaneEvenWhenTheBoardIsDown(t *testing.T) {
 		t.Fatalf("doctor printed %q", out.String())
 	}
 }
+
+// The work is no longer in the project directory, so the line an operator
+// reads has to name the branch it is on.
+func TestStatusNamesTheBranchTheWorkIsOn(t *testing.T) {
+	raw, err := json.Marshal(loop.Status{Workers: []loop.Worker{{
+		Seq: 7, Pane: "wM:p9", AgentStatus: "working", PaneAlive: true,
+		Branch: "hdis/task-7", Title: "do the thing",
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if err := Write("status", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if !strings.Contains(out.String(), "hdis/task-7") {
+		t.Fatalf("status does not name the branch: %q", out.String())
+	}
+}

@@ -7,6 +7,38 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+A worker now works in a git worktree of its own, on a branch named for its
+task, rather than in the project directory. The branch is `hdis/task-<seq>`,
+created at the project's current HEAD; the checkout is made under
+`<state_dir>/worktrees` and removed when the binding that owns it is dropped,
+which leaves the branch and every commit on it reachable. Until now only a
+verifier got a checkout of its own, so every worker this daemon opened edited,
+staged and committed in the tree the operator sits in — and one task's commit
+swept up another task's uncommitted work the first time two ran at once. When
+a checkout cannot be made, nothing is spawned at all and the reason is logged.
+
+A verifier now detaches at the commit that was SUBMITTED, the tip of its
+worker's branch, rather than at the project's HEAD. HEAD stopped being the
+commit under review the moment a worker stopped committing to it.
+
+**Operators have a step they did not have before.** A worker's commits land on
+`hdis/task-<seq>` and nowhere else, so approving a task no longer leaves the
+work on the project's own branch: merging that branch, and deleting it
+afterwards, is the operator's own act. hdis creates a branch and removes
+checkouts; it merges nothing, pushes nothing and deletes no branch, and a
+source-walking test fails on any of the three.
+
+`status` gains a `branch` field on each worker, and its prose line names the
+branch beside the pane, so the work can be found without reading the bindings
+file. A verifier works detached and has none, so the field is omitted for one
+and the line reads `detached`.
+
+The bindings file gains a `branch` on each record. A binding written by an
+older hdis simply has none, and both files stay readable to both binaries. The
+restart reap now covers worker checkouts as well as verifier ones: it is still
+bounded to `<state_dir>/worktrees` and to entries carrying the `hdis-` prefix
+this binary names its own with.
+
 Declares the shared plugin contract at 0.6.0, up from the 0.4.0 of the first
 release. §5.1/§10.1 forbid resolving a store from the Herdr-injected plugin
 dirs, which this binary has no store to resolve and never read; §11.4 states
