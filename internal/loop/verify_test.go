@@ -559,3 +559,89 @@ func TestAVanishedVerifierPaneTakesItsWorktreeWithIt(t *testing.T) {
 		t.Fatalf("git still records %v", left)
 	}
 }
+
+// The leak one branch over from the terminal drop, and the dangerous one. A
+// verifier whose submission left review — a rejection, status doing, not
+// terminal — had its binding dropped and its pane left open. Adopt then
+// reaps every checkout no KEPT binding names, so the tree was removed out
+// from under a process still running in it. A verifier with nothing left to
+// read is retired first, exactly as a live daemon retires it on settled, and
+// the tree then goes with a bounded drop rather than a reap.
+func TestARestartRetiresAVerifierWhoseSubmissionLeftReview(t *testing.T) {
+	l, f, project := newVerifyLoop(t, true)
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	submitted(t, f, project)
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	v, ok := bindingFor(l, "wM:p10")
+	if !ok || !v.IsVerifier() || v.Worktree == "" {
+		t.Fatalf("no verifier with a checkout to restart onto: %+v", l.Bindings())
+	}
+
+	// The rejection: back to the worker, out of review, and not terminal.
+	f.Write(t, "get.json", row(project, "doing", "agent:wM:p9"))
+	f.Write(t, "panes.json", paneList("wM:p9", "working", "wM:p10", "working"))
+
+	next := restarted(t, l)
+	next.Worktrees = l.Worktrees
+	if _, err := next.Adopt(context.Background()); err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+	if _, ok := bindingFor(next, "wM:p10"); ok {
+		t.Fatalf("the verifier binding survived its submission leaving review: %+v", next.Bindings())
+	}
+	// Unbound is not enough. The pane has to be closed, or the reap below
+	// takes the tree out from under a live process.
+	var closed bool
+	for _, c := range calls(t, f, "pane close") {
+		if strings.Contains(c, "wM:p10") {
+			closed = true
+		}
+	}
+	if !closed {
+		t.Fatalf("the verifier's pane was left open while its tree was reaped: %v", calls(t, f, "pane close"))
+	}
+	if _, err := os.Stat(v.Worktree); !os.IsNotExist(err) {
+		t.Fatalf("the retired verifier's checkout is still there: %v", err)
+	}
+}
+
+// The other side of the same branch: while the submission is still in
+// review, the verifier is doing exactly what it was brought up to do. Its
+// pane is not closed and the checkout it is working in is not reaped.
+func TestARestartLeavesALiveVerifierAndItsCheckoutAlone(t *testing.T) {
+	l, f, project := newVerifyLoop(t, true)
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	submitted(t, f, project)
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	v, ok := bindingFor(l, "wM:p10")
+	if !ok || v.Worktree == "" {
+		t.Fatalf("no verifier with a checkout to restart onto: %+v", l.Bindings())
+	}
+	// Still in review, and both panes alive.
+	f.Write(t, "panes.json", paneList("wM:p9", "idle", "wM:p10", "working"))
+
+	next := restarted(t, l)
+	next.Worktrees = l.Worktrees
+	if _, err := next.Adopt(context.Background()); err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+	if _, ok := bindingFor(next, "wM:p10"); !ok {
+		t.Fatalf("the live verifier was not re-adopted: %+v", next.Bindings())
+	}
+	for _, c := range calls(t, f, "pane close") {
+		if strings.Contains(c, "wM:p10") {
+			t.Fatalf("a restart closed a verifier still reading a submission: %v", c)
+		}
+	}
+	if _, err := os.Stat(v.Worktree); err != nil {
+		t.Fatalf("the live verifier's checkout was reaped: %v", err)
+	}
+}

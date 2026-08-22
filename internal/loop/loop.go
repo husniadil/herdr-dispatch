@@ -145,7 +145,14 @@ func (l *Loop) Adopt(ctx context.Context) (int, error) {
 			// binding is still real. What it was brought up to read is: the
 			// submission it was checking has to still be in review.
 			if row.Status != "review" {
-				l.logf("task %s is %s, dropping the verifier binding a restart found on pane %s", b.TaskID, row.Status, b.Pane)
+				// And the pane goes with it. A verifier with nothing left to
+				// read is retired on a live daemon the moment the submission
+				// settles; a restart owes the same. Leaving it open is worse
+				// here than for a worker: the drop unnames its checkout, and
+				// the reap below would then remove the tree out from under a
+				// process still running in it.
+				l.logf("task %s is %s, dropping the verifier binding a restart found on pane %s and retiring the pane with it", b.TaskID, row.Status, b.Pane)
+				l.retirePane(ctx, b.Pane)
 				continue
 			}
 		} else if claimed := row.Pane(); claimed != "" && claimed != b.Pane {

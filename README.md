@@ -316,7 +316,11 @@ pane is one this daemon opened and the binding still names it at the moment
 of the drop, so it is retired there — the same move a live daemon makes when
 a task it is driving reaches a terminal state. Without it a restart that
 lands after an approval leaves the worker's pane open with nothing aware of
-it. Every reap is logged with the reason.
+it. A verifier's pane goes the same way when the submission it was reading
+has left review — a rejection is enough, the task need not be finished — and
+there the retire is what keeps the worktree reap safe: the drop unnames the
+checkout, so a verifier left running would have its tree removed out from
+under it. Every reap is logged with the reason.
 
 **What a restart will never touch.** Anything under a directory this daemon
 did not create. The worktree reap reads only `<state_dir>/worktrees` — the
