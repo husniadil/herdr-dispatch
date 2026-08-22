@@ -289,3 +289,77 @@ func TestDispatchAndStatusAreSafeAlongsideATick(t *testing.T) {
 	}
 	<-done
 }
+
+// A task id belongs to the board, not to a project. Dispatching one that is
+// ready on another project's board reserves and spawns like any other, and
+// the by-id lookup that validates it looks across every project, exactly as
+// `task list --ready` already does.
+func TestDispatchResolvesATaskFiledOnAnotherProjectsBoard(t *testing.T) {
+	l, f := newLoop(t)
+	f.Write(t, "ready.json", `{"tasks":[{"id":"01ZZZ","seq":42,"project":"/src/other","title":"elsewhere","status":"todo"}],"count":1}`)
+	f.Write(t, "get.json", `{"task":{"id":"01ZZZ","seq":42,"project":"/src/other","title":"elsewhere","status":"todo"},"ready":true,"dependents":[]}`)
+
+	res, err := l.Dispatch(context.Background(), "01ZZZ")
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if res.TaskID != "01ZZZ" || res.Project != "/src/other" {
+		t.Fatalf("reservation: %+v", res)
+	}
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if got := calls(t, f, "pane split"); len(got) != 1 {
+		t.Fatalf("split %d panes for the reserved task: %v", len(got), got)
+	}
+	// The tick that follows reads the bound task back by id; that lookup is
+	// the one a single-project scope would lose.
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	for _, c := range calls(t, f, "task get") {
+		if !strings.Contains(c, "--all-projects") {
+			t.Fatalf("a by-id lookup was scoped to one project: %q", c)
+		}
+	}
+	if len(calls(t, f, "task get")) == 0 {
+		t.Fatal("no by-id lookup was recorded")
+	}
+}
+
+// An id that is on no board at all is still NOT_FOUND, and the refusal must
+// not tell the caller it was looked for in one project only — that reading is
+// what sends an operator hunting for the wrong board.
+func TestDispatchOfAnIdOnNoBoardDoesNotBlameOneProject(t *testing.T) {
+	l, f := newLoop(t)
+	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
+	f.Bin(t, "htask", `case "$1 $2" in
+"task list") cat "$HDIS_FAKE_DIR/ready.json" ;;
+"task get") echo '{"error":{"code":"NOT_FOUND","message":"no task 999"}}'; exit 3 ;;
+*) echo '{}' ;;
+esac`)
+
+	_, err := l.Dispatch(context.Background(), "999")
+	if got, want := codes.Of(err), codes.NotFound; got != want {
+		t.Fatalf("dispatch of a missing task = %v (%q), want %q", err, got, want)
+	}
+	if !strings.Contains(err.Error(), "no board has task 999") {
+		t.Fatalf("the refusal reads as a single-project miss: %v", err)
+	}
+}
+
+// The widened lookup must not soften the refusal a not-ready task already
+// gets, whichever project's board it sits on.
+func TestDispatchStillRefusesATaskThatIsNotReadyOnAnotherBoard(t *testing.T) {
+	l, f := newLoop(t)
+	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
+	f.Write(t, "get.json", `{"task":{"id":"01ZZZ","seq":42,"project":"/src/other","title":"elsewhere","status":"doing","claimed_by":"agent:wM:p4"},"ready":false,"dependents":[]}`)
+
+	_, err := l.Dispatch(context.Background(), "01ZZZ")
+	if got, want := codes.Of(err), codes.NotReady; got != want {
+		t.Fatalf("dispatch of a claimed task on another board = %v (%q), want %q", err, got, want)
+	}
+	if !strings.Contains(err.Error(), "agent:wM:p4") {
+		t.Fatalf("the refusal lost who holds the task: %v", err)
+	}
+}

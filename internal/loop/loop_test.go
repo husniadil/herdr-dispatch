@@ -527,3 +527,46 @@ func TestAGoneCodexPaneTakesItsSettingsFileWithIt(t *testing.T) {
 		t.Fatalf("a gone pane left its settings file behind: %v", got)
 	}
 }
+
+// The worse half of the same defect, and the one that never recovers: the
+// per-binding board read the tick does. A binding for a task filed on another
+// project's board could not be read at all, so every tick logged that it was
+// holding the binding and the pane was never retired. Here the fake board
+// answers NOT_FOUND to any by-id read that is scoped to one project, exactly
+// as the real one does, so a lookup that drops --all-projects leaves the
+// worker stuck instead of announcing its review.
+func TestATickReadsABoundTaskFiledOnAnotherProjectsBoard(t *testing.T) {
+	l, f := newLoop(t)
+	f.Write(t, "ready.json", `{"tasks":[{"id":"01ZZZ","seq":42,"project":"/src/other","title":"elsewhere","status":"todo"}],"count":1}`)
+	f.Write(t, "get.json", `{"task":{"id":"01ZZZ","seq":42,"project":"/src/other","title":"elsewhere","status":"todo"},"ready":true,"dependents":[]}`)
+	f.Bin(t, "htask", `case "$1 $2" in
+"task list") cat "$HDIS_FAKE_DIR/ready.json" ;;
+"task get")
+  case " $* " in
+    *" --all-projects "*) cat "$HDIS_FAKE_DIR/get.json" ;;
+    *) echo '{"error":{"code":"NOT_FOUND","message":"no task in /src/p"}}'; exit 3 ;;
+  esac ;;
+"task goal") cat "$HDIS_FAKE_DIR/goal.txt" ;;
+*) echo '{}' ;;
+esac`)
+
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	if len(l.bindings) != 1 || l.bindings[0].TaskID != "01ZZZ" {
+		t.Fatalf("bindings: %+v", l.bindings)
+	}
+	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
+	f.Write(t, "get.json", `{"task":{"id":"01ZZZ","seq":42,"project":"/src/other","title":"elsewhere","status":"review","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9","name":"hdis-42","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
+
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	if got := calls(t, f, "notification show"); len(got) != 1 {
+		t.Fatalf("the bound task on another board never reached review: %v", got)
+	}
+	if !l.bindings[0].Notified {
+		t.Fatal("the binding does not remember that review was announced")
+	}
+}

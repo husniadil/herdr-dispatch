@@ -110,7 +110,7 @@ func (l *Loop) whyNotReady(ctx context.Context, ref string) error {
 		// may well be sitting on the board.
 		var refusal *htask.Refusal
 		if errors.As(err, &refusal) && refusal.Code == string(codes.NotFound) {
-			return codes.Errorf(codes.NotFound, "the board has no task %s: %s", ref, refusal.Message)
+			return codes.Errorf(codes.NotFound, "no board has task %s: %s", ref, refusal.Message)
 		}
 		return codes.Errorf(codes.Unavailable, "cannot read task %s from the board: %v", ref, err)
 	}

@@ -81,7 +81,7 @@ EOF`)
 	if task.Status != "doing" || task.Pane() != "wM:p3" {
 		t.Fatalf("got %+v pane %q", task, task.Pane())
 	}
-	if got, want := f.Calls(t)[0], "task get 01AAA --json --as plugin:hdis"; got != want {
+	if got, want := f.Calls(t)[0], "task get 01AAA --all-projects --json --as plugin:hdis"; got != want {
 		t.Fatalf("argv: got %q, want %q", got, want)
 	}
 	if (Task{}).Pane() != "" {
@@ -138,5 +138,24 @@ func TestTheBoardsErrorEnvelopeIsCarriedAsARefusal(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unknown flag --as") {
 		t.Fatalf("want the door's own words, got %v", err)
+	}
+}
+
+// A task id is unique to the board, not to a project, and the dispatcher is
+// not scoped to one repository: `task list --ready` already looks across
+// every project, and the by-id lookup that validates a dispatch has to look
+// exactly as wide, or a task filed on another project's board reads as a
+// task that does not exist.
+func TestGetLooksAcrossEveryProject(t *testing.T) {
+	c, f := client(t)
+	f.Bin(t, "htask", `cat <<'EOF'
+{"task":{"id":"01AAA","seq":7,"project":"/src/other","title":"first","status":"todo"},"ready":true,"dependents":[]}
+EOF`)
+
+	if _, err := c.Get(context.Background(), "01AAA"); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got, want := f.Calls(t)[0], "task get 01AAA --all-projects --json --as plugin:hdis"; got != want {
+		t.Fatalf("argv: got %q, want %q", got, want)
 	}
 }

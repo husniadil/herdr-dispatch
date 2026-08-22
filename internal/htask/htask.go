@@ -94,13 +94,17 @@ func (c *Client) Ready(ctx context.Context) ([]Task, error) {
 	return page.Tasks, nil
 }
 
-// Get reads one task by its id or its number. `task get --json` answers with
-// the row inside an envelope, where `task list` and `doctor` answer flat.
+// Get reads one task by its id or its number, across every project. A task
+// id belongs to the board, not to a repository, and the dispatcher is not
+// scoped to one: the lookup looks exactly as wide as `task list --ready`
+// already does, or a task filed on another project's board reads as a task
+// that does not exist. `task get --json` answers with the row inside an
+// envelope, where `task list` and `doctor` answer flat.
 func (c *Client) Get(ctx context.Context, id string) (Task, error) {
 	var res struct {
 		Task Task `json:"task"`
 	}
-	if err := c.json(ctx, &res, "task", "get", id, "--json"); err != nil {
+	if err := c.json(ctx, &res, "task", "get", id, "--all-projects", "--json"); err != nil {
 		return Task{}, err
 	}
 	if res.Task.ID == "" {
