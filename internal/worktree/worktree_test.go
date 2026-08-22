@@ -275,3 +275,48 @@ func TestVerifierRefusesWhenItIsGivenNoCommitToRead(t *testing.T) {
 		t.Fatalf("a verifier was given %s with no commit to read", path)
 	}
 }
+
+// Which project a directory belongs to is git's own answer, and a worktree
+// answers with the repository it was cut from rather than with itself. That
+// is what lets a pane be named on the board by the number its agent carries:
+// a number is unique inside a project, and this is the project.
+func TestProjectNamesTheRepositoryACheckoutWasCutFrom(t *testing.T) {
+	project := repo(t)
+	m := &Manager{Root: t.TempDir()}
+	work, _, err := m.Worker(context.Background(), project, 7)
+	if err != nil {
+		t.Fatalf("worker: %v", err)
+	}
+	verify, err := m.Verifier(context.Background(), project, 7, head(t, project))
+	if err != nil {
+		t.Fatalf("verifier: %v", err)
+	}
+	for _, dir := range []string{work, verify, project, filepath.Join(project, ".git")} {
+		got, err := m.Project(context.Background(), dir)
+		if err != nil {
+			t.Fatalf("project of %s: %v", dir, err)
+		}
+		if got != resolved(t, project) {
+			t.Fatalf("project of %s is %q, want %q", dir, got, resolved(t, project))
+		}
+	}
+}
+
+// A directory that is no repository names no project, and says so rather
+// than answering with something a board would then be asked about.
+func TestProjectRefusesADirectoryThatIsNotARepository(t *testing.T) {
+	m := &Manager{}
+	if got, err := m.Project(context.Background(), t.TempDir()); err == nil {
+		t.Fatalf("a directory that is no repository named the project %q", got)
+	}
+}
+
+// resolved is the path with symlinks taken out, which is what git prints.
+func resolved(t *testing.T, dir string) string {
+	t.Helper()
+	out, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("resolve %s: %v", dir, err)
+	}
+	return out
+}

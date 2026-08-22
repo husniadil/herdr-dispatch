@@ -85,7 +85,9 @@ func TestDispatchRefusesATaskTheBoardDoesNotHave(t *testing.T) {
 *) echo '{}' ;;
 esac`)
 
-	_, err := l.Dispatch(context.Background(), "999")
+	// By id: a number names no board on its own, and the door says so
+	// without asking, which TestDispatchOfANumberTheBoardIsNotOfferingPins.
+	_, err := l.Dispatch(context.Background(), "01MISSING")
 	if got, want := codes.Of(err), codes.NotFound; got != want {
 		t.Fatalf("dispatch of a missing task = %v (%q), want %q", err, got, want)
 	}
@@ -103,7 +105,7 @@ func TestDispatchNamesTheUnderlyingRefusalWhenTheBoardCannotBeRead(t *testing.T)
 	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
 	f.Bin(t, "htask", brokenGet)
 
-	_, err := l.Dispatch(context.Background(), "7")
+	_, err := l.Dispatch(context.Background(), "01AAA")
 	if got := codes.Of(err); got == codes.NotFound {
 		t.Fatalf("a door that refused was reported as %q: %v", got, err)
 	}
@@ -336,15 +338,15 @@ func TestDispatchOfAnIdOnNoBoardDoesNotBlameOneProject(t *testing.T) {
 	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
 	f.Bin(t, "htask", `case "$1 $2" in
 "task list") cat "$HDIS_FAKE_DIR/ready.json" ;;
-"task get") echo '{"error":{"code":"NOT_FOUND","message":"no task 999"}}'; exit 3 ;;
+"task get") echo '{"error":{"code":"NOT_FOUND","message":"no task 01ZZZ"}}'; exit 3 ;;
 *) echo '{}' ;;
 esac`)
 
-	_, err := l.Dispatch(context.Background(), "999")
+	_, err := l.Dispatch(context.Background(), "01ZZZ")
 	if got, want := codes.Of(err), codes.NotFound; got != want {
 		t.Fatalf("dispatch of a missing task = %v (%q), want %q", err, got, want)
 	}
-	if !strings.Contains(err.Error(), "no board has task 999") {
+	if !strings.Contains(err.Error(), "no board has task 01ZZZ") {
 		t.Fatalf("the refusal reads as a single-project miss: %v", err)
 	}
 }
@@ -383,5 +385,23 @@ func TestStatusNamesTheBranchBesideThePane(t *testing.T) {
 	}
 	if got, want := st.Workers[0].Branch, worktree.Branch(7); got != want {
 		t.Fatalf("status names branch %q, the worker is on %q", got, want)
+	}
+}
+
+// The door's own half of the same defect: a bare number cannot be read
+// across projects, so the explainer must not ask the board for one. Before
+// this, a dispatch of a number the board was not offering came back as
+// UNAVAILABLE quoting a USAGE error, which reads as a broken door rather
+// than as a task that is not on offer.
+func TestDispatchOfANumberTheBoardIsNotOffering(t *testing.T) {
+	l, f := newLoop(t)
+	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
+
+	_, err := l.Dispatch(context.Background(), "7")
+	if got, want := codes.Of(err), codes.NotReady; got != want {
+		t.Fatalf("dispatch of a number not on offer = %v (%q), want %q", err, got, want)
+	}
+	if got := calls(t, f, "task get"); len(got) != 0 {
+		t.Fatalf("the board was asked for a bare number across projects: %v", got)
 	}
 }

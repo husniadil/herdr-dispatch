@@ -41,6 +41,10 @@ type Trees interface {
 	Verifier(ctx context.Context, project string, seq int, commit string) (string, error)
 	// Remove takes a checkout and git's record of it.
 	Remove(ctx context.Context, dir string) error
+	// Project is the repository a directory belongs to, with a worktree
+	// naming the repository it was cut from. It is how a restart learns
+	// which board a pane's task is filed on.
+	Project(ctx context.Context, dir string) (string, error)
 	// RootDir is the directory the checkouts are made under, which is what
 	// bounds the reap.
 	RootDir() string
@@ -151,7 +155,7 @@ func (l *Loop) Adopt(ctx context.Context) (int, error) {
 
 	kept := make([]decide.Binding, 0, len(held.Bindings))
 	rows := make(map[string]htask.Task, len(held.Bindings))
-	for _, p := range l.ourPanes(panes, agents, held.Bindings) {
+	for _, p := range l.ourPanes(ctx, panes, agents, held.Bindings) {
 		b, row, ok := l.reconcile(ctx, p)
 		if !ok {
 			continue
@@ -202,7 +206,11 @@ type ourPane struct {
 	kind string
 	// ref is how the board is asked about it: a task id when a binding
 	// carries one, otherwise the task number the agent registered under.
-	ref     string
+	ref string
+	// project is the board the number is unique on, read off the checkout
+	// the pane works in. It is empty, and unused, when ref is an id: an id
+	// belongs to no project and is read across all of them.
+	project string
 	binding *decide.Binding
 }
 
@@ -216,7 +224,7 @@ type ourPane struct {
 //
 // A binding whose pane is gone names nothing to reconcile, and is dropped
 // here with a word to the operator.
-func (l *Loop) ourPanes(panes map[string]string, agents []herdr.Agent, held []decide.Binding) []ourPane {
+func (l *Loop) ourPanes(ctx context.Context, panes map[string]string, agents []herdr.Agent, held []decide.Binding) []ourPane {
 	out := make([]ourPane, 0, len(agents))
 	at := make(map[string]int, len(agents))
 	for _, a := range agents {
@@ -227,8 +235,18 @@ func (l *Loop) ourPanes(panes map[string]string, agents []herdr.Agent, held []de
 		if _, alive := panes[a.PaneID]; !alive {
 			continue
 		}
+		// A pane names its task by number, and a number is unique only
+		// inside a project — so the project comes with it. It is git's
+		// answer about the checkout the pane works in, which holds for a
+		// worker's worktree, a verifier's detached one, and a pane opened
+		// before either existed and still sitting in the project itself.
+		project, err := l.project(ctx, a.Cwd)
+		if err != nil {
+			l.logf("pane %s: nothing names the project task %d is filed on, so it is left as it is: %v", a.PaneID, seq, err)
+			continue
+		}
 		at[a.PaneID] = len(out)
-		out = append(out, ourPane{pane: a.PaneID, kind: kind, ref: strconv.Itoa(seq)})
+		out = append(out, ourPane{pane: a.PaneID, kind: kind, ref: strconv.Itoa(seq), project: project})
 	}
 	for i := range held {
 		b := held[i]
@@ -239,6 +257,7 @@ func (l *Loop) ourPanes(panes map[string]string, agents []herdr.Agent, held []de
 		if j, seen := at[b.Pane]; seen {
 			out[j].binding = &b
 			out[j].ref = b.TaskID
+			out[j].project = ""
 			out[j].kind = bindingKind(b)
 			continue
 		}
@@ -252,7 +271,7 @@ func (l *Loop) ourPanes(panes map[string]string, agents []herdr.Agent, held []de
 // still needs doing. It returns the binding to keep, the row behind it, and
 // whether anything is kept at all.
 func (l *Loop) reconcile(ctx context.Context, p ourPane) (decide.Binding, htask.Task, bool) {
-	row, err := l.Board.Get(ctx, p.ref)
+	row, err := l.read(ctx, p)
 	if err != nil {
 		var refusal *htask.Refusal
 		if errors.As(err, &refusal) && refusal.Code == string(codes.NotFound) {
@@ -314,6 +333,30 @@ func (l *Loop) reconcile(ctx context.Context, p ourPane) (decide.Binding, htask.
 		PromptedAt: l.now(),
 		Prompts:    1,
 	}, row, true
+}
+
+// read asks the board about one pane's task, addressed the way that pane can
+// name it: by id across every project when a binding carries one, and by the
+// number the agent registered under, scoped to the project its checkout
+// belongs to, when none does. Widening the by-number read instead would ask
+// the board to accept a number across projects, which it refuses by design
+// and a sibling plugin's contract rests on.
+func (l *Loop) read(ctx context.Context, p ourPane) (htask.Task, error) {
+	if p.project == "" {
+		return l.Board.Get(ctx, p.ref)
+	}
+	return l.Board.GetIn(ctx, p.ref, p.project)
+}
+
+// project is the repository a pane's checkout belongs to.
+func (l *Loop) project(ctx context.Context, cwd string) (string, error) {
+	if cwd == "" {
+		return "", fmt.Errorf("herdr reports no directory for the pane")
+	}
+	if l.Worktrees == nil {
+		return "", fmt.Errorf("this dispatcher hands out no checkouts, so nothing can say which repository %s is", cwd)
+	}
+	return l.Worktrees.Project(ctx, cwd)
 }
 
 // bindingKind is the lane a binding names, with the empty kind of a binding

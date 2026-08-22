@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -167,4 +168,25 @@ func (m *Manager) run(ctx context.Context, dir string, args ...string) (string, 
 		return "", fmt.Errorf("git %s in %s: %s", strings.Join(args, " "), dir, stderr)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// Project is the repository a directory belongs to, which for a worktree is
+// the repository it was cut from and not the worktree itself.
+//
+// git's common directory is what draws that line: every worktree of a
+// repository shares one, and it sits inside the repository the worktree came
+// from. A checkout under this daemon's state dir, a detached one, and a pane
+// still sitting in the project directory all answer with the same path,
+// which is what makes this the one way to name a pane's project that does
+// not go stale the next time the lanes move.
+func (m *Manager) Project(ctx context.Context, dir string) (string, error) {
+	common, err := m.run(ctx, dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return "", fmt.Errorf("no project for %s: %w", dir, err)
+	}
+	root, err := m.run(ctx, filepath.Dir(common), "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", fmt.Errorf("no project for %s: %w", dir, err)
+	}
+	return root, nil
 }

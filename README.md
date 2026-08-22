@@ -355,7 +355,15 @@ The two facts are read now, and neither is guessed at. Herdr says which panes
 are alive and which agent name each one registered under, and this daemon's
 names — `hdis-<task>` for a worker, `hdis-v-<task>` for a verifier — carry the
 task number, so the name is what says a live pane is its own and which row to
-read. The persisted bindings are a hint on top of that, never the frame: they
+read. A number is unique only inside a project, so it is not a task's address
+on its own: the project comes from the checkout the pane is working in, which
+git names by way of the repository a worktree was cut from. A worker in its
+worktree, a verifier in its detached one, and a pane opened before either
+existed and still sitting in the project all answer the same way, and the row
+is then read as `task get <number> --project <project>`. A read by ID stays
+board-agnostic and keeps `--all-projects`, because an ID belongs to no
+project; the board refuses a bare number across projects by design, and
+nothing here asks it to stop. The persisted bindings are a hint on top of that, never the frame: they
 carry what Herdr cannot — when the goal was delivered, how often, whether
 review was announced, which checkout a pane was given and which branch a
 worker's commits are on — and they cover the
@@ -378,7 +386,9 @@ The answers, all of them consequences of the one question:
   and not a restart's to act on.
 - The board has no such row, or cannot answer for it: a pane with a binding is
   held, exactly as a tick holds it — a board that is down is not evidence that
-  a task moved on — and a pane with no binding is left as it is.
+  a task moved on — and a pane with no binding is left as it is. So is a pane
+  whose checkout names no repository, since nothing can then say which board
+  its number belongs to.
 - A binding whose pane Herdr no longer lists names nothing to reconcile, and
   is dropped with a line in the log.
 - If **Herdr** cannot be reached at all, nothing is adopted, the failure is

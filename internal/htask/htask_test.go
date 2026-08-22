@@ -256,3 +256,28 @@ EOF`)
 		t.Fatalf("the row did not survive the parse: %+v", task)
 	}
 }
+
+// A pane names its task by number, and a number is unique only inside a
+// project — so a by-number read is scoped to one, which is the addressing
+// the board's refusal of a bare number across projects points at. The by-id
+// read above stays board-agnostic; this is the other half of it.
+func TestGetInScopesANumberToOneProject(t *testing.T) {
+	c, f := client(t)
+	f.Bin(t, "htask", `case " $* " in
+*" --all-projects "*) echo '{"error":{"code":"USAGE","message":"\"7\" is not a 26-character id"}}'; exit 2 ;;
+esac
+cat <<'EOF2'
+{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"first","status":"doing"},"ready":false,"dependents":[]}
+EOF2`)
+
+	task, err := c.GetIn(context.Background(), "7", "/src/p")
+	if err != nil {
+		t.Fatalf("get in: %v", err)
+	}
+	if task.ID != "01AAA" || task.Seq != 7 {
+		t.Fatalf("got %+v", task)
+	}
+	if got, want := f.Calls(t)[0], "task get 7 --project /src/p --json --as plugin:hdis"; got != want {
+		t.Fatalf("argv: got %q, want %q", got, want)
+	}
+}

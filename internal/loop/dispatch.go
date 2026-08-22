@@ -113,6 +113,17 @@ func (l *Loop) Dispatch(ctx context.Context, ref string) (Reservation, error) {
 // the difference between a caller fixing a typo and a caller waiting for a
 // task that will never come.
 func (l *Loop) whyNotReady(ctx context.Context, ref string) error {
+	if seq, isNumber := strconv.Atoi(ref); isNumber == nil {
+		// The same wall the restart rule hit, on the other call site: a
+		// number is unique only inside a project, and a door call names no
+		// project the way a pane's checkout does. So the offer list is as
+		// far as a number resolves, and it did not carry this one. Asking
+		// the board for a bare number across projects is what it refuses by
+		// design, and the answer would be a USAGE error rather than a word
+		// about the task.
+		return codes.Errorf(codes.NotReady,
+			"task %d is not among the tasks the board is offering; name it by id to be told what it is instead", seq)
+	}
 	row, err := l.Board.Get(ctx, ref)
 	if err != nil {
 		// NOT_FOUND is a board that answered and had no such task. A door

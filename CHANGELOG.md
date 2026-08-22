@@ -7,6 +7,26 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+A restart can now read the row of a pane no binding names, which is the pane
+the restart rule exists for. A pane names its task by number, and a by-ID read
+is board-agnostic — so the board refused the number, by design, and every such
+pane was logged as "left as it is". The number is now asked with the project it
+is unique in: the repository the pane's checkout belongs to, which git names
+through the common directory a worktree shares with the repository it was cut
+from. A worker in its worktree, a verifier in its detached one, and a pane
+opened before worktrees existed all resolve the same way. A pane whose checkout
+names no repository is left alone and logged, rather than guessed at. The
+board's refusal of a bare number across projects is untouched, and reads by ID
+still pass `--all-projects`.
+
+**`hdis dispatch <number>` refuses differently when the board is not offering
+that task.** The reply is now `NOT_READY`, saying the number is not among the
+tasks the board is offering and to name the task by ID to be told what it is.
+It used to be `UNAVAILABLE` quoting the board's `USAGE` refusal of a bare
+number, which reads as a broken door rather than as a task that is not on
+offer. Dispatch by ID is unchanged, and so is dispatch of a number the board
+IS offering.
+
 A worker now works in a git worktree of its own, on a branch named for its
 task, rather than in the project directory. The branch is `hdis/task-<seq>`,
 created at the project's current HEAD; the checkout is made under

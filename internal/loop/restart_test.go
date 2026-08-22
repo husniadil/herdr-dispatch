@@ -21,15 +21,16 @@ import (
 func restarted(t *testing.T, l *Loop) *Loop {
 	t.Helper()
 	next := &Loop{
-		Board:    l.Board,
-		Herdr:    l.Herdr,
-		Spawn:    l.Spawn,
-		Config:   l.Config,
-		Policy:   l.Policy,
-		Store:    l.Store,
-		BasePane: l.BasePane,
-		Now:      l.Now,
-		Log:      log.New(io.Discard, "", 0),
+		Board:     l.Board,
+		Herdr:     l.Herdr,
+		Spawn:     l.Spawn,
+		Config:    l.Config,
+		Policy:    l.Policy,
+		Store:     l.Store,
+		Worktrees: l.Worktrees,
+		BasePane:  l.BasePane,
+		Now:       l.Now,
+		Log:       log.New(io.Discard, "", 0),
 	}
 	return next
 }
@@ -343,7 +344,7 @@ func agentsAre(t *testing.T, f *fake.Fake, agents string) {
 // the row it is working says what it is: it is adopted.
 func TestARestartAdoptsALivePaneThatAlreadyClaimedItsTask(t *testing.T) {
 	l, f := newLoop(t)
-	agentsAre(t, f, `{"name":"hdis-7","pane_id":"wM:p9","agent":"claude","agent_status":"working"}`)
+	agentsAre(t, f, `{"name":"hdis-7","pane_id":"wM:p9","agent":"claude","agent_status":"working","cwd":"/src/p"}`)
 	f.Write(t, "panes.json", panesWith("working"))
 	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"doing","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`)
 	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
@@ -433,4 +434,106 @@ func TestARestartTouchesNothingThatIsNotItsOwn(t *testing.T) {
 			t.Fatalf("a checkout outside this daemon's own root was removed: %v", err)
 		}
 	})
+}
+
+// The pane the restart rule exists for is the one no binding names, and
+// until this test it was the one pane whose row could not be read: the pane
+// names its task by number, and a by-id read is board-agnostic, so the board
+// refused the number by design. The pane is addressed the way a number is
+// unique — project plus number — with the project read off the checkout the
+// pane is working in.
+func TestARestartReadsTheRowOfAPaneNoBindingNames(t *testing.T) {
+	l, f := newLoop(t)
+	f.Write(t, "common.txt", "/src/p/.git\n")
+	agentsAre(t, f, `{"name":"hdis-7","pane_id":"wM:p9","agent":"claude","agent_status":"working",`+
+		`"cwd":"/state/hdis/worktrees/hdis-work-7-abc"}`)
+	f.Write(t, "panes.json", panesWith("working"))
+	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"doing","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`)
+	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
+
+	var said strings.Builder
+	l.Log = log.New(&said, "", 0)
+	n, err := l.Adopt(context.Background())
+	if err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("adopted %d, want the unbound worker taken back", n)
+	}
+	if b := l.Bindings(); len(b) != 1 || b[0].TaskID != "01AAA" || b[0].Pane != "wM:p9" {
+		t.Fatalf("bindings: %+v", b)
+	}
+	if strings.Contains(said.String(), "left as it is") {
+		t.Fatalf("the pane the rule exists for was left alone: %q", said.String())
+	}
+	got := calls(t, f, "task get")
+	if len(got) != 1 {
+		t.Fatalf("board reads: %v", got)
+	}
+	if want := "task get 7 --project /src/p --json"; !strings.HasPrefix(got[0], want) {
+		t.Fatalf("the row was asked for as %q, want it scoped to the project the checkout belongs to (%q)", got[0], want)
+	}
+}
+
+// The three shapes a pane's checkout can have, all named the same way: git
+// is asked which repository the directory belongs to, and a worktree answers
+// with the repository it was cut from rather than with itself.
+func TestAPanesProjectIsReadFromItsCheckoutWhateverShapeItHas(t *testing.T) {
+	for _, tc := range []struct{ name, cwd string }{
+		{"a worker in its worktree", "/state/hdis/worktrees/hdis-work-7-abc"},
+		{"a verifier in a detached worktree", "/state/hdis/worktrees/hdis-verify-7-abc"},
+		{"a pane opened before worktrees, sitting in the project", "/src/p"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			l, f := newLoop(t)
+			f.Write(t, "common.txt", "/src/p/.git\n")
+			agentsAre(t, f, `{"name":"hdis-7","pane_id":"wM:p9","agent":"claude","agent_status":"working","cwd":"`+tc.cwd+`"}`)
+			f.Write(t, "panes.json", panesWith("working"))
+			f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"doing","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`)
+			f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
+
+			n, err := l.Adopt(context.Background())
+			if err != nil {
+				t.Fatalf("adopt: %v", err)
+			}
+			if n != 1 {
+				t.Fatalf("adopted %d from a pane in %s, want 1", n, tc.cwd)
+			}
+			var asked bool
+			for _, c := range f.Argv(t) {
+				if len(c) > 2 && c[0] == "-C" && c[1] == tc.cwd && c[len(c)-1] == "--git-common-dir" {
+					asked = true
+				}
+			}
+			if !asked {
+				t.Fatalf("git was never asked which repository %s belongs to: %v", tc.cwd, f.Argv(t))
+			}
+		})
+	}
+}
+
+// A pane whose checkout names no repository is not a pane to guess about.
+// Nothing is adopted, and the operator is told which pane and why.
+func TestARestartLeavesAPaneWhoseProjectCannotBeRead(t *testing.T) {
+	l, f := newLoop(t)
+	f.Bin(t, "git", `exit 1`)
+	agentsAre(t, f, `{"name":"hdis-7","pane_id":"wM:p9","agent":"claude","agent_status":"working","cwd":"/gone"}`)
+	f.Write(t, "panes.json", panesWith("working"))
+	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
+
+	var said strings.Builder
+	l.Log = log.New(&said, "", 0)
+	n, err := l.Adopt(context.Background())
+	if err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+	if n != 0 || len(l.Bindings()) != 0 {
+		t.Fatalf("adopted %d from a pane whose project is unknown: %+v", n, l.Bindings())
+	}
+	if !strings.Contains(said.String(), "wM:p9") {
+		t.Fatalf("the operator was not told which pane was left: %q", said.String())
+	}
+	if got := calls(t, f, "task get"); len(got) != 0 {
+		t.Fatalf("the board was asked about a task nothing could name: %v", got)
+	}
 }

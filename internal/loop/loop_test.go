@@ -23,9 +23,21 @@ import (
 
 var clock = time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
 
+// The fake board refuses a bare number under --all-projects exactly as the
+// real one does. A fake that answers whatever argv it is handed is why a
+// restart shipped unable to read the row of any pane it had no binding for:
+// every test drove a number through it and got a row back.
 const htaskScript = `case "$1 $2" in
 "task list") cat "$HDIS_FAKE_DIR/ready.json" ;;
-"task get") cat "$HDIS_FAKE_DIR/get.json" ;;
+"task get")
+  case " $* " in
+  *" --all-projects "*)
+    case "$3" in
+    ''|*[!0-9]*) cat "$HDIS_FAKE_DIR/get.json" ;;
+    *) echo '{"error":{"code":"USAGE","message":"a number is only unique inside a project, so it cannot address a task across projects"}}'; exit 2 ;;
+    esac ;;
+  *) cat "$HDIS_FAKE_DIR/get.json" ;;
+  esac ;;
 "task goal") cat "$HDIS_FAKE_DIR/goal.txt" ;;
 *) echo '{}' ;;
 esac`
@@ -62,6 +74,10 @@ for a in "$@"; do prev=$last; last=$a; done
 case "$3" in
 rev-parse)
   [ "$4" = --verify ] && exit 1
+  if [ "$5" = --git-common-dir ]; then
+    cat "$HDIS_FAKE_DIR/common.txt" 2>/dev/null || echo "$2/.git"
+    exit 0
+  fi
   echo "$2" ;;
 worktree)
   case "$4" in

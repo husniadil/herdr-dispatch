@@ -28,7 +28,10 @@ func TestTheBoardAdapterCarriesNoReviewVerb(t *testing.T) {
 	// place a hold this daemon left behind survives the process, and handing
 	// back a hold nobody is working is not a verdict on the work. Neither
 	// reaches an approve, a reject or a note.
-	want := []string{"Doctor", "Get", "Held", "Ready", "Release"}
+	// GetIn is Get scoped to one project: the read a pane's number needs,
+	// because a number is unique only inside one. It reads a row and no
+	// more, exactly as Get does.
+	want := []string{"Doctor", "Get", "GetIn", "Held", "Ready", "Release"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("the board adapter's verbs are %v, and the ones this binary may have are %v", got, want)
 	}

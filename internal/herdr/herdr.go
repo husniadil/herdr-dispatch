@@ -41,10 +41,14 @@ func (e *Error) Error() string { return fmt.Sprintf("herdr: %s: %s", e.Code, e.M
 
 // Agent is one worker as Herdr sees it.
 type Agent struct {
-	Name             string `json:"name"`
-	PaneID           string `json:"pane_id"`
-	Agent            string `json:"agent"`
-	Status           string `json:"agent_status"`
+	Name   string `json:"name"`
+	PaneID string `json:"pane_id"`
+	Agent  string `json:"agent"`
+	Status string `json:"agent_status"`
+	// Cwd is the directory the agent was started in. For a pane this
+	// dispatcher opened it is the checkout it handed out, which is what
+	// names the repository the pane's task is filed on.
+	Cwd              string `json:"cwd"`
 	InteractiveReady bool   `json:"interactive_ready"`
 }
 

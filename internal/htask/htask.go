@@ -109,6 +109,29 @@ func (c *Client) Doctor(ctx context.Context) (Doctor, error) {
 	return d, err
 }
 
+// GetIn reads one task by the number a pane carries, inside one project.
+//
+// A number is unique only inside a project, which is exactly why the board
+// refuses a bare number across every project — and that refusal is right, so
+// the number is asked with the project it is unique in rather than widened
+// until the board gives in. This is the only read the dispatcher scopes:
+// everything it knows by id stays board-agnostic.
+func (c *Client) GetIn(ctx context.Context, ref, project string) (Task, error) {
+	if project == "" {
+		return Task{}, fmt.Errorf("htask task get %s: nothing names the project the number is unique in", ref)
+	}
+	var res struct {
+		Task Task `json:"task"`
+	}
+	if err := c.json(ctx, &res, "task", "get", ref, "--project", project, "--json"); err != nil {
+		return Task{}, err
+	}
+	if res.Task.ID == "" {
+		return Task{}, fmt.Errorf("htask task get %s --project %s: no task in the response", ref, project)
+	}
+	return res.Task, nil
+}
+
 // Ready lists every unblocked, unclaimed todo task on every project. The
 // dispatcher is not scoped to one repository; the board row names its own.
 func (c *Client) Ready(ctx context.Context) ([]Task, error) {
