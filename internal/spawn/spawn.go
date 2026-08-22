@@ -97,20 +97,27 @@ func PointerGoal(seq int) string {
 // The last sentence is the boundary this binary does not cross: verification
 // is delegated to a worker, judgment is not delegated at all.
 //
-// The fallback is `htask note add` because there is no `htask task note`:
-// htask carries `task release`, which takes a note and hands the task back,
-// and a separate `note` verb group for the board. A verifier holds nothing to
-// hand back, so the board note is the one that fits.
+// Neither route it names is a command to be found on PATH. A verifier's pane
+// is opened in a detached worktree under the state directory, so a plugin
+// binary that lives in the project's own bin/ is not on its PATH there: the
+// first live verifier hit exactly that and reported through the mail MCP door
+// instead, and the fallback the condition carried at the time, `htask note
+// add`, was a second binary with the same problem. An MCP door is configured
+// for the agent rather than resolved from the working directory, so it is the
+// route that survives the worktree. The fallback is the board's note tool
+// because there is no task-scoped note verb: htask carries `task release`,
+// which takes a note and hands the task back, and a separate `note` group for
+// the board. A verifier holds nothing to hand back, so the board note fits.
 //
 // Rendered with a codex settings path and a profile of --agent claude --model
-// sonnet --effort high, the whole typed line is 493 of the 512 budgeted for a
+// sonnet --effort high, the whole typed line is 503 of the 512 budgeted for a
 // two-digit task; TestTheVerifierLineFitsTheTypedBudget holds it there.
 func VerifierGoal(seq int) string {
 	return fmt.Sprintf("verify task %d: read its report: htask task get %d, run "+
 		"go clean -testcache then the gate CLAUDE.md names, check two claims against the "+
 		"code, make one COMPILING mutation, show it caught, send findings with "+
-		"hmail send $"+DispatcherPaneVar+", else htask note add for task %d. "+
-		"Never run task approve or task reject: you report, the operator judges.", seq, seq, seq)
+		"the mail MCP send to $"+DispatcherPaneVar+", else mcp__herdr-tasks__note_add. "+
+		"Never run task approve or task reject: you report, the operator judges.", seq, seq)
 }
 
 // TypedLineBudget bounds the whole line herdr types into a worker's pane.

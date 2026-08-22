@@ -783,11 +783,55 @@ func TestTheVerifierGoalForbidsApprovingAndRejecting(t *testing.T) {
 
 // It is a pointer, like the worker's: it names the task, where the report is
 // read from, and how findings leave. None of the criteria travel on it.
-func TestTheVerifierGoalPointsAtTheBoardAndAtHmail(t *testing.T) {
+func TestTheVerifierGoalPointsAtTheBoardAndAtItsMailDoor(t *testing.T) {
 	goal := VerifierGoal(23)
-	for _, want := range []string{"htask task get 23", "go clean -testcache", "hmail send", "htask note add for task 23"} {
+	for _, want := range []string{"htask task get 23", "go clean -testcache", "mail MCP", "mcp__herdr-tasks__note_add"} {
 		if !strings.Contains(goal, want) {
 			t.Fatalf("the verifier goal does not carry %q: %s", want, goal)
+		}
+	}
+}
+
+// The first route a verifier is told to report through has to be one the pane
+// it was spawned into actually has. A pane is opened in a detached worktree
+// under the state directory, so a binary that lives in the project's own bin/
+// is not on its PATH there; the first live verifier proved it, reporting
+// through the mail MCP door because `hmail` was not found. An MCP door is
+// configured for the agent, not resolved from the working directory, so it is
+// the route that survives the worktree. This pins the reasoning: whatever the
+// condition names first must not be a command to be found on PATH.
+func TestTheVerifierReportsThroughADoorAndNotAPathLookup(t *testing.T) {
+	goal := VerifierGoal(23)
+	first := strings.Index(goal, "send findings with ")
+	if first < 0 {
+		t.Fatalf("the verifier goal names no reporting route: %s", goal)
+	}
+	route := goal[first:]
+	door := strings.Index(route, "MCP")
+	if door < 0 {
+		t.Fatalf("the first reporting route is not an MCP door: %s", route)
+	}
+	for _, cli := range []string{"hmail", "htask note add"} {
+		if at := strings.Index(route, cli); at >= 0 && at < door {
+			t.Fatalf("the first reporting route is %q, a binary the pane may not have: %s", cli, route)
+		}
+	}
+}
+
+// A verifier that cannot use the first route needs a second one, and a second
+// route is worth nothing if it needs the same binary the first one avoided.
+// Both routes this condition names are MCP doors; neither is a CLI this
+// dispatcher installs into the worktree it opens.
+func TestNeitherVerifierReportRouteNeedsABinaryOnPath(t *testing.T) {
+	goal := VerifierGoal(23)
+	routes := goal[strings.Index(goal, "send findings with "):]
+	routes = routes[:strings.Index(routes, ". ")]
+	if strings.Count(strings.ToLower(routes), "mcp") < 2 {
+		t.Fatalf("the verifier is given fewer than two MCP doors to report through: %s", routes)
+	}
+	for _, cli := range []string{"hmail", "htask note add", "htask task note"} {
+		if strings.Contains(routes, cli) {
+			t.Fatalf("a reporting route falls back to %q, a binary the pane may not have: %s", cli, routes)
 		}
 	}
 }
