@@ -476,7 +476,18 @@ The tab label deliberately does NOT serve as identity. A tab holds several
 workers and its label names only the task it was opened for, so reading a
 pane's task off its tab would give every worker in that tab the first one's
 number. The label is the close guard and the operator's signpost; the checkout
-is the identity. A number is unique only inside a project, so it is not a task's address
+is the identity.
+
+**When the two disagree, the worker is driven and the tab is given up.** An
+operator can drag a worker into a tab of their own, and then the checkout says
+the pane is this daemon's while the label says the tab is theirs. The pane is
+still adopted and still retired: abandoning it is exactly the failure the
+checkout signal exists to prevent, a live pane on a live task that nothing
+adopts, nothing retires and nothing logs. What the daemon gives up is the TAB
+— the binding names none, so the operator's tab can never be closed out from
+under them, and the pane is retired as a pane. The operator is told, and
+`TestAPaneWhoseAgentNameHerdrDroppedIsStillAdoptedAndStillRetired` pins both
+halves. A number is unique only inside a project, so it is not a task's address
 on its own: the project comes from the checkout the pane is working in, which
 git names by way of the repository a worktree was cut from. A worker in its
 worktree, a verifier in its detached one, and a pane opened before either

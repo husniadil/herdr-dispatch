@@ -561,11 +561,35 @@ func TestAPaneWhoseAgentNameHerdrDroppedIsStillAdoptedAndStillRetired(t *testing
 	for _, tc := range []struct {
 		name    string
 		status  string
+		label   string
 		adopted int
 		closed  int
+		// wantTab is the tab the binding may name. It is empty for a pane
+		// in the operator's own tab, so no later retire can ever close it.
+		wantTab string
+		// says is what the operator must be told, when anything is owed.
+		says string
 	}{
-		{name: "a live row is adopted", status: "doing", adopted: 1},
-		{name: "a finished row is retired", status: "done", closed: 1},
+		{name: "a live row is adopted", status: "doing", label: "hdis task 7", adopted: 1, wantTab: "wM:t9"},
+		{name: "a finished row is retired", status: "done", label: "hdis task 7", closed: 1},
+		// The two evidences DISAGREE. The checkout says the pane is this
+		// daemon's; the tab label says the tab is the operator's. That
+		// happens when the operator drags a worker into a tab of their own,
+		// and it is the case the other two subcases assume away.
+		//
+		// The worker is still driven. Abandoning it is what note 24
+		// described: a live pane on a live task that nothing adopts,
+		// nothing retires and nothing logs. What the daemon gives up is the
+		// TAB, not the worker — the binding names no tab, so the operator's
+		// tab can never be closed out from under them.
+		{
+			name:    "a worker the operator moved into their own tab is still driven",
+			status:  "doing",
+			label:   "notes",
+			adopted: 1,
+			wantTab: "",
+			says:    "leaving the tab alone",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			l, f := newLoop(t)
@@ -584,7 +608,7 @@ func TestAPaneWhoseAgentNameHerdrDroppedIsStillAdoptedAndStillRetired(t *testing
 				`","tab_id":"wM:t9","workspace_id":"wM","focused":false,"revision":1}]}}`)
 			agentsAre(t, f, "")
 			f.Write(t, "tabs.json", `{"id":"x","result":{"type":"tab_list","tabs":[`+
-				`{"tab_id":"wM:t9","workspace_id":"wM","label":"hdis task 7","pane_count":1}]}}`)
+				`{"tab_id":"wM:t9","workspace_id":"wM","label":"`+tc.label+`","pane_count":1}]}}`)
 			f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"`+root+
 				`","title":"do the thing","status":"`+tc.status+`","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`)
 			f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
@@ -604,6 +628,13 @@ func TestAPaneWhoseAgentNameHerdrDroppedIsStillAdoptedAndStillRetired(t *testing
 				if len(b) != 1 || b[0].Pane != "wM:p9" || b[0].TaskID != "01AAA" {
 					t.Fatalf("a nameless pane was not bound to its task: %+v", b)
 				}
+				if b[0].Tab != tc.wantTab {
+					t.Fatalf("the binding names tab %q, want %q; a binding that names the operator's tab is a tab this daemon would later close on them",
+						b[0].Tab, tc.wantTab)
+				}
+			}
+			if tc.says != "" && !strings.Contains(said.String(), tc.says) {
+				t.Fatalf("the operator was not told the tab was left alone; the log said: %q", said.String())
 			}
 			if got := len(calls(t, f, "tab close")) + len(calls(t, f, "pane close")); got != tc.closed {
 				t.Fatalf("a nameless pane was closed %d time(s), want %d", got, tc.closed)

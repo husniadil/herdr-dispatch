@@ -311,17 +311,20 @@ func (l *Loop) ourPanes(ctx context.Context, alive []herdr.Agent, agents []herdr
 // named is every live pane carrying one of this daemon's own names, from
 // either evidence, with each pane appearing once.
 //
-// Herdr's agent name is the first evidence and the more precise one: it
-// carries the pane's own cwd, which is what says the project a task number
-// is unique in. The tab label is the second, and it exists because the first
-// can vanish while the work does not — Herdr drops the agent name when the
-// client it registered exits, and a pane whose agent is gone but whose task
-// is still live is a pane this daemon opened and still owns. The label is
-// written at `tab create` and belongs to the tab, so nothing a process does
-// takes it away.
+// Herdr's agent name is the first evidence and the cheapest one: it says the
+// lane and the task number outright. The CHECKOUT is the second, and it
+// exists because the first can vanish while the work does not — Herdr drops
+// the agent name when the client it registered exits, and a pane whose agent
+// is gone but whose task is still live is a pane this daemon opened and still
+// owns. See nameFor, which is where the checkout is read.
 //
-// A pane covered by both is counted once, from the agent record, which is
-// the one with the cwd on it.
+// The tab label is NOT an evidence here. A tab holds several workers and its
+// label names only the task it was opened for, so reading a pane's task off
+// its tab would give every worker in that tab the first one's number. The
+// label decides which TAB is this daemon's to close, never which task a pane
+// is on.
+//
+// A pane covered by both evidences is counted once, from the agent record.
 func (l *Loop) named(alive []herdr.Agent, agents []herdr.Agent, tabs []herdr.Tab) []herdr.Agent {
 	out := make([]herdr.Agent, 0, len(agents)+len(alive))
 	seen := make(map[string]bool, len(agents))
