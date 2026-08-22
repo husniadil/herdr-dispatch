@@ -24,7 +24,11 @@ func TestTheBoardAdapterCarriesNoReviewVerb(t *testing.T) {
 		got = append(got, rt.Method(i).Name)
 	}
 	sort.Strings(got)
-	want := []string{"Doctor", "Get", "Ready"}
+	// Held and Release are the restart's own pair: the board is the one
+	// place a hold this daemon left behind survives the process, and handing
+	// back a hold nobody is working is not a verdict on the work. Neither
+	// reaches an approve, a reject or a note.
+	want := []string{"Doctor", "Get", "Held", "Ready", "Release"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("the board adapter's verbs are %v, and the ones this binary may have are %v", got, want)
 	}

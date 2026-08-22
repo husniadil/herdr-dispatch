@@ -99,7 +99,10 @@ func serve(argv []string) error {
 	}
 	defer lock.Close()
 
-	board := &htask.Client{}
+	// The board principal carries this daemon's own pane, so a row the board
+	// is holding names the daemon that reserved it and a restart can tell
+	// its own stale hold from a live peer's.
+	board := &htask.Client{Principal: htask.PrincipalFor(pane)}
 	pens := &herdr.Client{}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -154,9 +157,11 @@ func serve(argv []string) error {
 		Log:       log.Default(),
 	}
 
-	// The bindings a previous daemon wrote are taken back before anything is
-	// dispatched: a worker that was prompted and has not claimed yet is
-	// tracked by the same pane it was given, and never handed a second one.
+	// What the previous daemon left behind is taken back or reaped before
+	// anything is dispatched: a worker that was prompted and has not claimed
+	// yet keeps the pane it was given and is never handed a second one, a
+	// task the board still holds for this daemon is adopted or released, and
+	// a checkout no binding names is removed.
 	if _, err := l.Adopt(ctx); err != nil {
 		log.Printf("%v", err)
 	}

@@ -22,6 +22,11 @@ import (
 	"strings"
 )
 
+// Prefix is what every directory this package creates is named with. A
+// restart reaps by it: a directory under the root carrying it is one hdis
+// made, and anything else under there is not hdis's to remove.
+const Prefix = "hdis-verify-"
+
 // Manager creates and removes the worktrees verifiers work in.
 type Manager struct {
 	// Root is the directory worktrees are created under; empty means the
@@ -55,7 +60,7 @@ func (m *Manager) Create(ctx context.Context, project string, seq int) (string, 
 			return "", fmt.Errorf("no worktree for %s: %w", project, err)
 		}
 	}
-	dir, err := os.MkdirTemp(m.Root, fmt.Sprintf("hdis-verify-%d-*", seq))
+	dir, err := os.MkdirTemp(m.Root, fmt.Sprintf(Prefix+"%d-*", seq))
 	if err != nil {
 		return "", fmt.Errorf("no worktree for %s: %w", project, err)
 	}

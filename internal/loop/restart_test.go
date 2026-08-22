@@ -196,7 +196,7 @@ func TestARestartWithNoHerdrAdoptsNothingAndKeepsTheStore(t *testing.T) {
 		t.Fatalf("bindings: %+v", got)
 	}
 	held, err := l.Store.Load()
-	if err != nil || len(held) != 1 {
+	if err != nil || len(held.Bindings) != 1 {
 		t.Fatalf("the store was not left intact: %+v (%v)", held, err)
 	}
 }

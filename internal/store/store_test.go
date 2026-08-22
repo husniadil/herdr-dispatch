@@ -23,13 +23,14 @@ func TestABindingSurvivesARoundTrip(t *testing.T) {
 		{TaskID: "01AAA", Pane: "wM:p9", PromptedAt: at, Prompts: 2, Notified: true},
 		{TaskID: "01BBB", Pane: "wM:pA", PromptedAt: at.Add(time.Minute), Prompts: 1},
 	}
-	if err := s.Save(want); err != nil {
+	if err := s.Save(State{Bindings: want}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	got, err := s.Load()
+	state, err := s.Load()
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
+	got := state.Bindings
 	if len(got) != len(want) {
 		t.Fatalf("loaded %d bindings, want %d: %+v", len(got), len(want), got)
 	}
@@ -49,8 +50,8 @@ func TestAStoreThatDoesNotExistLoadsAsEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("bindings: %+v", got)
+	if len(got.Bindings) != 0 || len(got.Reservations) != 0 {
+		t.Fatalf("state: %+v", got)
 	}
 }
 
@@ -65,7 +66,7 @@ func TestATornDocumentIsReportedAndNotFatal(t *testing.T) {
 	if err == nil {
 		t.Fatal("a torn document loaded without a word about it")
 	}
-	if len(got) != 0 {
+	if len(got.Bindings) != 0 {
 		t.Fatalf("bindings: %+v", got)
 	}
 }
@@ -74,10 +75,10 @@ func TestATornDocumentIsReportedAndNotFatal(t *testing.T) {
 // but a whole file or the previous one is left in the state dir.
 func TestSaveLeavesNoPartialFileBehind(t *testing.T) {
 	s := tempStore(t)
-	if err := s.Save([]decide.Binding{{TaskID: "01AAA", Pane: "wM:p9"}}); err != nil {
+	if err := s.Save(State{Bindings: []decide.Binding{{TaskID: "01AAA", Pane: "wM:p9"}}}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	if err := s.Save([]decide.Binding{{TaskID: "01BBB", Pane: "wM:pA"}}); err != nil {
+	if err := s.Save(State{Bindings: []decide.Binding{{TaskID: "01BBB", Pane: "wM:pA"}}}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	entries, err := os.ReadDir(filepath.Dir(s.Path))
@@ -95,7 +96,7 @@ func TestSaveLeavesNoPartialFileBehind(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(got) != 1 || got[0].TaskID != "01BBB" {
+	if len(got.Bindings) != 1 || got.Bindings[0].TaskID != "01BBB" {
 		t.Fatalf("the second save did not replace the first: %+v", got)
 	}
 }
@@ -104,17 +105,17 @@ func TestSaveLeavesNoPartialFileBehind(t *testing.T) {
 // as nothing rather than as the set before it.
 func TestSavingAnEmptySetClearsTheStore(t *testing.T) {
 	s := tempStore(t)
-	if err := s.Save([]decide.Binding{{TaskID: "01AAA", Pane: "wM:p9"}}); err != nil {
+	if err := s.Save(State{Bindings: []decide.Binding{{TaskID: "01AAA", Pane: "wM:p9"}}}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	if err := s.Save(nil); err != nil {
+	if err := s.Save(State{}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	got, err := s.Load()
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(got) != 0 {
+	if len(got.Bindings) != 0 {
 		t.Fatalf("bindings: %+v", got)
 	}
 }
@@ -124,7 +125,7 @@ func TestSavingAnEmptySetClearsTheStore(t *testing.T) {
 func TestTheStoredTimeIsUnixMilliseconds(t *testing.T) {
 	s := tempStore(t)
 	at := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
-	if err := s.Save([]decide.Binding{{TaskID: "01AAA", Pane: "wM:p9", PromptedAt: at}}); err != nil {
+	if err := s.Save(State{Bindings: []decide.Binding{{TaskID: "01AAA", Pane: "wM:p9", PromptedAt: at}}}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	b, err := os.ReadFile(s.Path)
@@ -155,21 +156,21 @@ func TestTheBindingKindAndVerificationRoundTrip(t *testing.T) {
 		{TaskID: "t1", Pane: "wM:p9", PromptedAt: time.UnixMilli(1_700_000_000_000).UTC(), Prompts: 1, Notified: true, Verified: true, Kind: decide.KindWorker},
 		{TaskID: "t1", Pane: "wM:p10", PromptedAt: time.UnixMilli(1_700_000_001_000).UTC(), Prompts: 1, Kind: decide.KindVerifier},
 	}
-	if err := b.Save(held); err != nil {
+	if err := b.Save(State{Bindings: held}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	got, err := b.Load()
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("loaded %d bindings", len(got))
+	if len(got.Bindings) != 2 {
+		t.Fatalf("loaded %d bindings", len(got.Bindings))
 	}
-	if !got[0].Verified || got[0].IsVerifier() {
-		t.Fatalf("the worker binding came back as %+v", got[0])
+	if !got.Bindings[0].Verified || got.Bindings[0].IsVerifier() {
+		t.Fatalf("the worker binding came back as %+v", got.Bindings[0])
 	}
-	if !got[1].IsVerifier() || got[1].Verified {
-		t.Fatalf("the verifier binding came back as %+v", got[1])
+	if !got.Bindings[1].IsVerifier() || got.Bindings[1].Verified {
+		t.Fatalf("the verifier binding came back as %+v", got.Bindings[1])
 	}
 }
 
@@ -185,7 +186,51 @@ func TestABindingWrittenBeforeTheLaneReadsAsAWorker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(got) != 1 || got[0].IsVerifier() {
+	if len(got.Bindings) != 1 || got.Bindings[0].IsVerifier() {
 		t.Fatalf("read back as %+v", got)
+	}
+}
+
+// A reservation is intent that has not become a worker yet, and the restart
+// window between reserving and spawning is exactly where it used to be lost.
+// It survives the process, and it carries the daemon that made it.
+func TestAReservationSurvivesARoundTripCarryingItsOwner(t *testing.T) {
+	s := tempStore(t)
+	at := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	want := State{Reservations: []Reservation{{TaskID: "01AAA", Owner: "plugin:hdis@wM:p1", At: at}}}
+	if err := s.Save(want); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := s.Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(got.Reservations) != 1 {
+		t.Fatalf("reservations: %+v", got.Reservations)
+	}
+	r := got.Reservations[0]
+	if r.TaskID != "01AAA" || r.Owner != "plugin:hdis@wM:p1" || !r.At.Equal(at) {
+		t.Fatalf("reservation: %+v", r)
+	}
+}
+
+// Bindings and reservations share one document, written whole, so saving
+// either never drops the other.
+func TestSavingBindingsKeepsTheReservationsBesideThem(t *testing.T) {
+	s := tempStore(t)
+	at := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	err := s.Save(State{
+		Bindings:     []decide.Binding{{TaskID: "01AAA", Pane: "wM:p9", PromptedAt: at, Prompts: 1}},
+		Reservations: []Reservation{{TaskID: "01BBB", Owner: "plugin:hdis@wM:p1", At: at}},
+	})
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := s.Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(got.Bindings) != 1 || len(got.Reservations) != 1 {
+		t.Fatalf("state: %+v", got)
 	}
 }

@@ -13,13 +13,36 @@ import (
 	"strings"
 )
 
-// Principal is who the dispatcher acts as on the board.
+// Principal is who the dispatcher acts as on the board when it has no pane
+// of its own to name.
 const Principal = "plugin:hdis"
+
+// PrincipalFor is the principal a daemon running in the given pane writes
+// with. The pane is what tells one daemon from another: a row the board is
+// holding for `plugin:hdis@wM:p1` was reserved by the daemon in that pane,
+// and a row held for any other suffix belongs to a peer that may well still
+// be alive. §3.2 accepts any plugin principal that is one printable word.
+func PrincipalFor(pane string) string {
+	if pane == "" {
+		return Principal
+	}
+	return Principal + "@" + pane
+}
 
 // Client runs the htask CLI.
 type Client struct {
 	// Bin is the binary to run; empty means `htask` off PATH.
 	Bin string
+	// Principal is who this client acts as; empty means the bare plugin
+	// principal, which is a daemon with no pane to name.
+	Principal string
+}
+
+func (c *Client) principal() string {
+	if c.Principal != "" {
+		return c.Principal
+	}
+	return Principal
 }
 
 func (c *Client) bin() string {
@@ -113,6 +136,31 @@ func (c *Client) Get(ctx context.Context, id string) (Task, error) {
 	return res.Task, nil
 }
 
+// Held lists every task on every project the board says this dispatcher's
+// principal is holding, whatever its status. It is how a restart finds the
+// reservations it left behind: the board is the one place a hold survives a
+// process, and `--mine` is scoped to the principal, so a peer daemon's rows
+// are never in the answer.
+func (c *Client) Held(ctx context.Context) ([]Task, error) {
+	var page struct {
+		Tasks []Task `json:"tasks"`
+	}
+	if err := c.json(ctx, &page, "task", "list", "--mine", "--all-projects", "--json"); err != nil {
+		return nil, err
+	}
+	return page.Tasks, nil
+}
+
+// Release hands one task back with a note saying what is left.
+//
+// This is not the lease sweep and never becomes one: it names a single task
+// this daemon's own principal is holding and nothing else. Pane-gone sweeps,
+// the lease timer and the board's startup reconciliation stay htask's.
+func (c *Client) Release(ctx context.Context, id, note string) error {
+	_, err := c.run(ctx, "task", "release", id, "--all-projects", "--note", note, "--json")
+	return err
+}
+
 func (c *Client) json(ctx context.Context, into any, args ...string) error {
 	out, err := c.run(ctx, args...)
 	if err != nil {
@@ -125,7 +173,7 @@ func (c *Client) json(ctx context.Context, into any, args ...string) error {
 }
 
 func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
-	args = append(append([]string{}, args...), "--as", Principal)
+	args = append(append([]string{}, args...), "--as", c.principal())
 	cmd := exec.CommandContext(ctx, c.bin(), args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

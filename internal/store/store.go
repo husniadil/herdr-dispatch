@@ -32,9 +32,41 @@ const Version = 1
 // Bindings is the document at Path.
 type Bindings struct{ Path string }
 
+// Reservation is one task an on-demand dispatch took and no tick has spawned
+// for yet, and the daemon that took it.
+//
+// Owner is what a restart reads to tell its own stale reservation from a
+// live peer's: it is the board principal the reserving daemon writes with,
+// which carries that daemon's pane. A reservation with no owner recorded is
+// one no restart can attribute, which is the state this exists to end.
+type Reservation struct {
+	TaskID string
+	Owner  string
+	At     time.Time
+}
+
+// State is everything the dispatcher remembers across a restart: the
+// bindings, and the reservations that have not become bindings yet. They
+// share one document because it is written whole, so saving either can never
+// drop the other.
+type State struct {
+	Bindings     []decide.Binding
+	Reservations []Reservation
+}
+
 type document struct {
 	Version  int      `json:"version"`
 	Bindings []record `json:"bindings"`
+	// Reservations is omitted when there are none, so a document this
+	// binary writes stays readable to one that predates them.
+	Reservations []reservation `json:"reservations,omitempty"`
+}
+
+// reservation is one reservation as it is written.
+type reservation struct {
+	TaskID string `json:"task"`
+	Owner  string `json:"owner"`
+	AtMS   int64  `json:"at_ms"`
 }
 
 // record is one binding as it is written. Times are Unix milliseconds, the
@@ -57,20 +89,20 @@ type record struct {
 // Load reads the bindings. A store nobody has written is an empty set and no
 // error; a document that cannot be read is an empty set AND an error, so a
 // torn write reaches the operator without keeping the daemon from starting.
-func (b *Bindings) Load() ([]decide.Binding, error) {
+func (b *Bindings) Load() (State, error) {
 	raw, err := os.ReadFile(b.Path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return State{}, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read the bindings at %s: %w", b.Path, err)
+		return State{}, fmt.Errorf("read the bindings at %s: %w", b.Path, err)
 	}
 	var doc document
 	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("the bindings at %s cannot be read: %w", b.Path, err)
+		return State{}, fmt.Errorf("the bindings at %s cannot be read: %w", b.Path, err)
 	}
 	if doc.Version != Version {
-		return nil, fmt.Errorf("the bindings at %s are version %d and this hdis knows %d",
+		return State{}, fmt.Errorf("the bindings at %s are version %d and this hdis knows %d",
 			b.Path, doc.Version, Version)
 	}
 	out := make([]decide.Binding, 0, len(doc.Bindings))
@@ -85,7 +117,15 @@ func (b *Bindings) Load() ([]decide.Binding, error) {
 			Verified:   r.Verified,
 		})
 	}
-	return out, nil
+	held := make([]Reservation, 0, len(doc.Reservations))
+	for _, r := range doc.Reservations {
+		held = append(held, Reservation{
+			TaskID: r.TaskID,
+			Owner:  r.Owner,
+			At:     time.UnixMilli(r.AtMS).UTC(),
+		})
+	}
+	return State{Bindings: out, Reservations: held}, nil
 }
 
 // kindOf writes a verifier's kind and leaves a worker's off: an absent kind
@@ -101,9 +141,9 @@ func kindOf(b decide.Binding) string {
 // flushed, then renamed over the old one. A reader sees the previous
 // document or the new one and never half of either, and a crash mid-write
 // leaves the previous one intact.
-func (b *Bindings) Save(bindings []decide.Binding) error {
-	doc := document{Version: Version, Bindings: make([]record, 0, len(bindings))}
-	for _, x := range bindings {
+func (b *Bindings) Save(state State) error {
+	doc := document{Version: Version, Bindings: make([]record, 0, len(state.Bindings))}
+	for _, x := range state.Bindings {
 		doc.Bindings = append(doc.Bindings, record{
 			TaskID:       x.TaskID,
 			Pane:         x.Pane,
@@ -112,6 +152,13 @@ func (b *Bindings) Save(bindings []decide.Binding) error {
 			Notified:     x.Notified,
 			Kind:         kindOf(x),
 			Verified:     x.Verified,
+		})
+	}
+	for _, x := range state.Reservations {
+		doc.Reservations = append(doc.Reservations, reservation{
+			TaskID: x.TaskID,
+			Owner:  x.Owner,
+			AtMS:   x.At.UnixMilli(),
 		})
 	}
 	raw, err := json.Marshal(doc)

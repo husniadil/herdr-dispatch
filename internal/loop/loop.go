@@ -12,6 +12,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -56,10 +59,11 @@ type Loop struct {
 	// with the lock released.
 	mu       sync.Mutex
 	bindings []decide.Binding
-	// pending is the task ids an on-demand dispatch reserved and no tick has
-	// spawned yet. A reservation is what keeps the watching loop and the
-	// dispatch verb from both taking the same task.
-	pending []string
+	// pending is the reservations an on-demand dispatch took and no tick has
+	// spawned for yet. A reservation is what keeps the watching loop and the
+	// dispatch verb from both taking the same task, and it carries the
+	// daemon that made it so a restart can tell its own from a peer's.
+	pending []store.Reservation
 	// readopted is how many persisted bindings the last Adopt kept, for
 	// doctor to report.
 	readopted int
@@ -93,29 +97,27 @@ func (l *Loop) Tick(ctx context.Context) error {
 // on that guess would hand a live worker's task to a second pane. Nothing is
 // adopted, the failure is loud, and the store is left for the next start.
 func (l *Loop) Adopt(ctx context.Context) (int, error) {
-	if l.Store == nil {
-		return 0, nil
-	}
-	held, err := l.Store.Load()
-	if err != nil {
-		// A store that cannot be read is a dispatcher that has forgotten,
-		// which is where it was before any of this. It is not a reason to
-		// refuse to start.
-		l.logf("the bindings could not be read, starting with none: %v", err)
-		return 0, nil
-	}
-	if len(held) == 0 {
-		return 0, nil
+	var held store.State
+	if l.Store != nil {
+		var err error
+		held, err = l.Store.Load()
+		if err != nil {
+			// A store that cannot be read is a dispatcher that has forgotten,
+			// which is where it was before any of this. It is not a reason to
+			// refuse to start.
+			l.logf("the bindings could not be read, starting with none: %v", err)
+			held = store.State{}
+		}
 	}
 
 	panes, err := l.Herdr.Panes(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("herdr cannot say which panes are alive, so %d persisted binding(s) stay unadopted: %w", len(held), err)
+		return 0, fmt.Errorf("herdr cannot say which panes are alive, so %d persisted binding(s) stay unadopted: %w", len(held.Bindings), err)
 	}
 
-	kept := make([]decide.Binding, 0, len(held))
-	rows := make(map[string]htask.Task, len(held))
-	for _, b := range held {
+	kept := make([]decide.Binding, 0, len(held.Bindings))
+	rows := make(map[string]htask.Task, len(held.Bindings))
+	for _, b := range held.Bindings {
 		if _, alive := panes[b.Pane]; !alive {
 			l.logf("task %s: pane %s is gone, dropping the binding a restart found", b.TaskID, b.Pane)
 			continue
@@ -153,14 +155,151 @@ func (l *Loop) Adopt(ctx context.Context) (int, error) {
 		kept = append(kept, b)
 	}
 
+	// A reservation is this daemon's own intent, and only its own: a record
+	// naming another daemon is a peer's and is dropped rather than acted on.
+	mine := make([]store.Reservation, 0, len(held.Reservations))
+	for _, r := range held.Reservations {
+		if r.Owner != "" && r.Owner != l.principal() {
+			l.logf("task %s: the reservation a restart found was made by %s, not by this daemon; leaving it", r.TaskID, r.Owner)
+			continue
+		}
+		mine = append(mine, r)
+	}
+
 	l.mu.Lock()
 	l.bindings = kept
 	l.rows = rows
+	l.pending = mine
 	l.readopted = len(kept)
 	l.saveLocked()
 	l.mu.Unlock()
-	l.logf("re-adopted %d of %d persisted binding(s) from %s", len(kept), len(held), l.Store.Path)
+	if l.Store != nil && (len(held.Bindings) > 0 || len(held.Reservations) > 0) {
+		l.logf("re-adopted %d of %d persisted binding(s) and %d of %d reservation(s) from %s",
+			len(kept), len(held.Bindings), len(mine), len(held.Reservations), l.Store.Path)
+	}
+
+	// The bindings were only ever half the restart window. The other half is
+	// what the bindings owned and no longer name: a task the board is still
+	// holding for this daemon, and a checkout under this daemon's own state
+	// dir. Both are resolved here, on facts read now.
+	l.reclaim(ctx, panes)
+	l.reap(ctx)
 	return len(kept), nil
+}
+
+// principal is the board principal this daemon writes with, which carries
+// its own pane.
+func (l *Loop) principal() string {
+	if l.Board != nil && l.Board.Principal != "" {
+		return l.Board.Principal
+	}
+	return htask.PrincipalFor(l.BasePane)
+}
+
+// reclaim resolves every task the board says this dispatcher is holding that
+// no binding names. It is the reservation window seen from the board: a
+// daemon that went down between reserving a task and writing its binding
+// leaves a hold nothing alive owns.
+//
+// The hold is not guessed at. Herdr is asked whether a pane is working that
+// task, by the agent name a worker for it registers under, and the answer
+// decides: a live pane is adopted, and only a task with no pane behind it is
+// handed back. Either way the operator is told which it was.
+//
+// `--mine` is scoped to the principal, and the principal carries this
+// daemon's pane, so a peer daemon's hold is never in the answer to begin
+// with.
+func (l *Loop) reclaim(ctx context.Context, panes map[string]string) {
+	if l.Board == nil {
+		return
+	}
+	held, err := l.Board.Held(ctx)
+	if err != nil {
+		l.logf("the board cannot say what this dispatcher is holding, so nothing is reclaimed: %v", err)
+		return
+	}
+
+	bound := make(map[string]bool)
+	l.mu.Lock()
+	for _, b := range l.bindings {
+		bound[b.TaskID] = true
+	}
+	l.mu.Unlock()
+
+	for _, row := range held {
+		if bound[row.ID] || row.ClaimedBy != l.principal() {
+			continue
+		}
+		agent, err := l.Herdr.AgentGet(ctx, workerName(row.Seq))
+		if err == nil && agent.PaneID != "" {
+			if _, alive := panes[agent.PaneID]; alive {
+				l.logf("task %s: the board still holds it for this daemon and %s is working it in pane %s; adopting the worker a restart lost",
+					row.ID, workerName(row.Seq), agent.PaneID)
+				l.mu.Lock()
+				l.bindings = append(l.bindings, decide.Binding{
+					TaskID:     row.ID,
+					Pane:       agent.PaneID,
+					Kind:       decide.KindWorker,
+					PromptedAt: l.now(),
+					Prompts:    1,
+				})
+				l.rows[row.ID] = row
+				l.saveLocked()
+				l.mu.Unlock()
+				continue
+			}
+		}
+		l.logf("task %s: the board still holds it for this daemon and no pane is working it; handing it back", row.ID)
+		if err := l.Board.Release(ctx, row.ID, "the dispatcher that reserved this task went down before a worker came up"); err != nil {
+			l.logf("task %s: the stale hold could not be handed back: %v", row.ID, err)
+		}
+	}
+}
+
+// reap removes the checkouts under this daemon's own worktree root that no
+// binding names. A verifier's binding is the only record of where its
+// checkout is, so a restart that loses the binding — a pane retired while the
+// daemon was down, a store written before the create — leaves the directory
+// with nothing left to remove it.
+//
+// It is bounded twice over, and deliberately: only inside the root this
+// daemon creates its own checkouts in, and only entries carrying the prefix
+// this daemon names them with. A directory under that root that hdis did not
+// create is not hdis's to remove.
+func (l *Loop) reap(ctx context.Context) {
+	if l.Worktrees == nil || l.Worktrees.Root == "" {
+		return
+	}
+	entries, err := os.ReadDir(l.Worktrees.Root)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			l.logf("the worktree root %s could not be read, so nothing is reaped: %v", l.Worktrees.Root, err)
+		}
+		return
+	}
+
+	named := make(map[string]bool)
+	l.mu.Lock()
+	for _, b := range l.bindings {
+		if b.Worktree != "" {
+			named[b.Worktree] = true
+		}
+	}
+	l.mu.Unlock()
+
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), worktree.Prefix) {
+			continue
+		}
+		dir := filepath.Join(l.Worktrees.Root, e.Name())
+		if named[dir] {
+			continue
+		}
+		l.logf("worktree %s: no binding names it, so the verifier it belonged to is gone; removing it", dir)
+		if err := l.Worktrees.Remove(ctx, dir); err != nil {
+			l.logf("worktree %s could not be removed: %v", dir, err)
+		}
+	}
 }
 
 // Readopted is how many persisted bindings the last Adopt kept.
@@ -187,7 +326,7 @@ func (l *Loop) saveLocked() {
 	if l.Store == nil {
 		return
 	}
-	if err := l.Store.Save(l.bindings); err != nil {
+	if err := l.Store.Save(store.State{Bindings: l.bindings, Reservations: l.pending}); err != nil {
 		l.logf("the bindings could not be written: %v", err)
 	}
 }
@@ -202,7 +341,7 @@ func (l *Loop) Bindings() []decide.Binding {
 func (l *Loop) snapshot(ctx context.Context) (decide.Snapshot, error) {
 	l.mu.Lock()
 	bindings := append([]decide.Binding(nil), l.bindings...)
-	pending := append([]string(nil), l.pending...)
+	pending := append([]store.Reservation(nil), l.pending...)
 	l.mu.Unlock()
 
 	snap := decide.Snapshot{
@@ -237,7 +376,8 @@ func (l *Loop) snapshot(ctx context.Context) (decide.Snapshot, error) {
 	// Reservations go first: an on-demand dispatch is a caller asking for
 	// this task now, ahead of whatever order the board lists.
 	reserved := make(map[string]bool, len(pending))
-	for _, id := range pending {
+	for _, held := range pending {
+		id := held.TaskID
 		row, ok := offered[id]
 		if bound[id] || !ok {
 			// A worker is already on it, or the board has taken it back.

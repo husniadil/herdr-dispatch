@@ -9,6 +9,7 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/codes"
 	"github.com/husniadil/herdr-dispatch/internal/decide"
 	"github.com/husniadil/herdr-dispatch/internal/htask"
+	"github.com/husniadil/herdr-dispatch/internal/store"
 )
 
 // Reservation is what an accepted dispatch answers with. It is a promise that
@@ -82,8 +83,8 @@ func (l *Loop) Dispatch(ctx context.Context, ref string) (Reservation, error) {
 				"task %d already has a worker in pane %s", row.Seq, b.Pane)
 		}
 	}
-	for _, id := range l.pending {
-		if id == row.ID {
+	for _, held := range l.pending {
+		if held.TaskID == row.ID {
 			return Reservation{}, codes.Errorf(codes.AlreadyDispatched,
 				"task %d is already reserved for the next tick", row.Seq)
 		}
@@ -92,7 +93,14 @@ func (l *Loop) Dispatch(ctx context.Context, ref string) (Reservation, error) {
 		return Reservation{}, codes.Errorf(codes.AtCapacity,
 			"%d workers are live or reserved and max-workers is %d", live, l.Policy.MaxWorkers)
 	}
-	l.pending = append(l.pending, row.ID)
+	l.pending = append(l.pending, store.Reservation{
+		TaskID: row.ID,
+		// The owner is what a restart reads to tell this daemon's own stale
+		// reservation from a live peer's.
+		Owner: l.principal(),
+		At:    l.now(),
+	})
+	l.saveLocked()
 
 	return Reservation{TaskID: row.ID, Seq: row.Seq, Title: row.Title, Project: row.Project}, nil
 }
@@ -135,7 +143,7 @@ func (l *Loop) Status(ctx context.Context) (Status, error) {
 		BasePane:   l.BasePane,
 		MaxWorkers: l.Policy.MaxWorkers,
 		Workers:    []Worker{},
-		Pending:    append([]string{}, l.pending...),
+		Pending:    pendingIDs(l.pending),
 	}
 	for _, b := range l.bindings {
 		row := l.rows[b.TaskID]
@@ -170,7 +178,17 @@ func kindOf(b decide.Binding) string {
 func (l *Loop) Pending() []string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return append([]string(nil), l.pending...)
+	return pendingIDs(l.pending)
+}
+
+// pendingIDs is the task ids of a set of reservations, for a caller that
+// reads the ids and not the daemon that took them.
+func pendingIDs(held []store.Reservation) []string {
+	out := make([]string, 0, len(held))
+	for _, r := range held {
+		out = append(out, r.TaskID)
+	}
+	return out
 }
 
 // match finds the row a caller's reference names: the board's id, or the
@@ -190,10 +208,11 @@ func (l *Loop) unreserve(taskID string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	kept := l.pending[:0]
-	for _, id := range l.pending {
-		if id != taskID {
-			kept = append(kept, id)
+	for _, held := range l.pending {
+		if held.TaskID != taskID {
+			kept = append(kept, held)
 		}
 	}
 	l.pending = kept
+	l.saveLocked()
 }

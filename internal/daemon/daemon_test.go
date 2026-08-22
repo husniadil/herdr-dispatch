@@ -587,9 +587,9 @@ func TestStopEndsTheTick(t *testing.T) {
 func TestDoctorSaysWhereTheBindingsLiveAndHowManyCameBack(t *testing.T) {
 	d, f := newDaemon(t)
 	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9","agent":"claude","agent_status":"working","revision":1}]}}`)
-	if err := d.Loop.Store.Save([]decide.Binding{{
+	if err := d.Loop.Store.Save(store.State{Bindings: []decide.Binding{{
 		TaskID: "01AAA", Pane: "wM:p9", PromptedAt: time.Now().UTC(), Prompts: 1,
-	}}); err != nil {
+	}}}); err != nil {
 		t.Fatalf("seed the store: %v", err)
 	}
 	if _, err := d.Loop.Adopt(context.Background()); err != nil {

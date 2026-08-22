@@ -159,3 +159,54 @@ EOF`)
 		t.Fatalf("argv: got %q, want %q", got, want)
 	}
 }
+
+// The principal a daemon writes with names the daemon, so a row the board is
+// holding can be told from a peer daemon's row without asking anyone.
+func TestThePrincipalCarriesTheDaemonThatMadeTheReservation(t *testing.T) {
+	if got, want := PrincipalFor("wM:p1"), "plugin:hdis@wM:p1"; got != want {
+		t.Fatalf("principal: got %q, want %q", got, want)
+	}
+	// A daemon with no pane of its own has nothing to carry, and falls back
+	// to the bare plugin principal the contract names.
+	if got, want := PrincipalFor(""), Principal; got != want {
+		t.Fatalf("principal with no pane: got %q, want %q", got, want)
+	}
+}
+
+// Held is the board's own answer to "what is this dispatcher holding": the
+// rows its principal claims, on every project, whatever their status.
+func TestHeldAsksTheBoardWhatThisDaemonIsHolding(t *testing.T) {
+	c, f := client(t)
+	c.Principal = "plugin:hdis@wM:p1"
+	f.Bin(t, "htask", `cat <<'EOF'
+{"tasks":[{"id":"01AAA","seq":7,"project":"/src/a","title":"first","status":"doing","claimed_by":"plugin:hdis@wM:p1"}],"count":1}
+EOF`)
+
+	held, err := c.Held(context.Background())
+	if err != nil {
+		t.Fatalf("held: %v", err)
+	}
+	if len(held) != 1 || held[0].ID != "01AAA" {
+		t.Fatalf("got %+v", held)
+	}
+	want := "task list --mine --all-projects --json --as plugin:hdis@wM:p1"
+	if got := f.Calls(t)[0]; got != want {
+		t.Fatalf("argv: got %q, want %q", got, want)
+	}
+}
+
+// Releasing a hold this daemon left behind hands the task back with a note
+// saying why, in the daemon's own name.
+func TestReleaseHandsBackAHoldWithItsReason(t *testing.T) {
+	c, f := client(t)
+	c.Principal = "plugin:hdis@wM:p1"
+	f.Bin(t, "htask", `echo '{"task":{"id":"01AAA","seq":7,"status":"todo"}}'`)
+
+	if err := c.Release(context.Background(), "01AAA", "no worker was ever brought up"); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	want := "task release 01AAA --all-projects --note no worker was ever brought up --json --as plugin:hdis@wM:p1"
+	if got := f.Calls(t)[0]; got != want {
+		t.Fatalf("argv: got %q, want %q", got, want)
+	}
+}

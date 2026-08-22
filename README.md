@@ -259,9 +259,14 @@ and taken back at the next start.
 **What is persisted.** Only what is not derivable: the pane, the task id, the
 time the goal was delivered, the prompt count, and whether review was
 announced. Board facts — status, claim, lease, evidence — are read from the
-board every tick, and pane facts from Herdr; neither is written here. An
-on-demand dispatch's reservation is not persisted either: it is intent that
-has not become a worker yet, and a caller can ask again.
+board every tick, and pane facts from Herdr; neither is written here.
+
+An on-demand dispatch's reservation is persisted beside them, and it carries
+the daemon that made it. The daemon's board principal is
+`plugin:hdis@<its own pane>`, so a hold the board is keeping names the daemon
+that took it: a restart reads its own pane in that principal and knows the
+hold is its own to resolve, and a hold carrying another pane belongs to a peer
+that may well still be running.
 
 **How it is written.** A JSON document, whole, to a temp file in the same
 directory and then renamed over the old one. A reader sees the previous
@@ -291,6 +296,33 @@ before it is taken back, and nothing is done to a pane on the strength of one:
   guess is how a live worker's task ends up in a second pane, which is the
   split this exists to prevent. Nothing is spawned while Herdr is down either,
   so the wait costs nothing.
+
+**What a restart adopts.** A worker whose pane Herdr still lists and whose
+task the board still says is its own, and a task the board is still holding
+for this daemon's principal that no binding names, when Herdr says a pane is
+working it — that is the reservation window seen from the board, and the pane
+is adopted rather than the work thrown away. Herdr is asked by the agent name
+a worker for that task registers under; the adoption is never a guess.
+
+**What a restart reaps.** A hold the board is keeping for this daemon that no
+pane is working: it is handed back with `task release` and a note saying the
+dispatcher went down before a worker came up, so the task returns to the ready
+list instead of sitting reserved forever. And a checkout under
+`<state_dir>/worktrees` that no binding names: a verifier's binding is the
+only record of where its checkout is, so a binding lost while the daemon was
+down leaves the directory with nothing to remove it. Every reap is logged
+with the reason.
+
+**What a restart will never touch.** Anything under a directory this daemon
+did not create. The worktree reap reads only `<state_dir>/worktrees` — the
+root hdis makes its own checkouts in — and inside it only entries named with
+the `hdis-verify-` prefix hdis names them with; a project directory, a
+worker's tree, and any other directory under that root are left exactly as
+they are. It also never touches a hold carrying another daemon's principal:
+`task list --mine` is scoped to the principal, so a peer's row is not even in
+the answer. Lease release stays htask's own — a single stale hold this daemon
+itself is named on is handed back, and the pane-gone sweep and the lease timer
+are never reimplemented here.
 
 `hdis doctor` reports the file and how many bindings came back at the last
 start.
