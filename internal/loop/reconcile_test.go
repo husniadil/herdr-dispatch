@@ -165,6 +165,17 @@ func TestAReservationOutlivesTheDaemonThatMadeIt(t *testing.T) {
 	}
 }
 
+// removingGit stands in for what `git worktree remove --force` really does:
+// it takes the directory named last on the line. A fake that only exits zero
+// deletes nothing, and a reap test standing on one passes whether the code
+// removed anything or not.
+func removingGit(t *testing.T, f *fake.Fake) {
+	t.Helper()
+	f.Bin(t, "git", `for a in "$@"; do last=$a; done
+[ "$3" = worktree ] && rm -rf "$last"
+exit 0`)
+}
+
 // A worktree under this daemon's own state dir that no binding names is a
 // verifier's checkout whose binding went before the retire could run. The
 // next start takes it.
@@ -172,11 +183,7 @@ func TestARestartReapsAWorktreeNoBindingNames(t *testing.T) {
 	l, f := newLoop(t)
 	root := t.TempDir()
 	l.Worktrees = &worktree.Manager{Root: root, Git: filepath.Join(f.Dir, "git")}
-	// Stand in for what `git worktree remove --force` really does: take the
-	// directory named last on the line.
-	f.Bin(t, "git", `for a in "$@"; do last=$a; done
-[ "$3" = worktree ] && rm -rf "$last"
-exit 0`)
+	removingGit(t, f)
 	stranded := filepath.Join(root, "hdis-verify-7-abc")
 	if err := os.MkdirAll(stranded, 0o700); err != nil {
 		t.Fatal(err)
@@ -201,10 +208,14 @@ func TestARestartKeepsWhatItDidNotStrand(t *testing.T) {
 	l, f := newLoop(t)
 	root := t.TempDir()
 	l.Worktrees = &worktree.Manager{Root: root, Git: filepath.Join(f.Dir, "git")}
-	f.Bin(t, "git", `exit 0`)
+	removingGit(t, f)
 	bound := filepath.Join(root, "hdis-verify-7-live")
 	foreign := filepath.Join(root, "notes")
-	for _, d := range []string{bound, foreign} {
+	// A directory that IS this daemon's to reap, so the reap is known to have
+	// run and to really remove. Without it the two survivors below prove
+	// nothing: a reap that removed nothing at all would leave them too.
+	stranded := filepath.Join(root, "hdis-verify-9-gone")
+	for _, d := range []string{bound, foreign, stranded} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -220,6 +231,9 @@ func TestARestartKeepsWhatItDidNotStrand(t *testing.T) {
 	l.Log = log.New(io.Discard, "", 0)
 	if _, err := l.Adopt(context.Background()); err != nil {
 		t.Fatalf("adopt: %v", err)
+	}
+	if _, err := os.Stat(stranded); !os.IsNotExist(err) {
+		t.Fatalf("the reap did not run, so nothing below is proven: %v", err)
 	}
 	for _, d := range []string{bound, foreign} {
 		if _, err := os.Stat(d); err != nil {

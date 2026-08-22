@@ -234,3 +234,25 @@ func TestSavingBindingsKeepsTheReservationsBesideThem(t *testing.T) {
 		t.Fatalf("state: %+v", got)
 	}
 }
+
+// A verifier's checkout is named by its binding and nowhere else. A binding
+// that comes back without it leaves the tree with nothing to remove it: the
+// retire cannot, and a startup reap would take it while the verifier is
+// still working in it.
+func TestAVerifiersWorktreeSurvivesARoundTrip(t *testing.T) {
+	s := tempStore(t)
+	held := []decide.Binding{{
+		TaskID: "01AAA", Pane: "wM:p9", Kind: decide.KindVerifier,
+		Worktree: "/state/hdis/worktrees/hdis-verify-7-abc", PromptedAt: time.Now().UTC(), Prompts: 1,
+	}}
+	if err := s.Save(State{Bindings: held}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := s.Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(got.Bindings) != 1 || got.Bindings[0].Worktree != held[0].Worktree {
+		t.Fatalf("the checkout was forgotten: %+v", got.Bindings)
+	}
+}

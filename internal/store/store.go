@@ -84,6 +84,12 @@ type record struct {
 	// Verified says a verifier has already been brought up for the
 	// submission a worker's binding is holding.
 	Verified bool `json:"verified,omitempty"`
+	// Worktree is the checkout a verifier works in. The binding is the only
+	// record of where it is, so a binding that comes back without it leaves
+	// a live verifier's tree with nothing naming it: the retire cannot
+	// remove it, and a startup reap would take it while the verifier is
+	// still working in it.
+	Worktree string `json:"worktree,omitempty"`
 }
 
 // Load reads the bindings. A store nobody has written is an empty set and no
@@ -115,6 +121,7 @@ func (b *Bindings) Load() (State, error) {
 			Notified:   r.Notified,
 			Kind:       r.Kind,
 			Verified:   r.Verified,
+			Worktree:   r.Worktree,
 		})
 	}
 	held := make([]Reservation, 0, len(doc.Reservations))
@@ -152,6 +159,7 @@ func (b *Bindings) Save(state State) error {
 			Notified:     x.Notified,
 			Kind:         kindOf(x),
 			Verified:     x.Verified,
+			Worktree:     x.Worktree,
 		})
 	}
 	for _, x := range state.Reservations {
