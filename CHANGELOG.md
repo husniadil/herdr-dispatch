@@ -80,7 +80,8 @@ pane and does not go stale when the daemon moves pane. It is an address only:
 the sender of anything a worker writes is stamped by the mail daemon from
 `HERDR_PANE_ID`.
 
-An agent in a dispatched pane reads that variable to answer the dispatcher. The
+An agent in a dispatched pane reads that variable to find out where its report
+goes, and answers there rather than at any pane written into its text. The
 name is the whole contract and is pinned by test against what README documents.
 
 Callers read the variable and answer there, as before, but must stop treating
