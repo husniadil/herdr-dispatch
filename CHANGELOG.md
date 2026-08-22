@@ -7,6 +7,13 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+Every worker pane is launched with `FORCE_PROMPT_CACHING_5M=1`, so a worker
+takes the 5-minute prompt-cache TTL instead of the 1-hour one a REPL main
+thread is given. The operator's own sessions are untouched. Inert on the
+`codex` path, where a relayed `cache_control` is not forwarded upstream.
+
+Callers do nothing. No CLI, tool, JSON shape or error code changes.
+
 The bindings are durable. They are written to
 `${XDG_STATE_HOME:-~/.local/state}/hdis/hdis-bindings.json` on every change and
 re-adopted at the next start, after each one is verified against the board and

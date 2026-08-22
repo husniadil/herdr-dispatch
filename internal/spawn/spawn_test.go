@@ -983,3 +983,17 @@ func TestTheVerifierGateCommandIsTheProjectsOwn(t *testing.T) {
 		t.Fatalf("the guard mistakes the project's own gate for one of our plugins: %v", got)
 	}
 }
+
+// A worker is short-lived and disposable, so its pane is launched asking the
+// client for the short prompt-cache TTL. The operator's own session is not
+// touched by this, which is the whole reason the variable lives on the split.
+func TestTheSplitAsksForTheShortPromptCache(t *testing.T) {
+	h := newHarness(t, []string{goalActive}, startRegistered)
+	if _, err := h.pipe.Run(context.Background(), req(claudeProfile())); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	split := splitArgv(t, h)
+	if !hasPair(split, "--env", ShortPromptCacheVar+"=1") {
+		t.Fatalf("the split carries no %s pair: %v", ShortPromptCacheVar, split)
+	}
+}

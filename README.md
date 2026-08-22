@@ -191,8 +191,10 @@ ledger.
    down fails here, in the daemon's own words, rather than thirty seconds
    later as a startup timeout with the cause hidden in a pane.
 2. `herdr pane split` off the dispatcher's pane, in the task's own project,
-   with `--env HDIS_DISPATCHER_PANE=<the daemon's base pane>` — see
-   [The dispatcher's address](#the-dispatchers-address).
+   with `--env HDIS_DISPATCHER_PANE=<the daemon's base pane>` and `--env
+   FORCE_PROMPT_CACHING_5M=1` — see
+   [The dispatcher's address](#the-dispatchers-address) and
+   [The worker's prompt cache](#the-workers-prompt-cache).
 3. For a `codex` profile, the routing arrives in two halves. The settings
    document goes to a private file and is spliced into the worker's argv as
    `--settings <path>`, because that argv is TYPED into the pane and the
@@ -247,6 +249,28 @@ from the mail daemon's own reading of `HERDR_PANE_ID`, which is Herdr's word
 about the pane it runs in, and never from this variable. Publishing the
 address is the whole of hdis's part — nothing in this binary imports, reads or
 runs herdr-mail, and a named test walks the source to keep it that way.
+
+## The worker's prompt cache
+
+Every pane this daemon splits is also launched with
+
+```
+FORCE_PROMPT_CACHING_5M=1
+```
+
+which asks the client for the 5-minute prompt-cache TTL rather than the
+1-hour one it would otherwise hand a REPL main thread. A worker is
+short-lived, disposable, and rarely revisits its own prefix, so the long
+entry costs more than the work can spend — a native subagent already gets
+the short one for the same reason. The client reads this variable before
+every other rule, so a worker pane settles the question on the way up.
+
+It reaches worker panes and nothing else. The operator's own session keeps
+the 1-hour TTL, which is why the variable is set on the split rather than in
+the launcher's environment, where the operator's sessions would read it too.
+On the `codex` path it is inert: a relayed `cache_control` has no equivalent
+upstream there and is not forwarded, so it changes only what a worker talking
+to the real Anthropic endpoint writes.
 
 ## Restarting the dispatcher
 

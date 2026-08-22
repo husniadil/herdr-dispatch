@@ -54,6 +54,21 @@ const GoalPrefix = "/goal "
 // is Herdr's own word about the pane, and never from this variable.
 const DispatcherPaneVar = "HDIS_DISPATCHER_PANE"
 
+// ShortPromptCacheVar asks the client for the 5-minute prompt-cache TTL
+// instead of the 1-hour one a REPL main thread would otherwise take. A
+// worker is short-lived and disposable and rarely revisits its own prefix,
+// so the long entry costs more than the work can spend; a native subagent
+// already gets the short one for the same reason. The client reads this
+// first and it short-circuits every other rule, so setting it here settles
+// the question for a worker pane and for nothing else — the operator's own
+// session never sees it, which is why it is set on the split rather than in
+// the launcher's environment.
+//
+// It is inert on the codex path: a relayed cache_control has no equivalent
+// upstream there and is not forwarded, so the variable only changes what a
+// worker talking to the real Anthropic endpoint writes. Harmless otherwise.
+const ShortPromptCacheVar = "FORCE_PROMPT_CACHING_5M"
+
 // SettingsFileMode is what a spawn's settings file is created with. The
 // document carries the proxy's auth token and the base URL of the daemon
 // that answers with the operator's own quota, and the file lands in a
@@ -298,7 +313,8 @@ func (p *Pipeline) Run(ctx context.Context, req Request) (string, error) {
 	// on the typed line: it costs nothing there, and the condition stays a
 	// pointer that does not go stale when the daemon moves pane.
 	pane, err := p.Herdr.PaneSplit(ctx, req.BasePane, p.direction(), req.Cwd,
-		DispatcherPaneVar+"="+req.BasePane)
+		DispatcherPaneVar+"="+req.BasePane,
+		ShortPromptCacheVar+"=1")
 	if err != nil {
 		return "", fmt.Errorf("spawn %s: %w", req.Name, err)
 	}
