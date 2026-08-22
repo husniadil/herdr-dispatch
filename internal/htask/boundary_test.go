@@ -41,23 +41,31 @@ func TestTheBoardAdapterCarriesNoReviewVerb(t *testing.T) {
 func TestNoSourceFilePassesAReviewVerbAsAnArgument(t *testing.T) {
 	root := filepath.Join("..", "..")
 	verb := regexp.MustCompile(`"(approve|reject)"`)
+	read := 0
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 		if info.IsDir() {
-			if name := info.Name(); name != "." && strings.HasPrefix(name, ".") {
+			// The root itself is spelled `../..`, whose name starts with a
+			// dot: testing the name alone skips the whole walk on its first
+			// step and passes without reading a line.
+			if name := info.Name(); path != root && strings.HasPrefix(name, ".") {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, ".go") {
+		// Production files only: the boundary is what the shipped binary
+		// does, and a test naming a verb to prove it is refused is the
+		// boundary being held rather than crossed.
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
 		body, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
+		read++
 		if m := verb.Find(body); m != nil {
 			t.Errorf("%s passes %s as an argument: this binary never approves or rejects", path, m)
 		}
@@ -65,5 +73,10 @@ func TestNoSourceFilePassesAReviewVerbAsAnArgument(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("walk: %v", err)
+	}
+	// A guard that read nothing passes for the wrong reason, which is
+	// exactly how this one passed while its walk stopped on its first step.
+	if read < 10 {
+		t.Fatalf("the walk read %d source files, so it guarded nothing", read)
 	}
 }
