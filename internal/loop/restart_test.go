@@ -119,9 +119,15 @@ func TestARestartDropsABindingWhosePaneIsGone(t *testing.T) {
 // A task the board has finished with, or handed to someone else, is not this
 // dispatcher's to drive any more.
 func TestARestartDropsABindingWhoseTaskMovedOn(t *testing.T) {
-	for _, tc := range []struct{ name, row string }{
-		{"done", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"done"},"ready":false,"dependents":[]}`},
-		{"claimed by another pane", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"doing","claimed_by":"agent:wM:pZ"},"ready":false,"dependents":[]}`},
+	for _, tc := range []struct {
+		name, row string
+		// A finished task takes its pane with it; a task another pane holds
+		// leaves the pane alone, because whose worker it is now is the
+		// board's answer and not a restart's.
+		retires bool
+	}{
+		{name: "done", row: `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"done"},"ready":false,"dependents":[]}`, retires: true},
+		{name: "claimed by another pane", row: `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"doing","claimed_by":"agent:wM:pZ"},"ready":false,"dependents":[]}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			l, f := newLoop(t)
@@ -144,11 +150,12 @@ func TestARestartDropsABindingWhoseTaskMovedOn(t *testing.T) {
 			if !strings.Contains(said.String(), "01AAA") {
 				t.Fatalf("the operator was not told which task went: %q", said.String())
 			}
-			// Nothing was done to the pane on the strength of a dropped
-			// binding: retiring a worker the board moved on from is the
-			// operator's call, not a restart's.
-			if got := calls(t, f, "pane close"); len(got) != 0 {
-				t.Fatalf("a re-adoption closed a pane: %v", got)
+			want := 0
+			if tc.retires {
+				want = 1
+			}
+			if got := calls(t, f, "pane close"); len(got) != want {
+				t.Fatalf("closed %d panes, want %d: %v", len(got), want, got)
 			}
 		})
 	}
@@ -238,4 +245,79 @@ func TestAFirstStartAdoptsNothingAndSaysSo(t *testing.T) {
 	if n != 0 || l.Readopted() != 0 {
 		t.Fatalf("re-adopted %d", n)
 	}
+}
+
+// The fourth shape of the restart window. Task 28 closed a reservation with
+// no binding, a live pane with no binding, and a worktree no binding names;
+// this is the one left: a binding whose task finished while the daemon was
+// down. Dropping it is right, but the pane it named is one this daemon
+// opened, and nothing else will ever close it.
+func TestARestartRetiresThePaneOfABindingWhoseTaskFinished(t *testing.T) {
+	l, f := newLoop(t)
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	f.Write(t, "panes.json", panesWith("idle"))
+	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"done"},"ready":false,"dependents":[]}`)
+
+	next := restarted(t, l)
+	if _, err := next.Adopt(context.Background()); err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+	if got := next.Bindings(); len(got) != 0 {
+		t.Fatalf("the binding survived a finished task: %+v", got)
+	}
+	// Unbound is not enough: the pane has to be gone.
+	got := calls(t, f, "pane close")
+	if len(got) != 1 || !strings.Contains(got[0], "wM:p9") {
+		t.Fatalf("the pane of a finished task was left open: %v", got)
+	}
+}
+
+// The two edges the retire must not cross: a pane this daemon never opened,
+// and a pane whose task is still unfinished.
+func TestARestartRetiresNoPaneItDidNotStrand(t *testing.T) {
+	t.Run("a pane no binding names is never touched", func(t *testing.T) {
+		l, f := newLoop(t)
+		if err := l.Tick(context.Background()); err != nil {
+			t.Fatalf("tick: %v", err)
+		}
+		// A second pane herdr lists that this daemon never opened, alongside
+		// the one it did, whose task has finished.
+		f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[`+
+			`{"pane_id":"wM:p9","agent":"claude","agent_status":"idle","focused":false,"revision":1},`+
+			`{"pane_id":"wM:pX","agent":"claude","agent_status":"working","focused":false,"revision":1}]}}`)
+		f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"done"},"ready":false,"dependents":[]}`)
+
+		next := restarted(t, l)
+		if _, err := next.Adopt(context.Background()); err != nil {
+			t.Fatalf("adopt: %v", err)
+		}
+		for _, c := range calls(t, f, "pane close") {
+			if strings.Contains(c, "wM:pX") {
+				t.Fatalf("a restart closed a pane it never opened: %v", c)
+			}
+		}
+	})
+
+	t.Run("an unfinished task keeps its pane", func(t *testing.T) {
+		l, f := newLoop(t)
+		if err := l.Tick(context.Background()); err != nil {
+			t.Fatalf("tick: %v", err)
+		}
+		f.Write(t, "panes.json", panesWith("working"))
+		f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"doing","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`)
+
+		next := restarted(t, l)
+		n, err := next.Adopt(context.Background())
+		if err != nil {
+			t.Fatalf("adopt: %v", err)
+		}
+		if n != 1 {
+			t.Fatalf("re-adopted %d bindings, want 1", n)
+		}
+		if got := calls(t, f, "pane close"); len(got) != 0 {
+			t.Fatalf("a restart closed a live worker's pane: %v", got)
+		}
+	})
 }

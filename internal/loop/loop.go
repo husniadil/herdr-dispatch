@@ -136,7 +136,8 @@ func (l *Loop) Adopt(ctx context.Context) (int, error) {
 			continue
 		}
 		if decide.Terminal(row.Status) {
-			l.logf("task %s is %s, dropping the binding a restart found on pane %s", b.TaskID, row.Status, b.Pane)
+			l.logf("task %s is %s, dropping the binding a restart found on pane %s and retiring the pane with it", b.TaskID, row.Status, b.Pane)
+			l.retirePane(ctx, b.Pane)
 			continue
 		}
 		if b.IsVerifier() {
@@ -185,6 +186,20 @@ func (l *Loop) Adopt(ctx context.Context) (int, error) {
 	l.reclaim(ctx, panes)
 	l.reap(ctx)
 	return len(kept), nil
+}
+
+// retirePane closes a pane a dropped binding named, through the same pipeline
+// a live daemon retires through, so the settings file the spawn wrote goes
+// with it. It is only ever reached with a pane this daemon opened and whose
+// binding still names it at the moment of the drop — the same standing a
+// live retire has. The task's lease is not touched: that is the board's.
+func (l *Loop) retirePane(ctx context.Context, pane string) {
+	if l.Spawn == nil {
+		return
+	}
+	if err := l.Spawn.Retire(ctx, pane); err != nil {
+		l.logf("pane %s could not be retired: %v", pane, err)
+	}
 }
 
 // principal is the board principal this daemon writes with, which carries

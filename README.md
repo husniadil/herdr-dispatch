@@ -310,15 +310,23 @@ dispatcher went down before a worker came up, so the task returns to the ready
 list instead of sitting reserved forever. And a checkout under
 `<state_dir>/worktrees` that no binding names: a verifier's binding is the
 only record of where its checkout is, so a binding lost while the daemon was
-down leaves the directory with nothing to remove it. Every reap is logged
-with the reason.
+down leaves the directory with nothing to remove it. And the pane of a
+binding whose task the board has finished with: the drop is right, but the
+pane is one this daemon opened and the binding still names it at the moment
+of the drop, so it is retired there — the same move a live daemon makes when
+a task it is driving reaches a terminal state. Without it a restart that
+lands after an approval leaves the worker's pane open with nothing aware of
+it. Every reap is logged with the reason.
 
 **What a restart will never touch.** Anything under a directory this daemon
 did not create. The worktree reap reads only `<state_dir>/worktrees` — the
 root hdis makes its own checkouts in — and inside it only entries named with
 the `hdis-verify-` prefix hdis names them with; a project directory, a
 worker's tree, and any other directory under that root are left exactly as
-they are. It also never touches a hold carrying another daemon's principal:
+they are. The pane retire is bounded the same way: only a pane one of this
+daemon's own persisted bindings names, so a pane it never opened is never
+closed, and a pane whose task is unfinished is adopted rather than retired.
+It also never touches a hold carrying another daemon's principal:
 `task list --mine` is scoped to the principal, so a peer's row is not even in
 the answer. Lease release stays htask's own — a single stale hold this daemon
 itself is named on is handed back, and the pane-gone sweep and the lease timer
