@@ -473,12 +473,43 @@ func TestADaemonWithNoBasePaneDoesNotTick(t *testing.T) {
 	<-served
 }
 
+// awaitStartupTick waits until the tick a starting daemon always runs has
+// made every call it is going to make.
+//
+// It is not a sleep. A tick always reads two things, the board's ready list
+// and Herdr's panes (loop.snapshot); with nothing ready and no bindings
+// there is nothing to act on afterwards, so those two reads ARE the whole of
+// that tick. Both seen means the tick has no call left to make, and a test
+// that wants to attribute later calls to something else can take its mark.
+func awaitStartupTick(t *testing.T, f *fake.Fake) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		var board, panes bool
+		for _, c := range f.Calls(t) {
+			board = board || strings.Contains(c, "task list --ready")
+			panes = panes || strings.Contains(c, "pane list")
+		}
+		if board && panes {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("the startup tick never finished; it made %q", f.Calls(t))
+}
+
 // The ask-to-stop path: a daemon a door started can only be reached over the
 // socket, so stop has to be a verb. It answers, stops ticking, and takes its
 // socket and lock with it.
 func TestStopShutsTheDaemonDownCleanly(t *testing.T) {
 	dir := stateDir(t)
 	d, f := newDaemon(t)
+	// Nothing ready to dispatch. This case is about what a daemon does on
+	// the way out, and a board with work on it makes the startup tick a
+	// spawn whose length is set by a poll loop. Empty, the tick is the two
+	// reads a snapshot always makes and it ends where awaitStartupTick can
+	// see it.
+	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
 	lock, err := Lock()
 	if err != nil {
 		t.Fatalf("lock: %v", err)
@@ -492,6 +523,14 @@ func TestStopShutsTheDaemonDownCleanly(t *testing.T) {
 	defer cancel()
 	served := make(chan error, 1)
 	go func() { served <- d.Serve(ctx, ln) }()
+
+	// Daemon.tick runs the loop before it ever reaches its ticker, so a
+	// daemon that starts serving always ticks once. That tick is the
+	// dispatcher STARTING, and its calls are none of this case's business:
+	// wait it out and take the mark afterwards, rather than racing it
+	// against the stop round trip.
+	awaitStartupTick(t, f)
+	before := len(f.Calls(t))
 
 	conn, err := net.Dial("unix", config.SocketPath())
 	if err != nil {
@@ -516,7 +555,6 @@ func TestStopShutsTheDaemonDownCleanly(t *testing.T) {
 		t.Fatalf("stop answered %+v", rep)
 	}
 
-	before := len(f.Calls(t))
 	select {
 	case err := <-served:
 		if err != nil {
@@ -533,7 +571,8 @@ func TestStopShutsTheDaemonDownCleanly(t *testing.T) {
 		t.Errorf("the lock file outlived the daemon: %v", err)
 	}
 	// The board is htask's, and a dispatcher going away writes nothing to
-	// it: no release, no note, no claim handed back.
+	// it: no release, no note, no claim handed back. The mark was taken
+	// after the startup tick, so everything past it belongs to stopping.
 	after := f.Calls(t)
 	if len(after) != before {
 		t.Errorf("stopping reached out: %q", after[before:])
