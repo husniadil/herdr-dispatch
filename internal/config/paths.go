@@ -45,6 +45,11 @@ func ConfigPath() string { return filepath.Join(ConfigDir(), Name+".json") }
 // reason the README records.
 func BindingsPath() string { return filepath.Join(StateDir(), Name+"-bindings.json") }
 
+// WorktreeDir is <state_dir>/worktrees, where a verifier's throwaway
+// checkout is made. It is outside every project on purpose: the tree a
+// verifier works in must not be one a worker or the operator is holding.
+func WorktreeDir() string { return filepath.Join(StateDir(), "worktrees") }
+
 // LogPath is <state_dir>/hdis.log, where a daemon started by a door writes:
 // it has no terminal, and a dispatcher nobody can hear is worse than none.
 func LogPath() string { return filepath.Join(StateDir(), Name+".log") }

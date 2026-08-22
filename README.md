@@ -339,6 +339,26 @@ operator decides, and the board's review gate is still the only thing that
 moves the task. `TestTheBoardAdapterCarriesNoReviewVerb` and
 `TestNoSourceFilePassesAReviewVerbAsAnArgument` pin that from both sides.
 
+A verifier works in a checkout of its own, and never in the project
+directory. Its pane is opened in a detached `git worktree` of the project at
+its committed HEAD, made under `<state_dir>/worktrees`, and removed when the
+binding that owns it is dropped. The worker keeps the project directory
+itself, because its commits belong on the branch.
+
+The split is not tidiness. The lane's first live run had the verifier, the
+worker and the operator all mutating one tree: the verifier restored it from
+HEAD and destroyed the operator's uncommitted work, then reported a gate
+result it had measured over that debris rather than over the commit under
+review. A gate run means nothing when the tree is not the commit. So the
+worktree is a precondition rather than a convenience: when it cannot be made
+— the project is not a git repository, or git refuses — no verifier is
+spawned at all, the reason is logged, and the task simply stays in review for
+the operator. Verifying in the shared tree is worse than not verifying.
+`TestAVerifierIsGivenAWorktreeAndNeverTheProjectDirectory`,
+`TestTheWorkerIsGivenTheProjectDirectoryItself`,
+`TestWithoutAWorktreeNoVerifierIsSpawned` and `TestARunLeavesNoWorktreeBehind`
+pin each half.
+
 ## Building and testing
 
 ```sh

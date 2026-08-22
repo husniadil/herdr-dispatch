@@ -22,6 +22,7 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/htask"
 	"github.com/husniadil/herdr-dispatch/internal/spawn"
 	"github.com/husniadil/herdr-dispatch/internal/store"
+	"github.com/husniadil/herdr-dispatch/internal/worktree"
 )
 
 // Loop holds the adapters, the policy, and the bindings.
@@ -31,6 +32,10 @@ type Loop struct {
 	Spawn  *spawn.Pipeline
 	Config config.Config
 	Policy decide.Policy
+	// Worktrees hands each verifier the checkout it works in. The
+	// verification lane needs it: a verifier with nowhere of its own to work
+	// is not spawned at all.
+	Worktrees *worktree.Manager
 	// Store is where the bindings outlive the process. A nil Store keeps
 	// them in memory only, which is a test that does not care and never a
 	// running daemon.
@@ -295,7 +300,7 @@ func (l *Loop) apply(ctx context.Context, actions []decide.Action) {
 			// the board's own sweep.
 			l.logf("task %s: pane %s is gone, dropping its binding", a.TaskID, a.Pane)
 			l.Spawn.Discard(a.Pane)
-			l.drop(a.Pane)
+			l.drop(ctx, a.Pane)
 		case decide.GiveUp:
 			l.logf("task %s: %s after %d prompts, retiring pane %s",
 				a.TaskID, a.Reason, l.promptsFor(a.Pane), a.Pane)
@@ -368,16 +373,34 @@ func (l *Loop) spawnVerifier(ctx context.Context, a decide.Action) error {
 	if err != nil {
 		return err
 	}
+	// The checkout comes first, and no checkout means no verifier. A
+	// verifier reads and mutates the tree it is put in, so the project's own
+	// directory — which its worker still holds and the operator reviews in —
+	// is the one place it must never run: the lane's first live run restored
+	// that tree from HEAD, destroyed the operator's uncommitted work, and
+	// then reported a gate result measured on it. Not verifying is the
+	// better failure, and the next tick may try again.
+	if l.Worktrees == nil {
+		return fmt.Errorf("no worktree manager, so nothing verifies task %s in a tree of its own", row.Project)
+	}
+	tree, err := l.Worktrees.Create(ctx, row.Project, row.Seq)
+	if err != nil {
+		return err
+	}
 	pane, err := l.Spawn.Run(ctx, spawn.Request{
 		Name:     verifierName(row.Seq),
 		BasePane: l.BasePane,
-		Cwd:      row.Project,
+		Cwd:      tree,
 		Profile:  profile,
 		Goal:     spawn.VerifierGoal(row.Seq),
 	})
 	if pane == "" {
 		// Nothing came up, so the submission has not had its verifier and
-		// the next tick may try again.
+		// the next tick may try again. The checkout it would have worked in
+		// goes with it.
+		if rmErr := l.Worktrees.Remove(ctx, tree); rmErr != nil {
+			l.logf("task %s: %v", row.ID, rmErr)
+		}
 		return err
 	}
 	l.mu.Lock()
@@ -385,6 +408,7 @@ func (l *Loop) spawnVerifier(ctx context.Context, a decide.Action) error {
 		TaskID:     row.ID,
 		Pane:       pane,
 		Kind:       decide.KindVerifier,
+		Worktree:   tree,
 		PromptedAt: l.now(),
 		Prompts:    1,
 	})
@@ -468,24 +492,38 @@ func (l *Loop) notify(ctx context.Context, a decide.Action) error {
 // board's own, and a second writer racing them is the bug, not a safety net.
 func (l *Loop) retire(ctx context.Context, a decide.Action) error {
 	err := l.Spawn.Retire(ctx, a.Pane)
-	l.drop(a.Pane)
+	l.drop(ctx, a.Pane)
 	return err
 }
 
-// drop forgets one binding, by the pane it names. The pane is what a binding
-// is unique by: a task in review can hold a worker's binding and its
-// verifier's at once, and dropping by task would take both.
-func (l *Loop) drop(pane string) {
+// drop forgets one binding, by the pane it names, and takes the worktree the
+// binding owned with it. The pane is what a binding is unique by: a task in
+// review can hold a worker's binding and its verifier's at once, and dropping
+// by task would take both.
+//
+// The binding is the only record of where a verifier's checkout is, so
+// removing it here is the one place that record is spent. It is written to
+// the store, so a restart inherits the removal rather than leaking it.
+func (l *Loop) drop(ctx context.Context, pane string) {
 	l.mu.Lock()
-	defer l.mu.Unlock()
+	var tree string
 	kept := l.bindings[:0]
 	for _, b := range l.bindings {
 		if b.Pane != pane {
 			kept = append(kept, b)
+			continue
 		}
+		tree = b.Worktree
 	}
 	l.bindings = kept
 	l.saveLocked()
+	l.mu.Unlock()
+
+	if tree != "" && l.Worktrees != nil {
+		if err := l.Worktrees.Remove(ctx, tree); err != nil {
+			l.logf("pane %s: %v", pane, err)
+		}
+	}
 }
 
 func (l *Loop) promptsFor(pane string) int {

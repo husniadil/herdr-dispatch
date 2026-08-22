@@ -77,6 +77,10 @@ type Binding struct {
 	// task, KindVerifier checks what a worker submitted. Empty is a worker,
 	// so a binding written before the lane existed reads as what it was.
 	Kind string
+	// Worktree is the throwaway checkout a VERIFIER was given to work in,
+	// which is removed when this binding is dropped. A worker has none: its
+	// commits belong on the project's own branch.
+	Worktree string
 	// Verified is set on a WORKER's binding when a verifier has been
 	// brought up for the submission it is currently holding. It is what
 	// makes one submission earn one verifier, and Rearm clears it when the

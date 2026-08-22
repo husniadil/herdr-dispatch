@@ -31,6 +31,7 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/store"
 	"github.com/husniadil/herdr-dispatch/internal/verbs"
 	"github.com/husniadil/herdr-dispatch/internal/version"
+	"github.com/husniadil/herdr-dispatch/internal/worktree"
 )
 
 func main() {
@@ -145,9 +146,12 @@ func serve(argv []string) error {
 			ShellCeiling:   spawn.DefaultShellCeiling,
 			Poll:           2 * time.Second,
 		},
-		Store:    &store.Bindings{Path: config.BindingsPath()},
-		BasePane: pane,
-		Log:      log.Default(),
+		// A verifier gets a checkout of its own, never the project directory
+		// its worker holds and the operator reviews in.
+		Worktrees: &worktree.Manager{Root: config.WorktreeDir()},
+		Store:     &store.Bindings{Path: config.BindingsPath()},
+		BasePane:  pane,
+		Log:       log.Default(),
 	}
 
 	// The bindings a previous daemon wrote are taken back before anything is
