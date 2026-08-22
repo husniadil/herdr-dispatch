@@ -594,11 +594,12 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 	// on a line herdr TYPES into the pane, and the board's own goal document
 	// is far too long to type intact. The worker reads the criteria itself.
 	pane, err := l.Spawn.Run(ctx, spawn.Request{
-		Name:     workerName(row.Seq),
-		BasePane: l.BasePane,
-		Cwd:      row.Project,
-		Profile:  profile,
-		Goal:     spawn.PointerGoal(row.Seq),
+		Name:       workerName(row.Seq),
+		BasePane:   l.BasePane,
+		OriginPane: row.PaneID,
+		Cwd:        row.Project,
+		Profile:    profile,
+		Goal:       spawn.PointerGoal(row.Seq),
 	})
 	if pane == "" {
 		return err
@@ -655,11 +656,12 @@ func (l *Loop) spawnVerifier(ctx context.Context, a decide.Action) error {
 		return err
 	}
 	pane, err := l.Spawn.Run(ctx, spawn.Request{
-		Name:     verifierName(row.Seq),
-		BasePane: l.BasePane,
-		Cwd:      tree,
-		Profile:  profile,
-		Goal:     spawn.VerifierGoal(row.Seq),
+		Name:       verifierName(row.Seq),
+		BasePane:   l.BasePane,
+		OriginPane: row.PaneID,
+		Cwd:        tree,
+		Profile:    profile,
+		Goal:       spawn.VerifierGoal(row.Seq),
 	})
 	if pane == "" {
 		// Nothing came up, so the submission has not had its verifier and

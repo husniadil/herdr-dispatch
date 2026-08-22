@@ -191,7 +191,7 @@ ledger.
    down fails here, in the daemon's own words, rather than thirty seconds
    later as a startup timeout with the cause hidden in a pane.
 2. `herdr pane split` off the dispatcher's pane, in the task's own project,
-   with `--env HDIS_DISPATCHER_PANE=<the daemon's base pane>` and `--env
+   with `--env HDIS_DISPATCHER_PANE=<the report address>` and `--env
    FORCE_PROMPT_CACHING_5M=1` — see
    [The dispatcher's address](#the-dispatchers-address) and
    [The worker's prompt cache](#the-workers-prompt-cache).
@@ -235,13 +235,25 @@ ledger.
 Every pane this daemon splits — worker and verifier alike — is launched with
 
 ```
-HDIS_DISPATCHER_PANE=<the daemon's base pane>
+HDIS_DISPATCHER_PANE=<the report address>
 ```
 
 in its environment, and both conditions tell the agent to answer there rather
 than at a pane id written into their text. An agent that comes up in one of
-these panes may read the variable to find out where the dispatcher lives; the
-text stays valid whatever pane the daemon is running on this time.
+these panes may read the variable to find out where to report; the text stays
+valid whatever pane the daemon is running on this time.
+
+The address is the pane the task was CREATED FROM when the board's row names
+one, and the daemon's own base pane only when it does not. A report belongs to
+whoever wanted the work, and this daemon is not scoped to one repository: it
+takes ready tasks off every project's board, so the operator who started it is
+routinely not the operator who filed the task. The verification lane follows
+the same rule, which also decides whose tokens a verifier spends. A task an
+operator filed at a terminal legitimately has no pane of origin — nothing with
+a pane created it — and for those the daemon's own pane is the only address
+there is. What does NOT move is the pane a worker is split off: that stays the
+base pane in both branches, because this daemon has only its own pane to split
+from.
 
 It is an address and nothing more. It says where the dispatcher is, never who
 the reader is: the sender stamped on any message the agent then writes comes

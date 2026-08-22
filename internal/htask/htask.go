@@ -60,6 +60,10 @@ type Task struct {
 	Title     string `json:"title"`
 	Status    string `json:"status"`
 	ClaimedBy string `json:"claimed_by"`
+	// PaneID is the pane the task was created from, or empty when nothing
+	// with a pane created it. A task an operator files at a terminal has
+	// none, and that is the ordinary case rather than a missing field.
+	PaneID string `json:"pane_id"`
 }
 
 // Pane returns the pane the claiming principal runs in, or empty while the

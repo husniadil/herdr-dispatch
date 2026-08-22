@@ -280,6 +280,21 @@ type Request struct {
 	Profile config.Profile
 	// Goal is the one-line condition, without its slash command.
 	Goal string
+	// OriginPane is the pane the task was created from, and the address the
+	// report is owed at. It is empty for a task nothing with a pane filed,
+	// and then BasePane is the only address there is.
+	OriginPane string
+}
+
+// reportPane is where whatever comes up in the pane owes its report: the
+// pane the task came from when the board named one, and the daemon's own
+// pane otherwise. It is never the pane the worker is split off — this
+// daemon has only its own pane to split from, wherever the task came from.
+func (r Request) reportPane() string {
+	if r.OriginPane != "" {
+		return r.OriginPane
+	}
+	return r.BasePane
 }
 
 // Run brings up one worker and returns the pane it lives in. A failure the
@@ -309,11 +324,11 @@ func (p *Pipeline) Run(ctx context.Context, req Request) (string, error) {
 	// parser, and shortening the typed line is the settings document's job.
 	agentArgs = append(agentArgs, GoalPrefix+req.Goal)
 
-	// The dispatcher's address travels in the pane's environment rather than
-	// on the typed line: it costs nothing there, and the condition stays a
-	// pointer that does not go stale when the daemon moves pane.
+	// The report address travels in the pane's environment rather than on the
+	// typed line: it costs nothing there, and the condition stays a pointer
+	// that does not go stale when the daemon moves pane.
 	pane, err := p.Herdr.PaneSplit(ctx, req.BasePane, p.direction(), req.Cwd,
-		DispatcherPaneVar+"="+req.BasePane,
+		DispatcherPaneVar+"="+req.reportPane(),
 		ShortPromptCacheVar+"=1")
 	if err != nil {
 		return "", fmt.Errorf("spawn %s: %w", req.Name, err)

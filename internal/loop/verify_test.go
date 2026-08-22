@@ -40,8 +40,15 @@ esac`
 // status. The verification lane needs the project to be a real repository,
 // so every case names its own.
 func row(project, status, claimedBy string) string {
+	return rowFrom(project, status, claimedBy, "")
+}
+
+// rowFrom is row with the pane the board says the task was created from. An
+// empty origin renders the field the way a board answers for a task an
+// operator filed at a terminal.
+func rowFrom(project, status, claimedBy, origin string) string {
 	return `{"task":{"id":"01AAA","seq":7,"project":"` + project + `","title":"do the thing","status":"` + status +
-		`","claimed_by":"` + claimedBy + `"},"ready":false,"dependents":[]}`
+		`","claimed_by":"` + claimedBy + `","pane_id":"` + origin + `"},"ready":false,"dependents":[]}`
 }
 
 // gitRepo makes a git repository with one commit, which is what a project
@@ -643,5 +650,39 @@ func TestARestartLeavesALiveVerifierAndItsCheckoutAlone(t *testing.T) {
 	}
 	if _, err := os.Stat(v.Worktree); err != nil {
 		t.Fatalf("the live verifier's checkout was reaped: %v", err)
+	}
+}
+
+// The verifier's findings and its spend follow the task, not the daemon: a
+// lane that reported to whoever started hdis charged one operator's tokens
+// to answer another operator's board.
+func TestAVerifierIsAddressedAtTheTasksPaneOfOrigin(t *testing.T) {
+	l, f, project := newVerifyLoop(t, true)
+	// Both reads carry the origin: the worker is dispatched off the ready
+	// list and the verifier off the row `task get` answers with.
+	f.Write(t, "ready.json", `{"tasks":[{"id":"01AAA","seq":7,"project":"`+project+
+		`","title":"do the thing","status":"todo","pane_id":"wZ:p2"}],"count":1}`)
+	f.Write(t, "get.json", rowFrom(project, "todo", "", "wZ:p2"))
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
+	f.Write(t, "get.json", rowFrom(project, "review", "agent:wM:p9", "wZ:p2"))
+	f.Write(t, "panes.json", paneList("wM:p9", "idle"))
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	all := calls(t, f, "pane split")
+	if len(all) != 2 {
+		t.Fatalf("split %d panes: %v", len(all), all)
+	}
+	want := "--env " + spawn.DispatcherPaneVar + "=wZ:p2"
+	for i, got := range all {
+		if !strings.Contains(got, want) {
+			t.Errorf("split %d does not carry %q: %q", i, want, got)
+		}
+		if strings.Contains(got, spawn.DispatcherPaneVar+"="+l.BasePane) {
+			t.Errorf("split %d still addresses the daemon: %q", i, got)
+		}
 	}
 }

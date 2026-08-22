@@ -210,3 +210,49 @@ func TestReleaseHandsBackAHoldWithItsReason(t *testing.T) {
 		t.Fatalf("argv: got %q, want %q", got, want)
 	}
 }
+
+// The row names the pane it was created from when a pane created it. That
+// address is the whole point of the read: a report belongs to whoever wanted
+// the work, and until the row carries a pane there is nothing to route to.
+//
+// A task an operator filed at a terminal legitimately has no pane, so the
+// field arrives empty rather than failing the parse. Both bodies below go
+// through the read the dispatcher actually uses.
+func TestGetReportsThePaneATaskWasCreatedFrom(t *testing.T) {
+	c, f := client(t)
+	f.Bin(t, "htask", `cat <<'EOF'
+{"task":{"id":"01AAA","seq":7,"project":"/src/a","title":"first","status":"todo","pane_id":"wZ:p2"},"ready":true,"dependents":[]}
+EOF`)
+
+	task, err := c.Get(context.Background(), "01AAA")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got, want := task.PaneID, "wZ:p2"; got != want {
+		t.Fatalf("pane of origin is %q, want %q", got, want)
+	}
+	if got, want := f.Calls(t)[0], "task get 01AAA --all-projects --json --as plugin:hdis"; got != want {
+		t.Fatalf("argv: got %q, want %q", got, want)
+	}
+}
+
+// A board that records no pane for a row is not an error: it is the operator
+// case, and the field simply arrives empty. The body below is a capture of
+// the real CLI answering for a task a human filed.
+func TestATaskWithNoPaneOfOriginParsesWithAnEmptyOne(t *testing.T) {
+	c, f := client(t)
+	f.Bin(t, "htask", `cat <<'EOF'
+{"task":{"id":"01AAA","seq":7,"project":"/src/a","title":"first","status":"todo","created_by":"human"},"ready":true,"dependents":[]}
+EOF`)
+
+	task, err := c.Get(context.Background(), "01AAA")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if task.PaneID != "" {
+		t.Fatalf("pane of origin is %q, want empty", task.PaneID)
+	}
+	if task.ID != "01AAA" {
+		t.Fatalf("the row did not survive the parse: %+v", task)
+	}
+}

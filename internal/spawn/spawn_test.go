@@ -997,3 +997,62 @@ func TestTheSplitAsksForTheShortPromptCache(t *testing.T) {
 		t.Fatalf("the split carries no %s pair: %v", ShortPromptCacheVar, split)
 	}
 }
+
+// A report belongs to whoever wanted the work. When the board says which
+// pane a task came from, that pane is the address the worker is handed —
+// not the daemon's, which is only the pane this binary happens to run on.
+func TestTheDispatcherAddressIsTheTasksPaneOfOrigin(t *testing.T) {
+	h := newHarness(t, []string{goalActive}, startRegistered)
+	r := req(claudeProfile())
+	r.BasePane = "wM:p4"
+	r.OriginPane = "wZ:p2"
+	if _, err := h.pipe.Run(context.Background(), r); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	split := splitArgv(t, h)
+	if !hasPair(split, "--env", DispatcherPaneVar+"=wZ:p2") {
+		t.Fatalf("the split does not address the task's pane of origin: %v", split)
+	}
+	if hasPair(split, "--env", DispatcherPaneVar+"=wM:p4") {
+		t.Fatalf("the split still addresses the daemon: %v", split)
+	}
+}
+
+// A task an operator filed at a terminal has no pane of origin, and there is
+// nothing better to answer to than the daemon that dispatched it.
+func TestTheDispatcherAddressFallsBackToTheBasePaneWithNoOrigin(t *testing.T) {
+	h := newHarness(t, []string{goalActive}, startRegistered)
+	r := req(claudeProfile())
+	r.BasePane = "wM:p4"
+	r.OriginPane = ""
+	if _, err := h.pipe.Run(context.Background(), r); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	split := splitArgv(t, h)
+	if !hasPair(split, "--env", DispatcherPaneVar+"=wM:p4") {
+		t.Fatalf("the split does not fall back to the daemon's pane: %v", split)
+	}
+}
+
+// The address moved; the pane a worker is SPLIT OFF did not. This daemon has
+// only its own pane to split from, and a pane on another operator's
+// workspace is not one this binary may open a worker in.
+func TestTheSplitBaseStaysTheDaemonsPaneWhenATaskHasAnOrigin(t *testing.T) {
+	h := newHarness(t, []string{goalActive}, startRegistered)
+	r := req(claudeProfile())
+	r.BasePane = "wM:p4"
+	r.OriginPane = "wZ:p2"
+	if _, err := h.pipe.Run(context.Background(), r); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	split := splitArgv(t, h)
+	for i, a := range split {
+		if a == "--pane" && i+1 < len(split) {
+			if got, want := split[i+1], "wM:p4"; got != want {
+				t.Fatalf("the worker is split off %q, and the daemon's own pane is %q", got, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("no pane split in the argv: %v", split)
+}
