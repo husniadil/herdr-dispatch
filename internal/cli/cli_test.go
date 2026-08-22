@@ -174,3 +174,46 @@ func TestStopPrintsWhatItStopped(t *testing.T) {
 		t.Errorf("stop printed %q", out.String())
 	}
 }
+
+// README says doctor reports whether the verification lane is on and which
+// profile it uses. The prose report is what an operator reads, so the lane
+// has to be named there and not only in the JSON.
+func TestDoctorNamesTheVerificationLaneWhenItIsOn(t *testing.T) {
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/hdis.sock","base_pane":"wM:p1","max_workers":2,"interval":"15s","verify":{"enabled":true,"profile":"checker"},"board":{"reachable":true}}`)
+	var out strings.Builder
+	if err := Write("doctor", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	for _, want := range []string{"verify", "on", "checker"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("want %q in doctor prose %q", want, out.String())
+		}
+	}
+}
+
+// A lane that is off is said, rather than left to be inferred from a line
+// that is not printed.
+func TestDoctorSaysTheVerificationLaneIsOffWhenItIsOff(t *testing.T) {
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/hdis.sock","base_pane":"wM:p1","max_workers":2,"interval":"15s","verify":{"enabled":false},"board":{"reachable":true}}`)
+	var out strings.Builder
+	if err := Write("doctor", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if !strings.Contains(out.String(), "verify") || !strings.Contains(out.String(), "off") {
+		t.Fatalf("doctor printed %q", out.String())
+	}
+}
+
+// An unreachable board returns early from the report. The lane is this
+// dispatcher's own config and is known either way, so it is printed before
+// the board line rather than lost behind it.
+func TestDoctorNamesTheLaneEvenWhenTheBoardIsDown(t *testing.T) {
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/hdis.sock","base_pane":"wM:p1","max_workers":2,"interval":"15s","verify":{"enabled":true,"profile":"checker"},"board":{"reachable":false,"error":"dial: no socket"}}`)
+	var out strings.Builder
+	if err := Write("doctor", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if !strings.Contains(out.String(), "checker") {
+		t.Fatalf("doctor printed %q", out.String())
+	}
+}

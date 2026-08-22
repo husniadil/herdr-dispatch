@@ -96,6 +96,7 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 		fmt.Fprintf(out, "  tick        every %s\n", rep.Interval)
 		fmt.Fprintf(out, "  bindings    %s, %d re-adopted at start\n",
 			or(rep.Bindings, "in memory only"), rep.Readopted)
+		fmt.Fprintf(out, "  verify      %s\n", verifyLane(rep.Verify))
 		if rep.Board.Error != "" {
 			fmt.Fprintf(out, "  board       unreachable: %s\n", rep.Board.Error)
 			return nil
@@ -165,6 +166,15 @@ func Usage() string {
 	}
 	b.WriteString("\nEvery verb takes --json. Run `hdis daemon -h` for the dispatcher's knobs.\n")
 	return b.String()
+}
+
+// verifyLane is the verification lane in a line: on names the profile a
+// verifier launches from, off says so rather than leaving it to be inferred.
+func verifyLane(v daemon.VerifyHealth) string {
+	if !v.Enabled {
+		return "off: a submission earns no verifier"
+	}
+	return fmt.Sprintf("on, verifiers launch from profile %q", v.Profile)
 }
 
 func or(s, fallback string) string {
