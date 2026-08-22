@@ -372,14 +372,19 @@ or any note verb.
 The verification lane does not move that line, it works up against it. With
 `"verify"` on, a task one of this dispatcher's own workers submitted earns a
 VERIFIER worker: a fresh pane, the same spawn path, a binding of its own with
-a verifier kind on it. Its condition tells it to reread the report with
-`htask task get`, run the gate with nothing cached, check the report's claims
-against the code, prove the gate still bites, and send what it found through
-the mail MCP door, or the board's note tool when that door is not there — and
-never to run `task approve` or `task reject`. Neither route is a command to
-be looked up on PATH: the pane is opened in a worktree where a plugin binary
-kept in the project's own `bin/` is not found, which is how the first live
-verifier lost `hmail`. One
+a verifier kind on it. Its condition tells it to reread the report through
+the board's `get` MCP door, run the gate with nothing cached, check the
+report's claims against the code, prove the gate still bites, and send what it
+found through the mail MCP door, or the board's note tool when that door is
+not there — and never to run `task approve` or `task reject`. Nothing of ours
+that the condition names is a command to be looked up on PATH: the pane is
+opened in a worktree where a plugin binary kept in the project's own `bin/` is
+not found, which is how the first live verifier lost `hmail`, and a board read
+resolved from PATH is the same shape of bet. The one command it does name as a
+command is the project's own gate, which is the project's toolchain rather
+than one of our plugins.
+`TestEveryFleetInstructionInTheVerifierConditionNamesADoor` pins the whole
+condition, not only the routes findings leave by. One
 submission earns one verifier; a re-submission after a rejection earns
 another. Verification is delegated. Judgment is not: a verifier reports, the
 operator decides, and the board's review gate is still the only thing that

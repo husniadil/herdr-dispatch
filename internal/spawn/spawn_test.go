@@ -785,7 +785,7 @@ func TestTheVerifierGoalForbidsApprovingAndRejecting(t *testing.T) {
 // read from, and how findings leave. None of the criteria travel on it.
 func TestTheVerifierGoalPointsAtTheBoardAndAtItsMailDoor(t *testing.T) {
 	goal := VerifierGoal(23)
-	for _, want := range []string{"htask task get 23", "go clean -testcache", "mail MCP", "mcp__herdr-tasks__note_add"} {
+	for _, want := range []string{"mcp__herdr-tasks__get", "go clean -testcache", "mail MCP", "mcp__herdr-tasks__note_add"} {
 		if !strings.Contains(goal, want) {
 			t.Fatalf("the verifier goal does not carry %q: %s", want, goal)
 		}
@@ -922,4 +922,64 @@ func hasPair(argv []string, flag, value string) bool {
 		}
 	}
 	return false
+}
+
+// fleetCLIs finds every place a condition tells an agent to run one of THIS
+// fleet's own binaries. Each of them is resolved from PATH, and a verifier's
+// pane is opened in a detached worktree where a plugin's own bin/ is not on
+// it. The project's own gate is deliberately not in this set: `go` is the
+// project's toolchain, not one of our plugins, and a verifier that cannot run
+// it has nothing to verify.
+func fleetCLIs(goal string) []string {
+	var found []string
+	for _, cli := range []string{"htask ", "hmail ", "hdis "} {
+		if strings.Contains(goal, cli) {
+			found = append(found, strings.TrimSpace(cli))
+		}
+	}
+	return found
+}
+
+// Task 29 moved the two REPORT routes onto MCP doors and left the read as
+// `htask task get`, which is the same shape that broke the report route: a
+// binary hoped for on PATH. It survives only because htask happens to be
+// installed globally on one machine. This pins the WHOLE condition rather
+// than its report routes: every instruction that reaches one of this fleet's
+// own plugins names a door.
+func TestEveryFleetInstructionInTheVerifierConditionNamesADoor(t *testing.T) {
+	goal := VerifierGoal(23)
+	if got := fleetCLIs(goal); len(got) > 0 {
+		t.Fatalf("the verifier condition tells a verifier to run %v, binaries its worktree may not have: %s", got, goal)
+	}
+	if !strings.Contains(goal, "mcp__herdr-tasks__get") {
+		t.Fatalf("the verifier reads the board through no door: %s", goal)
+	}
+}
+
+// And the guard above is only worth what it catches. Put any one of those
+// instructions back as a CLI invocation and it has to fail.
+func TestTheDoorGuardCatchesAnInstructionPutBackAsACLI(t *testing.T) {
+	for name, mutant := range map[string]string{
+		"the board read":    strings.Replace(VerifierGoal(23), "mcp__herdr-tasks__get", "htask task get 23", 1),
+		"the report route":  strings.Replace(VerifierGoal(23), "the mail MCP send", "hmail send", 1),
+		"the note fallback": strings.Replace(VerifierGoal(23), "mcp__herdr-tasks__note_add", "htask note add", 1),
+	} {
+		if got := fleetCLIs(mutant); len(got) == 0 {
+			t.Errorf("%s put back as a CLI is not caught: %s", name, mutant)
+		}
+	}
+}
+
+// The gate is the other side of the same line. The command a verifier is told
+// to run is the PROJECT's own, and no door of ours stands in front of it.
+func TestTheVerifierGateCommandIsTheProjectsOwn(t *testing.T) {
+	goal := VerifierGoal(23)
+	for _, want := range []string{"go clean -testcache", "the gate CLAUDE.md names"} {
+		if !strings.Contains(goal, want) {
+			t.Fatalf("the verifier is not told to run the project's own gate (%q missing): %s", want, goal)
+		}
+	}
+	if got := fleetCLIs("go clean -testcache"); len(got) > 0 {
+		t.Fatalf("the guard mistakes the project's own gate for one of our plugins: %v", got)
+	}
 }
