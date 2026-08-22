@@ -69,14 +69,27 @@ itself gains a `reservations` array beside `bindings`, and each binding gains a
 document this binary writes stays readable to one that predates them. Anything
 reading that file by hand should expect the two.
 
-Every pane this dispatcher splits carries `HDIS_DISPATCHER_PANE`, the address
-of the daemon that spawned it, set on the split itself so it costs nothing on
-the line Herdr types into the pane and does not go stale when the daemon moves
-pane. It is an address only: the sender of anything a worker writes is stamped
-by the mail daemon from `HERDR_PANE_ID`.
+Every pane this dispatcher splits carries `HDIS_DISPATCHER_PANE`, the report
+address for the task that pane was brought up for: the pane the task was
+CREATED FROM when the board's row names one, and the daemon's own base pane
+only when it does not. A task an operator filed at a terminal has no pane of
+origin at all — nothing with a pane created it — and the daemon's pane is then
+the only address there is, which is the rule working, not a gap in the row. It
+is set on the split itself so it costs nothing on the line Herdr types into the
+pane and does not go stale when the daemon moves pane. It is an address only:
+the sender of anything a worker writes is stamped by the mail daemon from
+`HERDR_PANE_ID`.
 
 An agent in a dispatched pane reads that variable to answer the dispatcher. The
 name is the whole contract and is pinned by test against what README documents.
+
+Callers read the variable and answer there, as before, but must stop treating
+its value as one fixed pane. Two panes this same daemon opened can now hold
+different addresses, because they are answering to different filers; the
+verification lane follows the same rule, so it also decides whose tokens a
+verifier spends. Anything that cached the value across tasks, or hard-coded the
+daemon's pane in its place, is wrong now and should read the variable in the
+pane it is running in.
 
 Every worker pane is also launched with `FORCE_PROMPT_CACHING_5M=1`, so a
 worker takes the 5-minute prompt-cache TTL instead of the 1-hour one a REPL
