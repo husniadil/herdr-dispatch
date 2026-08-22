@@ -275,12 +275,11 @@ one, and the daemon's own base pane only when it does not. A report belongs to
 whoever wanted the work, and this daemon is not scoped to one repository: it
 takes ready tasks off every project's board, so the operator who started it is
 routinely not the operator who filed the task. The verification lane follows
-the same rule, which also decides whose tokens a verifier spends. A task an
-operator filed at a terminal legitimately has no pane of origin — nothing with
-a pane created it — and for those the daemon's own pane is the only address
-there is. What does NOT move is the pane a worker is split off: that stays the
-base pane in both branches, because this daemon has only its own pane to split
-from.
+the same rule. A task an operator filed at a terminal legitimately has no pane
+of origin — nothing with a pane created it — and for those the daemon's own
+pane is the only address there is. What does NOT move is the pane a worker is
+split off: that stays the base pane in both branches, because this daemon has
+only its own pane to split from.
 
 It is an address and nothing more. It says where to answer — normally the pane
 the task was filed from, and the daemon's own pane only when nothing with a

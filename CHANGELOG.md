@@ -139,10 +139,9 @@ name is the whole contract and is pinned by test against what README documents.
 Callers read the variable and answer there, as before, but must stop treating
 its value as one fixed pane. Two panes this same daemon opened can now hold
 different addresses, because they are answering to different filers; the
-verification lane follows the same rule, so it also decides whose tokens a
-verifier spends. Anything that cached the value across tasks, or hard-coded the
-daemon's pane in its place, is wrong now and should read the variable in the
-pane it is running in.
+verification lane follows the same rule. Anything that cached the value
+across tasks, or hard-coded the daemon's pane in its place, is wrong now and
+should read the variable in the pane it is running in.
 
 Every worker pane is also launched with `FORCE_PROMPT_CACHING_5M=1`, so a
 worker takes the 5-minute prompt-cache TTL instead of the 1-hour one a REPL
