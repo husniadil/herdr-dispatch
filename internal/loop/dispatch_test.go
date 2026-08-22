@@ -23,7 +23,7 @@ func TestDispatchReservesTheTaskAndReturnsBeforeAnythingIsSpawned(t *testing.T) 
 	if res.TaskID != "01AAA" || res.Seq != 7 || res.Project != "/src/p" {
 		t.Fatalf("reservation: %+v", res)
 	}
-	if got := calls(t, f, "pane split"); len(got) != 0 {
+	if got := calls(t, f, "tab create"); len(got) != 0 {
 		t.Fatalf("dispatch spawned before returning: %v", got)
 	}
 	if got := calls(t, f, "agent start"); len(got) != 0 {
@@ -36,8 +36,8 @@ func TestDispatchReservesTheTaskAndReturnsBeforeAnythingIsSpawned(t *testing.T) 
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("tick: %v", err)
 	}
-	if got := calls(t, f, "pane split"); len(got) != 1 {
-		t.Fatalf("the tick split %d panes for the reserved task", len(got))
+	if got := calls(t, f, "tab create"); len(got) != 1 {
+		t.Fatalf("the tick created %d tabs for the reserved task", len(got))
 	}
 	if got := l.Pending(); len(got) != 0 {
 		t.Fatalf("the reservation outlived its spawn: %v", got)
@@ -54,8 +54,8 @@ func TestADispatchedTaskIsNotAlsoSpawnedByTheWatchingLoop(t *testing.T) {
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("tick: %v", err)
 	}
-	if got := calls(t, f, "pane split"); len(got) != 1 {
-		t.Fatalf("split %d panes for one task: %v", len(got), got)
+	if got := calls(t, f, "tab create"); len(got) != 1 {
+		t.Fatalf("created %d tabs for one task: %v", len(got), got)
 	}
 	if len(l.Bindings()) != 1 {
 		t.Fatalf("bindings: %+v", l.Bindings())
@@ -118,7 +118,7 @@ func TestDispatchNamesTheUnderlyingRefusalWhenTheBoardCannotBeRead(t *testing.T)
 	if got := l.Pending(); len(got) != 0 {
 		t.Fatalf("a validation failure left a standing reservation: %v", got)
 	}
-	if got := calls(t, f, "pane split"); len(got) != 0 {
+	if got := calls(t, f, "tab create"); len(got) != 0 {
 		t.Fatalf("a failed dispatch split a pane: %v", got)
 	}
 }
@@ -152,8 +152,8 @@ func TestRetryingAFailedDispatchCannotProduceTwoReservationsOrTwoWorkers(t *test
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("tick: %v", err)
 	}
-	if got := calls(t, f, "pane split"); len(got) != 1 {
-		t.Fatalf("split %d panes for one task: %v", len(got), got)
+	if got := calls(t, f, "tab create"); len(got) != 1 {
+		t.Fatalf("created %d tabs for one task: %v", len(got), got)
 	}
 	if len(l.Bindings()) != 1 {
 		t.Fatalf("bindings: %+v", l.Bindings())
@@ -215,7 +215,7 @@ func TestAReservationTheBoardTookBackIsDroppedAtTheNextTick(t *testing.T) {
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("tick: %v", err)
 	}
-	if got := calls(t, f, "pane split"); len(got) != 0 {
+	if got := calls(t, f, "tab create"); len(got) != 0 {
 		t.Fatalf("a task the board took back was still spawned: %v", got)
 	}
 	if got := l.Pending(); len(got) != 0 {
@@ -312,8 +312,8 @@ func TestDispatchResolvesATaskFiledOnAnotherProjectsBoard(t *testing.T) {
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("tick: %v", err)
 	}
-	if got := calls(t, f, "pane split"); len(got) != 1 {
-		t.Fatalf("split %d panes for the reserved task: %v", len(got), got)
+	if got := calls(t, f, "tab create"); len(got) != 1 {
+		t.Fatalf("created %d tabs for the reserved task: %v", len(got), got)
 	}
 	// The tick that follows reads the bound task back by id; that lookup is
 	// the one a single-project scope would lose.

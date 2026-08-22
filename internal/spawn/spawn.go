@@ -27,6 +27,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -68,6 +69,33 @@ const DispatcherPaneVar = "HDIS_DISPATCHER_PANE"
 // upstream there and is not forwarded, so the variable only changes what a
 // worker talking to the real Anthropic endpoint writes. Harmless otherwise.
 const ShortPromptCacheVar = "FORCE_PROMPT_CACHING_5M"
+
+// TabLabelPrefix is what every tab this dispatcher opens is labelled with,
+// and it is the whole of the ownership evidence a restart still has.
+//
+// Herdr's agent name carries the same prefix, and until now it was the only
+// evidence there was. It is not enough: an agent name is Herdr's record of a
+// registration, and a pane whose agent Herdr has dropped — a client that
+// exited and left the shell, a registration that never landed — is a pane
+// with no name at all, while the pane and its work are still there. A tab
+// label is written at CREATE time and belongs to the tab rather than to any
+// process inside it, so it survives exactly the case the name does not.
+//
+// It is also the close guard. A tab without this prefix is a tab the
+// operator made, and nothing here closes one — the same shape as the reap's
+// root-and-prefix bound on a worktree directory.
+// A tab's label is written for two readers at once, and both matter. An
+// operator reads it to find the work — `hdis task 41` is something a person
+// can pick out of a row of tabs, which is the one thing a tab has that a pane
+// does not. This dispatcher reads it to know the tab is its own.
+const TabLabelPrefix = "hdis "
+
+// TabLabel is what a worker's tab is called.
+func TabLabel(seq int) string { return fmt.Sprintf("%stask %d", TabLabelPrefix, seq) }
+
+// OwnTab reports whether a tab label is one this dispatcher wrote. It is the
+// only thing that earns a `tab close`.
+func OwnTab(label string) bool { return strings.HasPrefix(label, TabLabelPrefix) }
 
 // SettingsFileMode is what a spawn's settings file is created with. The
 // document carries the proxy's auth token and the base URL of the daemon
@@ -238,8 +266,6 @@ type Pipeline struct {
 	Herdr *herdr.Client
 	Proxy *proxy.Client
 
-	// Direction the worker pane is split in; empty means to the right.
-	Direction string
 	// SettingsDir is where a codex spawn writes its settings file; empty
 	// means the system temp directory.
 	SettingsDir string
@@ -258,6 +284,14 @@ type Pipeline struct {
 	Poll time.Duration
 	// ReadLines is how much of the pane each read asks for; zero means 200.
 	ReadLines int
+	// Log is where a placement fallback is reported; nil says nothing.
+	Log *log.Logger
+	// MaxPanesPerTab is how many workers may share one of this
+	// dispatcher's tabs before the next one opens a tab of its own. Zero
+	// means config.DefaultMaxPanesPerTab. It exists because every pane
+	// added to a tab narrows the others, and a pane narrow enough stops
+	// being readable — see config.MeasuredReadableColumns.
+	MaxPanesPerTab int
 	// Sleep is time.Sleep unless a test replaces it.
 	Sleep func(time.Duration)
 
@@ -266,6 +300,11 @@ type Pipeline struct {
 	// knows the path, so a pane retired any other way leaks it.
 	mu       sync.Mutex
 	settings map[string]string
+	// tabs is the tab each spawn opened, by the pane that came up in it.
+	// Retiring a worker closes the TAB, because the tab is what the spawn
+	// created; closing only the pane would leave an empty tab behind for
+	// every task this dispatcher ever ran.
+	tabs map[string]string
 }
 
 // Request is one worker to bring up.
@@ -280,6 +319,9 @@ type Request struct {
 	Profile config.Profile
 	// Goal is the one-line condition, without its slash command.
 	Goal string
+	// Label is what the worker's tab is called, for an operator to find and
+	// for this dispatcher to recognise. Empty means the request's Name.
+	Label string
 	// OriginPane is the pane the task was created from, and the address the
 	// report is owed at. It is empty for a task nothing with a pane filed,
 	// and then BasePane is the only address there is.
@@ -290,6 +332,14 @@ type Request struct {
 // pane the task came from when the board named one, and the daemon's own
 // pane otherwise. It is never the pane the worker is split off — this
 // daemon has only its own pane to split from, wherever the task came from.
+// label is the tab name this request asks for.
+func (r Request) label() string {
+	if r.Label != "" {
+		return r.Label
+	}
+	return r.Name
+}
+
 func (r Request) reportPane() string {
 	if r.OriginPane != "" {
 		return r.OriginPane
@@ -327,9 +377,7 @@ func (p *Pipeline) Run(ctx context.Context, req Request) (string, error) {
 	// The report address travels in the pane's environment rather than on the
 	// typed line: it costs nothing there, and the condition stays a pointer
 	// that does not go stale when the daemon moves pane.
-	pane, err := p.Herdr.PaneSplit(ctx, req.BasePane, p.direction(), req.Cwd,
-		DispatcherPaneVar+"="+req.reportPane(),
-		ShortPromptCacheVar+"=1")
+	pane, err := p.place(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("spawn %s: %w", req.Name, err)
 	}
@@ -349,14 +397,238 @@ func (p *Pipeline) Run(ctx context.Context, req Request) (string, error) {
 	return pane, nil
 }
 
-// Retire closes a worker's pane and removes the settings file its spawn
+// place brings up the pane a worker will live in, and returns it.
+//
+// A worker never shares a HUMAN's tab. That is the whole rule, and everything
+// else here follows from it: this dispatcher's own tabs are the only ones it
+// will add a pane to, and when none of them has room it opens another.
+//
+// Inside one of its own tabs the splits alternate right and down, so the tab
+// fills as a grid rather than a row of slivers. That alternation is what
+// makes the cap what it is: halving only happens every SECOND split, so five
+// panes in a 226-column window are 226, 113, 113, 56 and 56 columns wide and
+// every one of them clears the measured readable floor.
+//
+// The env travels on whichever call opens the pane, so a worker carries its
+// report address and its cache TTL whether it was the first in a tab or the
+// fifth.
+func (p *Pipeline) place(ctx context.Context, req Request) (string, error) {
+	env := []string{
+		DispatcherPaneVar + "=" + req.reportPane(),
+		ShortPromptCacheVar + "=1",
+	}
+	ws := p.workspaceFor(ctx, req)
+
+	if tab, last, held := p.roomInOwnTab(ctx, ws); tab != "" {
+		// held is how many panes the tab already has, so the pane being
+		// added is the (held+1)-th. Odd counts split sideways and even ones
+		// downwards, which is what turns a row into a grid.
+		direction := "down"
+		if held%2 == 1 {
+			direction = "right"
+		}
+		pane, err := p.Herdr.PaneSplit(ctx, last, direction, "0.5", req.Cwd, env...)
+		if err == nil {
+			p.remember(pane, tab)
+			return pane, nil
+		}
+		// A tab that would not take another pane is not a reason to give up
+		// on the worker. A tab of its own always works.
+		p.logf("task pane could not be added to tab %s, opening a tab of its own instead: %v", tab, err)
+	}
+
+	tab, pane, err := p.Herdr.TabCreate(ctx, ws, req.Cwd, req.label(), env...)
+	if err != nil {
+		return "", err
+	}
+	p.remember(pane, tab.TabID)
+	return pane, nil
+}
+
+// roomInOwnTab finds a tab this dispatcher opened in the given workspace that
+// is still under the pane cap, and the last pane in it to split off. It
+// returns an empty tab id when there is none, which is the ordinary case for
+// the first worker and for a workspace that is all the operator's.
+//
+// A tab the operator made is never a candidate, whatever room it has. The
+// label is the only thing that distinguishes them, and it is checked here for
+// the same reason it is checked before a close.
+func (p *Pipeline) roomInOwnTab(ctx context.Context, ws string) (tab, last string, held int) {
+	tabs, err := p.Herdr.Tabs(ctx)
+	if err != nil {
+		return "", "", 0
+	}
+	panes, err := p.Herdr.PaneList(ctx)
+	if err != nil {
+		return "", "", 0
+	}
+
+	inTab := make(map[string][]string)
+	for _, row := range panes {
+		if row.TabID != "" {
+			inTab[row.TabID] = append(inTab[row.TabID], row.PaneID)
+		}
+	}
+	for _, t := range tabs {
+		if !OwnTab(t.Label) || (ws != "" && t.WorkspaceID != ws) {
+			continue
+		}
+		n := len(inTab[t.TabID])
+		if n == 0 || n >= p.maxPanesPerTab() {
+			continue
+		}
+		return t.TabID, inTab[t.TabID][n-1], n
+	}
+	return "", "", 0
+}
+
+func (p *Pipeline) maxPanesPerTab() int {
+	if p.MaxPanesPerTab > 0 {
+		return p.MaxPanesPerTab
+	}
+	return config.DefaultMaxPanesPerTab
+}
+
+// logf tells the operator what happened when a fallback was taken. A nil Log
+// is a test that does not care.
+func (p *Pipeline) logf(format string, args ...any) {
+	if p.Log != nil {
+		p.Log.Printf(format, args...)
+	}
+}
+
+// workspaceFor is the workspace a worker's tab is opened in: the one the
+// task was FILED from when the board named a pane and that pane is still
+// alive, and this daemon's own otherwise.
+//
+// Following the origin pane is what puts a worker where the person who asked
+// for it is looking. It is a preference and never a requirement: a task filed
+// from a pane that has since gone is an ordinary task, and refusing to spawn
+// for it would strand work on nothing worse than a closed window. Every
+// failure here — an origin pane the board never named, a pane list that
+// cannot be read, a daemon whose own pane Herdr does not list — falls back
+// one step at a time and ends at the empty string, which lets Herdr choose.
+func (p *Pipeline) workspaceFor(ctx context.Context, req Request) string {
+	panes, err := p.Herdr.PaneList(ctx)
+	if err != nil {
+		return ""
+	}
+	at := make(map[string]string, len(panes))
+	for _, pane := range panes {
+		at[pane.PaneID] = pane.WorkspaceID
+	}
+	if ws := at[req.OriginPane]; req.OriginPane != "" && ws != "" {
+		return ws
+	}
+	return at[req.BasePane]
+}
+
+// TabOf is the tab a spawn placed a pane in, for the dispatcher to record on
+// the binding. Empty when this process did not place it.
+func (p *Pipeline) TabOf(pane string) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.tabs[pane]
+}
+
+// Adopt puts back the pane-to-tab mapping a previous process wrote down,
+// which is how a restart can still give a tab back. Without it the tab is
+// only re-derivable from the pane's own tab id, and that is not enough: a tab
+// holds several workers, so closing it on the strength of one pane would take
+// the others with it.
+func (p *Pipeline) Adopt(pane, tab string) {
+	if pane == "" || tab == "" {
+		return
+	}
+	p.remember(pane, tab)
+}
+
+// remember records the tab a spawn opened against the pane inside it.
+func (p *Pipeline) remember(pane, tab string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.tabs == nil {
+		p.tabs = make(map[string]string)
+	}
+	p.tabs[pane] = tab
+}
+
+// Retire closes the worker's TAB and removes the settings file its spawn
 // wrote. It is the only way a pane this pipeline opened should be closed:
 // closing it any other way leaves the file behind, and nothing else knows
 // where it is.
+//
+// Which tab is asked of Herdr rather than only of memory, because memory
+// does not survive a restart and the tabs of a daemon that went down are
+// exactly the ones that need retiring. Whatever the tab is found to be, it
+// is closed only if its LABEL says this dispatcher opened it: a worker pane
+// the operator has since dragged into a tab of their own closes as a pane,
+// and their tab stays. That guard is the point — this verb is reached with
+// panes, and a pane is not a licence over whatever tab happens to hold it.
 func (p *Pipeline) Retire(ctx context.Context, pane string) error {
-	err := p.Herdr.PaneClose(ctx, pane)
+	tab, alone := p.tabFor(ctx, pane)
 	p.Discard(pane)
-	return err
+	if tab == "" || !alone {
+		// Either the tab is not this dispatcher's to close, or another
+		// worker is still in it. Closing the pane retires this worker
+		// either way, and takes the tab with it only when nothing is left.
+		return p.Herdr.PaneClose(ctx, pane)
+	}
+	return p.Herdr.TabClose(ctx, tab)
+}
+
+// tabFor is the tab this pipeline may close for a pane, or empty when there
+// is none it may. A tab this process opened is known outright; otherwise the
+// pane is traced through Herdr to its tab and the tab's label is what
+// decides. A label that is not this dispatcher's own is an operator's tab and
+// yields nothing, whatever the pane inside it is.
+func (p *Pipeline) tabFor(ctx context.Context, pane string) (tab string, alone bool) {
+	p.mu.Lock()
+	known := p.tabs[pane]
+	delete(p.tabs, pane)
+	p.mu.Unlock()
+
+	panes, err := p.Herdr.PaneList(ctx)
+	if err != nil {
+		// Nothing can be said about how many panes the tab holds, and
+		// closing a tab on that guess could take another live worker with
+		// it. The pane is closed instead, which is always safe.
+		return "", false
+	}
+	tabOf := make(map[string]string, len(panes))
+	held := make(map[string]int, len(panes))
+	for _, row := range panes {
+		tabOf[row.PaneID] = row.TabID
+		held[row.TabID]++
+	}
+
+	id := known
+	if id == "" {
+		id = tabOf[pane]
+	}
+	if id == "" {
+		return "", false
+	}
+
+	// A tab this process opened is known to be its own; any other has to
+	// prove it by its label, which is what keeps an operator's tab safe
+	// when a pane inside it happens to be one of ours.
+	if known == "" {
+		tabs, err := p.Herdr.Tabs(ctx)
+		if err != nil {
+			return "", false
+		}
+		var ours bool
+		for _, t := range tabs {
+			if t.TabID == id && OwnTab(t.Label) {
+				ours = true
+			}
+		}
+		if !ours {
+			return "", false
+		}
+	}
+	return id, held[id] <= 1
 }
 
 // Discard removes the settings file a spawn wrote for a pane, if it wrote
@@ -551,13 +823,6 @@ func statusOrUnknown(status string) string {
 		return herdr.StatusUnknown
 	}
 	return status
-}
-
-func (p *Pipeline) direction() string {
-	if p.Direction != "" {
-		return p.Direction
-	}
-	return "right"
 }
 
 func (p *Pipeline) shellCeiling() time.Duration {

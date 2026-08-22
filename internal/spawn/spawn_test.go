@@ -30,6 +30,9 @@ const (
 // JSON error body on stderr and a non-zero exit.
 const herdrScript = `case "$1 $2" in
 "pane split") cat "$HDIS_FAKE_DIR/split.json" ;;
+"tab create") cat "$HDIS_FAKE_DIR/tab.json" ;;
+"tab list") cat "$HDIS_FAKE_DIR/tablist.json" ;;
+"pane list") cat "$HDIS_FAKE_DIR/panelist.json" ;;
 "pane read")
   n=$(cat "$HDIS_FAKE_DIR/readn" 2>/dev/null || echo 0)
   n=$((n+1)); printf %s "$n" > "$HDIS_FAKE_DIR/readn"
@@ -77,6 +80,21 @@ func newHarness(t *testing.T, reads []string, start string) *harness {
 	f := fake.New(t)
 	f.Bin(t, "herdr", herdrScript)
 	f.Write(t, "split.json", `{"id":"x","result":{"type":"pane_info","pane":{"pane_id":"wM:p9","workspace_id":"wM","tab_id":"wM:t1","terminal_id":"x","focused":false,"agent_status":"unknown","revision":1}}}`)
+	// What `herdr tab create` really answers with: the tab, and the pane
+	// that came up in it. Measured against herdr 0.8.2.
+	f.Write(t, "tab.json", `{"id":"x","result":{"type":"tab_created","tab":{"tab_id":"wM:t9","workspace_id":"wM","label":"hdis task 7","number":9,"pane_count":1,"agent_status":"unknown","focused":false},"root_pane":{"pane_id":"wM:p9","workspace_id":"wM","tab_id":"wM:t9","terminal_id":"x","focused":false,"agent_status":"unknown","revision":0}}}`)
+	// The default world is all the operator's: two of their tabs, none of
+	// this dispatcher's. A case that wants an hdis tab with room in it
+	// writes its own tablist.json.
+	f.Write(t, "tablist.json", `{"id":"x","result":{"type":"tab_list","tabs":[`+
+		`{"tab_id":"wM:t1","workspace_id":"wM","label":"1","pane_count":1},`+
+		`{"tab_id":"w7:t1","workspace_id":"w7","label":"1","pane_count":1}]}}`)
+	// The daemon's own pane and the pane a task was filed from, in two
+	// different workspaces, so a case can tell which one a spawn followed.
+	f.Write(t, "panelist.json", `{"id":"x","result":{"type":"pane_list","panes":[`+
+		`{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"working"},`+
+		`{"pane_id":"w7:p3","workspace_id":"w7","tab_id":"w7:t1","agent_status":"working"},`+
+		`{"pane_id":"wM:p9","workspace_id":"wM","tab_id":"wM:t9","agent_status":"unknown"}]}}`)
 	f.Write(t, "start.sh", start)
 	f.Write(t, "agentget.json", `{"id":"x","result":{"type":"agent_info","agent":`+agentJSON("idle")+`}}`)
 	for i, r := range reads {
@@ -132,7 +150,7 @@ func claudeProfile() config.Profile {
 }
 
 func req(p config.Profile) Request {
-	return Request{Name: "hdis-7", BasePane: "wM:p1", Cwd: "/src/p", Profile: p, Goal: "do the thing · Done when: ..."}
+	return Request{Name: "hdis-7", Label: TabLabel(7), BasePane: "wM:p1", Cwd: "/src/p", Profile: p, Goal: "do the thing · Done when: ..."}
 }
 
 // The whole point of the pipeline: a worker comes up with its completion
@@ -183,7 +201,7 @@ func TestARegisteredGoalAlongsideAStartTimeoutIsSuccess(t *testing.T) {
 	if _, err := h.pipe.Run(context.Background(), req(claudeProfile())); err != nil {
 		t.Fatalf("a timeout with the goal registered must be success, got %v", err)
 	}
-	if n := count(h.verbs(t), "pane close"); n != 0 {
+	if n := count(h.verbs(t), "tab close"); n != 0 {
 		t.Fatal("a delivered goal must not retire its own pane")
 	}
 }
@@ -200,8 +218,8 @@ func TestARefusedGoalAlongsideAStartSuccessIsFailure(t *testing.T) {
 	if !strings.Contains(err.Error(), "limited to 4000 characters") {
 		t.Fatalf("the error drops what the pane said: %v", err)
 	}
-	if n := count(h.verbs(t), "pane close"); n != 1 {
-		t.Fatalf("a failed spawn must retire its half-built pane, closed %d times", n)
+	if n := count(h.verbs(t), "tab close"); n != 1 {
+		t.Fatalf("a failed spawn must retire its half-built tab, closed %d times", n)
 	}
 }
 
@@ -350,7 +368,7 @@ func TestAnUnreadableConfirmKeepsThePaneAndFailsLoud(t *testing.T) {
 	if !errors.As(err, &keep) {
 		t.Fatalf("an unreadable confirm must be a keep-pane failure, got %T", err)
 	}
-	if n := count(h.verbs(t), "pane close"); n != 0 {
+	if n := count(h.verbs(t), "tab close"); n != 0 {
 		t.Fatalf("a worker that could not be read was retired anyway, closed %d times", n)
 	}
 	if pane != "wM:p9" {
@@ -376,8 +394,8 @@ func TestAConfirmThatReadsARefusalRetiresThePane(t *testing.T) {
 	if errors.As(err, &keep) {
 		t.Fatal("a refusal that was read is not an unreadable confirm")
 	}
-	if n := count(h.verbs(t), "pane close"); n != 1 {
-		t.Fatalf("a read refusal must retire its pane, closed %d times", n)
+	if n := count(h.verbs(t), "tab close"); n != 1 {
+		t.Fatalf("a read refusal must retire its tab, closed %d times", n)
 	}
 	if pane != "" {
 		t.Fatalf("a retired pane must not come back for a binding, got %q", pane)
@@ -397,7 +415,7 @@ func TestAFlakyReadRecoversWithinTheCeiling(t *testing.T) {
 	if pane != "wM:p9" {
 		t.Fatalf("pane: %q", pane)
 	}
-	if n := count(h.verbs(t), "pane close"); n != 0 {
+	if n := count(h.verbs(t), "tab close"); n != 0 {
 		t.Fatal("a recovered read must not retire its pane")
 	}
 }
@@ -438,7 +456,7 @@ func TestTheCodexSpawnWaitsForItsPanesShellBeforeStartingTheAgent(t *testing.T) 
 	if n := count(verbs, "agent start"); n != 4 {
 		t.Fatalf("want three refusals and then one start, got %d agent starts", n)
 	}
-	if n := count(verbs, "pane close"); n != 0 {
+	if n := count(verbs, "tab close"); n != 0 {
 		t.Fatal("a spawn that waited out a busy shell must not retire its pane")
 	}
 	// The wait belongs after the environment half, which is what made the
@@ -476,8 +494,8 @@ func TestAPaneShellThatNeverFreesFailsLoudAndRetiresThePane(t *testing.T) {
 	if n := count(verbs, "agent start"); n != 3 {
 		t.Fatalf("want three bounded tries, got %d agent starts", n)
 	}
-	if n := count(verbs, "pane close"); n != 1 {
-		t.Fatalf("a pane nothing was started in must be retired, closed %d times", n)
+	if n := count(verbs, "tab close"); n != 1 {
+		t.Fatalf("a tab nothing was started in must be retired, closed %d times", n)
 	}
 	if pane != "" {
 		t.Fatalf("a retired pane must not come back for a binding, got %q", pane)
@@ -504,7 +522,7 @@ func TestAConfirmThatTimesOutOnAStartingWorkerKeepsThePane(t *testing.T) {
 	if pane != "wM:p9" {
 		t.Fatalf("the pane must come back so the dispatcher can hold its binding, got %q", pane)
 	}
-	if n := count(h.verbs(t), "pane close"); n != 0 {
+	if n := count(h.verbs(t), "tab close"); n != 0 {
 		t.Fatalf("a worker that was still starting was retired anyway, closed %d times", n)
 	}
 }
@@ -705,8 +723,8 @@ func TestRetiringAPaneRemovesItsSettingsFile(t *testing.T) {
 	if err := h.pipe.Retire(context.Background(), pane); err != nil {
 		t.Fatalf("retire: %v", err)
 	}
-	if n := count(h.verbs(t), "pane close"); n != 1 {
-		t.Fatalf("retire must close the pane, closed %d times", n)
+	if n := count(h.verbs(t), "tab close"); n != 1 {
+		t.Fatalf("retire must close the tab, closed %d times", n)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("the settings file outlived its worker: %v", err)
@@ -857,7 +875,7 @@ func TestTheSplitPublishesTheDispatcherPane(t *testing.T) {
 	if _, err := h.pipe.Run(context.Background(), req(claudeProfile())); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	split := splitArgv(t, h)
+	split := tabArgv(t, h)
 	if !hasPair(split, "--env", DispatcherPaneVar+"=wM:p1") {
 		t.Fatalf("the split carries no %s pair: %v", DispatcherPaneVar, split)
 	}
@@ -873,7 +891,7 @@ func TestTheDispatcherPaneEnvNamesTheBasePaneAndNotTheWorkersOwn(t *testing.T) {
 	if _, err := h.pipe.Run(context.Background(), r); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	split := splitArgv(t, h)
+	split := tabArgv(t, h)
 	for i, a := range split {
 		if a == "--env" && i+1 < len(split) && strings.HasPrefix(split[i+1], DispatcherPaneVar+"=") {
 			if got, want := strings.TrimPrefix(split[i+1], DispatcherPaneVar+"="), "wM:p4"; got != want {
@@ -903,15 +921,15 @@ func TestBothConditionsAddressTheDispatcherThroughTheEnvVar(t *testing.T) {
 // is exactly what neither condition may carry.
 var paneID = regexp.MustCompile(`\bw[A-Za-z0-9]+:p[0-9]+\b`)
 
-// splitArgv is the argv the fake herdr recorded for the one pane split.
-func splitArgv(t *testing.T, h *harness) []string {
+// tabArgv is the argv the fake herdr recorded for the one tab create.
+func tabArgv(t *testing.T, h *harness) []string {
 	t.Helper()
 	for _, argv := range h.Argv(t) {
-		if len(argv) >= 2 && argv[0] == "pane" && argv[1] == "split" {
+		if len(argv) >= 2 && argv[0] == "tab" && argv[1] == "create" {
 			return argv
 		}
 	}
-	t.Fatal("no pane was split")
+	t.Fatal("no tab was created")
 	return nil
 }
 
@@ -992,7 +1010,7 @@ func TestTheSplitAsksForTheShortPromptCache(t *testing.T) {
 	if _, err := h.pipe.Run(context.Background(), req(claudeProfile())); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	split := splitArgv(t, h)
+	split := tabArgv(t, h)
 	if !hasPair(split, "--env", ShortPromptCacheVar+"=1") {
 		t.Fatalf("the split carries no %s pair: %v", ShortPromptCacheVar, split)
 	}
@@ -1009,7 +1027,7 @@ func TestTheDispatcherAddressIsTheTasksPaneOfOrigin(t *testing.T) {
 	if _, err := h.pipe.Run(context.Background(), r); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	split := splitArgv(t, h)
+	split := tabArgv(t, h)
 	if !hasPair(split, "--env", DispatcherPaneVar+"=wZ:p2") {
 		t.Fatalf("the split does not address the task's pane of origin: %v", split)
 	}
@@ -1028,31 +1046,258 @@ func TestTheDispatcherAddressFallsBackToTheBasePaneWithNoOrigin(t *testing.T) {
 	if _, err := h.pipe.Run(context.Background(), r); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	split := splitArgv(t, h)
+	split := tabArgv(t, h)
 	if !hasPair(split, "--env", DispatcherPaneVar+"=wM:p4") {
 		t.Fatalf("the split does not fall back to the daemon's pane: %v", split)
 	}
 }
 
-// The address moved; the pane a worker is SPLIT OFF did not. This daemon has
-// only its own pane to split from, and a pane on another operator's
-// workspace is not one this binary may open a worker in.
-func TestTheSplitBaseStaysTheDaemonsPaneWhenATaskHasAnOrigin(t *testing.T) {
+// CRITERION 2. A worker comes up in a TAB of its own, and the operator's tab
+// is never split to make room for it.
+//
+// This is the placement itself, pinned at the one call that makes it: the
+// argv herdr is handed. Reverting the pipeline to `pane split --pane
+// <base>` fails here, because no `tab create` is recorded at all.
+//
+// The three flags are each load bearing. --workspace is where the tab lands,
+// --label is the ownership evidence that outlives the agent name, and --env
+// is how the report address and the cache TTL reach a worker without being
+// typed into its condition.
+func TestAWorkerComesUpInItsOwnTabAndNeverSplitsTheOperatorsTab(t *testing.T) {
 	h := newHarness(t, []string{goalActive}, startRegistered)
 	r := req(claudeProfile())
-	r.BasePane = "wM:p4"
-	r.OriginPane = "wZ:p2"
+	r.BasePane = "wM:p1"
 	if _, err := h.pipe.Run(context.Background(), r); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	split := splitArgv(t, h)
-	for i, a := range split {
-		if a == "--pane" && i+1 < len(split) {
-			if got, want := split[i+1], "wM:p4"; got != want {
-				t.Fatalf("the worker is split off %q, and the daemon's own pane is %q", got, want)
-			}
-			return
+
+	if n := count(h.verbs(t), "pane split"); n != 0 {
+		t.Errorf("a worker was placed by splitting a live tab %d time(s); the whole point of a tab is that no existing pane narrows", n)
+	}
+	argv := tabArgv(t, h)
+	if !hasPair(argv, "--label", TabLabel(7)) {
+		t.Errorf("the tab carries no --label %q, and the label is what an operator finds the work by and what keeps their own tabs from ever being closed here: %v", TabLabel(7), argv)
+	}
+	if !hasPair(argv, "--workspace", "wM") {
+		t.Errorf("the tab names no --workspace, so herdr places it wherever it likes: %v", argv)
+	}
+	if !hasPair(argv, "--cwd", r.Cwd) {
+		t.Errorf("the tab does not open in the worker's checkout %q: %v", r.Cwd, argv)
+	}
+	var envs int
+	for _, a := range argv {
+		if a == "--env" {
+			envs++
 		}
 	}
-	t.Fatalf("no pane split in the argv: %v", split)
+	if envs < 2 {
+		t.Errorf("the tab carries %d --env flags, and the report address and the cache TTL both travel that way: %v", envs, argv)
+	}
+}
+
+// CRITERION 3. The workspace is the one the task was FILED from when the
+// board named a pane and that pane is alive, and the daemon's own otherwise.
+//
+// A dead origin pane FALLS BACK. A task filed from a window the operator has
+// since closed is an ordinary task, and refusing to spawn for it would
+// strand real work on nothing worse than a closed window.
+func TestTheTabOpensInTheOriginsWorkspaceAndFallsBackWhenThatPaneIsGone(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		origin string
+		want   string
+	}{
+		// w7:p3 is alive in the fake's pane list, in a workspace of its own.
+		{"a live origin pane is followed", "w7:p3", "w7"},
+		// wZ:p2 is in nobody's pane list: the window it was filed from is
+		// gone, and the daemon's own workspace is what is left.
+		{"a dead origin pane falls back", "wZ:p2", "wM"},
+		{"a task nothing with a pane filed", "", "wM"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t, []string{goalActive}, startRegistered)
+			r := req(claudeProfile())
+			r.BasePane = "wM:p1"
+			r.OriginPane = c.origin
+			if _, err := h.pipe.Run(context.Background(), r); err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			argv := tabArgv(t, h)
+			if !hasPair(argv, "--workspace", c.want) {
+				t.Fatalf("the tab was not opened in workspace %q: %v", c.want, argv)
+			}
+		})
+	}
+}
+
+// CRITERION 5. A tab is closed only if its LABEL says this dispatcher opened
+// it. Reaching retire with a pane is not a licence over whatever tab happens
+// to be holding that pane.
+//
+// The daemon that opened the tab is gone here — a fresh pipeline, which is
+// exactly the restart case — so the only thing left to ask is herdr, and the
+// only thing herdr has to answer with is the label. An operator's tab is
+// closed as a PANE, which retires the worker and leaves the operator's window
+// exactly as they arranged it.
+func TestRetireClosesOnlyATabThisDispatcherLabelled(t *testing.T) {
+	for _, c := range []struct {
+		name       string
+		tabs       string
+		wantTab    int
+		wantPane   int
+		wantClosed string
+	}{
+		{
+			name:       "a tab this dispatcher opened",
+			tabs:       `{"tab_id":"wM:t9","workspace_id":"wM","label":"hdis task 7"}`,
+			wantTab:    1,
+			wantPane:   0,
+			wantClosed: "wM:t9",
+		},
+		{
+			name:       "a tab the operator made",
+			tabs:       `{"tab_id":"wM:t9","workspace_id":"wM","label":"my notes"}`,
+			wantTab:    0,
+			wantPane:   1,
+			wantClosed: "wM:p9",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t, []string{goalActive}, startRegistered)
+			h.Write(t, "tablist.json", `{"id":"x","result":{"type":"tab_list","tabs":[`+c.tabs+`]}}`)
+			if err := h.pipe.Retire(context.Background(), "wM:p9"); err != nil {
+				t.Fatalf("retire: %v", err)
+			}
+			verbs := h.verbs(t)
+			if n := count(verbs, "tab close"); n != c.wantTab {
+				t.Errorf("tab close ran %d time(s), want %d", n, c.wantTab)
+			}
+			if n := count(verbs, "pane close"); n != c.wantPane {
+				t.Errorf("pane close ran %d time(s), want %d", n, c.wantPane)
+			}
+			var closed string
+			for _, argv := range h.Argv(t) {
+				if len(argv) >= 3 && argv[1] == "close" {
+					closed = argv[2]
+				}
+			}
+			if closed != c.wantClosed {
+				t.Errorf("closed %q, want %q", closed, c.wantClosed)
+			}
+		})
+	}
+}
+
+// ownTab is a tab list holding one of this dispatcher's own tabs with the
+// given panes already in it, plus an operator tab that must never be chosen.
+func ownTab(t *testing.T, h *harness, panes ...string) {
+	t.Helper()
+	rows := []string{`{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"working"}`}
+	for _, p := range panes {
+		rows = append(rows, `{"pane_id":"`+p+`","workspace_id":"wM","tab_id":"wM:t5","agent_status":"working"}`)
+	}
+	h.Write(t, "panelist.json", `{"id":"x","result":{"type":"pane_list","panes":[`+strings.Join(rows, ",")+`]}}`)
+	h.Write(t, "tablist.json", `{"id":"x","result":{"type":"tab_list","tabs":[`+
+		`{"tab_id":"wM:t1","workspace_id":"wM","label":"1","pane_count":1},`+
+		`{"tab_id":"wM:t5","workspace_id":"wM","label":"hdis task 3","pane_count":`+
+		strconv.Itoa(len(panes))+`}]}}`)
+}
+
+// A second worker joins the first one's tab rather than opening another, and
+// the splits alternate right and down with an explicit --ratio so the tab
+// fills as a grid instead of a row of slivers.
+//
+// The alternation is what makes the cap the number it is: a pane's width
+// halves only every SECOND split, so five panes in a measured 226-column
+// window are 226, 113, 113, 56 and 56 wide and every one clears the
+// 40-column readable floor.
+func TestASecondWorkerFillsTheFirstsTabAsAGridAndNeverTheOperatorsTab(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		panes []string
+		want  string
+	}{
+		{"the second pane goes beside the first", []string{"wM:p9"}, "right"},
+		{"the third goes below", []string{"wM:p9", "wM:pA"}, "down"},
+		{"the fourth goes beside again", []string{"wM:p9", "wM:pA", "wM:pB"}, "right"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, []string{goalActive}, startRegistered)
+			ownTab(t, h, tc.panes...)
+			if _, err := h.pipe.Run(context.Background(), req(claudeProfile())); err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			if n := count(h.verbs(t), "tab create"); n != 0 {
+				t.Fatalf("a tab with room was ignored and %d new one(s) opened instead", n)
+			}
+			argv := splitArgvOf(t, h)
+			if !hasPair(argv, "--direction", tc.want) {
+				t.Errorf("the split went %v, want --direction %q; one direction forever is a row of slivers, not a grid", argv, tc.want)
+			}
+			if !hasPair(argv, "--ratio", "0.5") {
+				t.Errorf("the split passed no --ratio, so herdr places the pane wherever it likes: %v", argv)
+			}
+			// The pane split off is the LAST one in the tab, never the base
+			// pane and never the operator's.
+			last := tc.panes[len(tc.panes)-1]
+			if !hasPair(argv, "--pane", last) {
+				t.Errorf("the split was taken off the wrong pane, want the tab's last %q: %v", last, argv)
+			}
+		})
+	}
+}
+
+// A tab already holding the cap does not take another worker. The next one
+// opens a tab of its own, in the same workspace, rather than narrowing panes
+// past the width their detection text still reads at.
+func TestAFullTabOverflowsIntoAnotherTabRatherThanNarrowingPastTheCap(t *testing.T) {
+	h := newHarness(t, []string{goalActive}, startRegistered)
+	full := make([]string, config.DefaultMaxPanesPerTab)
+	for i := range full {
+		full[i] = "wM:p" + strconv.Itoa(i+9)
+	}
+	ownTab(t, h, full...)
+
+	if _, err := h.pipe.Run(context.Background(), req(claudeProfile())); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if n := count(h.verbs(t), "pane split"); n != 0 {
+		t.Errorf("a tab already holding %d panes was split %d more time(s); past the cap a pane stops being readable",
+			config.DefaultMaxPanesPerTab, n)
+	}
+	argv := tabArgv(t, h)
+	if !hasPair(argv, "--workspace", "wM") {
+		t.Errorf("the overflow tab left the workspace the work is in: %v", argv)
+	}
+}
+
+// A tab is given back only when its LAST worker leaves. Retiring one of two
+// workers sharing a tab closes that worker's pane and leaves the tab, because
+// the other worker is still in it.
+func TestATabIsClosedOnlyWhenItsLastWorkerLeaves(t *testing.T) {
+	h := newHarness(t, []string{goalActive}, startRegistered)
+	ownTab(t, h, "wM:p9", "wM:pA")
+
+	if err := h.pipe.Retire(context.Background(), "wM:p9"); err != nil {
+		t.Fatalf("retire: %v", err)
+	}
+	verbs := h.verbs(t)
+	if n := count(verbs, "tab close"); n != 0 {
+		t.Errorf("the tab was closed %d time(s) while another worker was still in it", n)
+	}
+	if n := count(verbs, "pane close"); n != 1 {
+		t.Errorf("the retiring worker's pane was closed %d time(s), want 1", n)
+	}
+}
+
+// splitArgvOf is the argv of the one recorded `pane split`.
+func splitArgvOf(t *testing.T, h *harness) []string {
+	t.Helper()
+	for _, argv := range h.Argv(t) {
+		if len(argv) >= 2 && argv[0] == "pane" && argv[1] == "split" {
+			return argv
+		}
+	}
+	t.Fatal("no pane was split into the tab that had room")
+	return nil
 }

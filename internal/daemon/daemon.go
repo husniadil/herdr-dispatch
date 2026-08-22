@@ -291,6 +291,11 @@ type DoctorReport struct {
 	// Verify is the verification lane: whether a submission earns a
 	// verifier, and which profile that verifier launches with.
 	Verify VerifyHealth `json:"verify"`
+	// MinPaneColumns is the width a worker's pane must be readable at, and
+	// the reason every worker gets a tab of its own. Herdr reports no column
+	// count for a pane, so this is the one place an operator can see the
+	// floor their window has to clear.
+	MinPaneColumns int `json:"min_pane_columns"`
 }
 
 // VerifyHealth is the verification lane as doctor reports it.
@@ -327,6 +332,7 @@ func (d *Daemon) doctor(ctx context.Context) (DoctorReport, error) {
 			Enabled: d.Loop.Config.Verify.Enabled,
 			Profile: d.Loop.Config.Verify.Profile,
 		},
+		MinPaneColumns: d.Loop.Config.Layout.MinPaneColumns,
 	}
 	board, err := d.Board.Doctor(ctx)
 	if err != nil {

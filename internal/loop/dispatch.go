@@ -40,7 +40,11 @@ type Worker struct {
 	// is gone is dropped by the next tick.
 	// Branch is where a worker's commits are, so an operator reading status
 	// can find the work; a verifier works detached and has none.
-	Branch     string    `json:"branch,omitempty"`
+	Branch string `json:"branch,omitempty"`
+	// Tab is the tab the worker was placed in. A tab carries a label, which
+	// a pane does not, so this is what an operator follows to find the work
+	// on their own screen.
+	Tab        string    `json:"tab,omitempty"`
 	PaneAlive  bool      `json:"pane_alive"`
 	PromptedAt time.Time `json:"prompted_at"`
 	Prompts    int       `json:"prompts"`
@@ -171,6 +175,7 @@ func (l *Loop) Status(ctx context.Context) (Status, error) {
 			Kind:        kindOf(b),
 			AgentStatus: status,
 			Branch:      b.Branch,
+			Tab:         b.Tab,
 			PaneAlive:   alive,
 			PromptedAt:  b.PromptedAt,
 			Prompts:     b.Prompts,

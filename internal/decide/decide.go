@@ -82,6 +82,11 @@ type Binding struct {
 	// is thrown away with everything in it, and a worker's is thrown away
 	// with its commits already safe on Branch.
 	Worktree string
+	// Tab is the tab this dispatcher opened the pane in. It is what a
+	// restart needs in order to give the tab back: a tab holds up to the
+	// pane cap of workers, so which tab a pane is in cannot be re-derived
+	// from the pane alone once the process that opened it is gone.
+	Tab string
 	// Branch is the branch a WORKER's commits live on, named for the task.
 	// It outlives the checkout, so it is what tells a verifier which commit
 	// was submitted and tells the operator where the work is. A verifier

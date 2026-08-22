@@ -48,8 +48,29 @@ type Agent struct {
 	// Cwd is the directory the agent was started in. For a pane this
 	// dispatcher opened it is the checkout it handed out, which is what
 	// names the repository the pane's task is filed on.
-	Cwd              string `json:"cwd"`
+	Cwd string `json:"cwd"`
+	// TabID and WorkspaceID are where Herdr is holding the pane. They are
+	// what a tab-per-worker placement reasons about: the workspace a new
+	// worker's tab is opened in, and the tab a pane belongs to when the
+	// time comes to close it.
+	TabID            string `json:"tab_id"`
+	WorkspaceID      string `json:"workspace_id"`
 	InteractiveReady bool   `json:"interactive_ready"`
+}
+
+// Tab is one tab as Herdr sees it. The label is the only thing a tab carries
+// that a pane cannot, and this dispatcher writes its own name into it: it is
+// what says a tab is hdis's own after a restart has forgotten everything
+// else, and the guard that keeps a tab the operator made from ever being
+// closed here.
+type Tab struct {
+	TabID       string `json:"tab_id"`
+	WorkspaceID string `json:"workspace_id"`
+	Label       string `json:"label"`
+	// PaneCount is how many panes the tab is holding. It is what says
+	// whether a tab has room for another worker, and whether the worker
+	// being retired is the last one in it.
+	PaneCount int `json:"pane_count"`
 }
 
 // The agent_status values this repo acts on.
@@ -65,13 +86,23 @@ const (
 // operator's focus, and returns the new pane's id. Each env entry is a
 // KEY=VALUE herdr sets for the process it launches in the new pane, which
 // the agent started there inherits.
-func (c *Client) PaneSplit(ctx context.Context, pane, direction, cwd string, env ...string) (string, error) {
+//
+// It is only ever used INSIDE a tab this dispatcher opened, to add a second
+// worker to one. The operator's own tab is never split.
+//
+// An empty ratio lets herdr halve the pane; a ratio is the share the pane
+// being split KEEPS, measured against herdr 0.8.2 — `--ratio 0.88` on a
+// 226-column pane left the new one 24 columns.
+func (c *Client) PaneSplit(ctx context.Context, pane, direction, ratio, cwd string, env ...string) (string, error) {
 	var res struct {
 		Pane struct {
 			PaneID string `json:"pane_id"`
 		} `json:"pane"`
 	}
 	argv := []string{"pane", "split", "--pane", pane, "--direction", direction, "--cwd", cwd, "--no-focus"}
+	if ratio != "" {
+		argv = append(argv, "--ratio", ratio)
+	}
 	for _, e := range env {
 		argv = append(argv, "--env", e)
 	}
@@ -82,6 +113,66 @@ func (c *Client) PaneSplit(ctx context.Context, pane, direction, cwd string, env
 		return "", fmt.Errorf("herdr pane split: no pane id in the response")
 	}
 	return res.Pane.PaneID, nil
+}
+
+// TabCreate opens a worker's own tab and returns the tab and the pane that
+// came up in it, without moving the operator's focus.
+//
+// A tab rather than a split is what keeps the detector honest. Every pane
+// added to one tab makes every pane in it narrower, and the whole of this
+// repo's reading of a worker goes through `pane read --source detection` —
+// a pane narrow enough wraps the very phrases those matches look for. A tab
+// gives each worker the full window, so the width a worker is read at does
+// not depend on how many other workers are live.
+//
+// The label is this dispatcher's own name for the worker, and it is load
+// bearing: it is the only evidence of ownership that survives Herdr dropping
+// the pane's agent name.
+//
+// An empty workspace lets Herdr pick, which is what happens when nothing
+// alive could say where the tab belongs.
+func (c *Client) TabCreate(ctx context.Context, workspace, cwd, label string, env ...string) (Tab, string, error) {
+	var res struct {
+		Tab      Tab `json:"tab"`
+		RootPane struct {
+			PaneID string `json:"pane_id"`
+		} `json:"root_pane"`
+	}
+	argv := []string{"tab", "create", "--cwd", cwd, "--label", label, "--no-focus"}
+	if workspace != "" {
+		argv = append(argv, "--workspace", workspace)
+	}
+	for _, e := range env {
+		argv = append(argv, "--env", e)
+	}
+	if err := c.result(ctx, &res, argv...); err != nil {
+		return Tab{}, "", err
+	}
+	if res.RootPane.PaneID == "" {
+		return Tab{}, "", fmt.Errorf("herdr tab create: no pane id in the response")
+	}
+	if res.Tab.TabID == "" {
+		return Tab{}, "", fmt.Errorf("herdr tab create: no tab id in the response")
+	}
+	return res.Tab, res.RootPane.PaneID, nil
+}
+
+// TabClose closes a tab and everything in it.
+func (c *Client) TabClose(ctx context.Context, tab string) error {
+	return c.result(ctx, nil, "tab", "close", tab)
+}
+
+// Tabs lists every tab Herdr is holding, with the label each carries. It is
+// how a pane is traced back to the tab it lives in, and how that tab is
+// asked whether it is one of this dispatcher's own.
+func (c *Client) Tabs(ctx context.Context) ([]Tab, error) {
+	var res struct {
+		Tabs []Tab `json:"tabs"`
+	}
+	if err := c.result(ctx, &res, "tab", "list"); err != nil {
+		return nil, err
+	}
+	return res.Tabs, nil
 }
 
 // PaneRun sends a command line and Enter to a pane's interactive shell.
@@ -160,17 +251,28 @@ func (c *Client) AgentGet(ctx context.Context, target string) (Agent, error) {
 // from `agent list` altogether. Reading that absence as "the pane is gone"
 // unbound a live worker and let its task be dispatched a second time.
 func (c *Client) Panes(ctx context.Context) (map[string]string, error) {
+	panes, err := c.PaneList(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byPane := make(map[string]string, len(panes))
+	for _, p := range panes {
+		byPane[p.PaneID] = p.Status
+	}
+	return byPane, nil
+}
+
+// PaneList is the same read whole: every live pane with the tab and the
+// workspace Herdr is holding it in. Panes answers the status question from
+// it; placement and ownership need the rest.
+func (c *Client) PaneList(ctx context.Context) ([]Agent, error) {
 	var res struct {
 		Panes []Agent `json:"panes"`
 	}
 	if err := c.result(ctx, &res, "pane", "list"); err != nil {
 		return nil, err
 	}
-	byPane := make(map[string]string, len(res.Panes))
-	for _, p := range res.Panes {
-		byPane[p.PaneID] = p.Status
-	}
-	return byPane, nil
+	return res.Panes, nil
 }
 
 // Agents lists every agent Herdr has registered, with the name it was

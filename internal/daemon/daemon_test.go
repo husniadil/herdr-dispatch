@@ -36,6 +36,8 @@ esac`
 
 const herdrScript = `case "$1 $2" in
 "pane split") echo '{"id":"x","result":{"type":"pane_info","pane":{"pane_id":"wM:p9","agent_status":"unknown","revision":1}}}' ;;
+"tab create") echo '{"id":"x","result":{"type":"tab_created","tab":{"tab_id":"wM:t9","workspace_id":"wM","label":"hdis-7"},"root_pane":{"pane_id":"wM:p9","workspace_id":"wM","tab_id":"wM:t9","agent_status":"unknown","revision":0}}}' ;;
+"tab list") echo '{"id":"x","result":{"type":"tab_list","tabs":[]}}' ;;
 "pane read") cat "$HDIS_FAKE_DIR/screen.txt" ;;
 "pane list") cat "$HDIS_FAKE_DIR/panes.json" ;;
 "agent get") cat "$HDIS_FAKE_DIR/agentget.json" ;;
@@ -172,12 +174,12 @@ func TestASecondRunnerCannotDoubleSpawnATask(t *testing.T) {
 	}
 	splits := 0
 	for _, c := range f.Calls(t) {
-		if len(c) >= 10 && c[:10] == "pane split" {
+		if len(c) >= 10 && c[:10] == "tab create" {
 			splits++
 		}
 	}
 	if splits != 1 {
-		t.Fatalf("one ready task became %d panes", splits)
+		t.Fatalf("one ready task became %d tabs", splits)
 	}
 }
 
@@ -282,7 +284,7 @@ func TestDispatchOverTheSocketAnswersWithAReservation(t *testing.T) {
 		t.Fatalf("reservation: %+v", res)
 	}
 	for _, c := range f.Calls(t) {
-		if len(c) >= 10 && c[:10] == "pane split" {
+		if len(c) >= 10 && c[:10] == "tab create" {
 			t.Fatal("dispatch spawned before answering")
 		}
 	}
@@ -487,7 +489,7 @@ func TestADaemonWithNoBasePaneDoesNotTick(t *testing.T) {
 		t.Fatalf("a daemon with no base pane drove %d workers", len(st.Workers))
 	}
 	for _, c := range f.Calls(t) {
-		if len(c) >= 10 && c[:10] == "pane split" {
+		if len(c) >= 10 && c[:10] == "tab create" {
 			t.Fatalf("a daemon with no base pane tried to split one: %v", c)
 		}
 	}

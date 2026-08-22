@@ -22,14 +22,14 @@ func TestPaneSplitReturnsTheNewPane(t *testing.T) {
 	c, f := client(t)
 	f.Bin(t, "herdr", `echo '{"id":"cli:pane:split","result":{"type":"pane_info","pane":{"pane_id":"wM:p9","workspace_id":"wM","tab_id":"wM:t1","terminal_id":"x","focused":false,"agent_status":"unknown","revision":1}}}'`)
 
-	pane, err := c.PaneSplit(context.Background(), "wM:p1", "right", "/src/p")
+	pane, err := c.PaneSplit(context.Background(), "wM:p1", "right", "0.5", "/src/p")
 	if err != nil {
 		t.Fatalf("split: %v", err)
 	}
 	if pane != "wM:p9" {
 		t.Fatalf("pane: got %q", pane)
 	}
-	want := "pane split --pane wM:p1 --direction right --cwd /src/p --no-focus"
+	want := "pane split --pane wM:p1 --direction right --cwd /src/p --no-focus --ratio 0.5"
 	if got := f.Calls(t)[0]; got != want {
 		t.Fatalf("argv: got %q, want %q", got, want)
 	}

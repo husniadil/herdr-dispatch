@@ -25,12 +25,14 @@ import (
 )
 
 // The verification lane needs two panes at once, so this herdr hands out a
-// fresh pane id per split rather than the one id the worker cases reuse.
+// fresh tab and pane id per create rather than the one id the worker cases
+// reuse.
 const herdrTwoPanes = `case "$1 $2" in
-"pane split")
+"tab create")
   n=$(cat "$HDIS_FAKE_DIR/splitn" 2>/dev/null || echo 8)
   n=$((n+1)); printf %s "$n" > "$HDIS_FAKE_DIR/splitn"
-  printf '{"id":"x","result":{"type":"pane_info","pane":{"pane_id":"wM:p%s","workspace_id":"wM","tab_id":"wM:t1","terminal_id":"x","focused":false,"agent_status":"unknown","revision":1}}}' "$n" ;;
+  printf '{"id":"x","result":{"type":"tab_created","tab":{"tab_id":"wM:t%s","workspace_id":"wM","label":"hdis-7"},"root_pane":{"pane_id":"wM:p%s","workspace_id":"wM","tab_id":"wM:t%s","terminal_id":"x","focused":false,"agent_status":"unknown","revision":0}}}' "$n" "$n" "$n" ;;
+"tab list") cat "$HDIS_FAKE_DIR/tabs.json" ;;
 "pane read") cat "$HDIS_FAKE_DIR/screen.txt" ;;
 "pane list") cat "$HDIS_FAKE_DIR/panes.json" ;;
 "agent get") cat "$HDIS_FAKE_DIR/agentget.json" ;;
@@ -101,7 +103,7 @@ func worktreesOf(t *testing.T, project string) []string {
 	return dirs
 }
 
-// cwdOf reads the --cwd a recorded `pane split` was called with.
+// cwdOf reads the --cwd a recorded `tab create` was called with.
 func cwdOf(t *testing.T, argv []string) string {
 	t.Helper()
 	for i, a := range argv {
@@ -113,12 +115,13 @@ func cwdOf(t *testing.T, argv []string) string {
 	return ""
 }
 
-// splits returns the argv of every recorded `pane split`.
+// splits returns the argv of every recorded `tab create`: one per agent this
+// dispatcher brought up.
 func splits(t *testing.T, f *fake.Fake) [][]string {
 	t.Helper()
 	var out [][]string
 	for _, argv := range f.Argv(t) {
-		if len(argv) >= 2 && argv[0] == "pane" && argv[1] == "split" {
+		if len(argv) >= 2 && argv[0] == "tab" && argv[1] == "create" {
 			out = append(out, argv)
 		}
 	}
@@ -150,6 +153,7 @@ func newVerifyLoopIn(t *testing.T, enabled bool, project string) (*Loop, *fake.F
 	f := fake.New(t)
 	f.Bin(t, "htask", htaskScript)
 	f.Bin(t, "herdr", herdrTwoPanes)
+	f.Write(t, "tabs.json", `{"id":"x","result":{"type":"tab_list","tabs":[]}}`)
 	f.Write(t, "ready.json", `{"tasks":[{"id":"01AAA","seq":7,"project":"`+project+`","title":"do the thing","status":"todo"}],"count":1}`)
 	f.Write(t, "get.json", row(project, "todo", ""))
 	f.Write(t, "panes.json", paneList())
@@ -211,8 +215,8 @@ func TestWithTheLaneOffASubmissionSpawnsNoVerifier(t *testing.T) {
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("second tick: %v", err)
 	}
-	if got := calls(t, f, "pane split"); len(got) != 1 {
-		t.Fatalf("split %d panes with the lane off: %v", len(got), got)
+	if got := calls(t, f, "tab create"); len(got) != 1 {
+		t.Fatalf("created %d tabs with the lane off: %v", len(got), got)
 	}
 	if len(l.Bindings()) != 1 {
 		t.Fatalf("bindings: %+v", l.Bindings())
@@ -231,8 +235,8 @@ func TestASubmissionEarnsAVerifierOnItsOwnPane(t *testing.T) {
 		t.Fatalf("second tick: %v", err)
 	}
 
-	if got := calls(t, f, "pane split"); len(got) != 2 {
-		t.Fatalf("split %d panes: %v", len(got), got)
+	if got := calls(t, f, "tab create"); len(got) != 2 {
+		t.Fatalf("created %d tabs: %v", len(got), got)
 	}
 	v, ok := bindingFor(l, "wM:p10")
 	if !ok {
@@ -279,8 +283,8 @@ func TestASecondTickDoesNotSpawnASecondVerifier(t *testing.T) {
 			t.Fatalf("tick %d: %v", i, err)
 		}
 	}
-	if got := calls(t, f, "pane split"); len(got) != 2 {
-		t.Fatalf("split %d panes for one submission: %v", len(got), got)
+	if got := calls(t, f, "tab create"); len(got) != 2 {
+		t.Fatalf("created %d tabs for one submission: %v", len(got), got)
 	}
 }
 
@@ -303,9 +307,9 @@ func TestAFinishedVerifierIsRetiredAndItsPaneClosed(t *testing.T) {
 	if _, ok := bindingFor(l, "wM:p10"); ok {
 		t.Fatalf("the verifier binding outlived the verifier: %+v", l.Bindings())
 	}
-	closed := calls(t, f, "pane close")
-	if len(closed) != 1 || !strings.Contains(closed[0], "wM:p10") {
-		t.Fatalf("closed panes: %v", closed)
+	closed := calls(t, f, "tab close")
+	if len(closed) != 1 || !strings.Contains(closed[0], "wM:t10") {
+		t.Fatalf("closed tabs: %v", closed)
 	}
 	// The worker's own binding is untouched by its verifier ending.
 	if _, ok := bindingFor(l, "wM:p9"); !ok {
@@ -345,8 +349,8 @@ func TestARejectionRetiresTheVerifierAndTheNextSubmissionEarnsANewOne(t *testing
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("fourth tick: %v", err)
 	}
-	if got := calls(t, f, "pane split"); len(got) != 3 {
-		t.Fatalf("split %d panes over two submissions: %v", len(got), got)
+	if got := calls(t, f, "tab create"); len(got) != 3 {
+		t.Fatalf("created %d tabs over two submissions: %v", len(got), got)
 	}
 	if got := calls(t, f, "notification show"); len(got) != 2 {
 		t.Fatalf("announced review %d times over two submissions: %v", len(got), got)
@@ -419,9 +423,9 @@ func TestEveryPaneSplitCarriesTheDispatcherAddress(t *testing.T) {
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("second tick: %v", err)
 	}
-	splits := calls(t, f, "pane split")
+	splits := calls(t, f, "tab create")
 	if len(splits) != 2 {
-		t.Fatalf("split %d panes: %v", len(splits), splits)
+		t.Fatalf("created %d tabs: %v", len(splits), splits)
 	}
 	want := "--env " + spawn.DispatcherPaneVar + "=" + l.BasePane
 	for i, got := range splits {
@@ -446,7 +450,7 @@ func TestAVerifierIsGivenAWorktreeAndNeverTheProjectDirectory(t *testing.T) {
 
 	got := splits(t, f)
 	if len(got) != 2 {
-		t.Fatalf("split %d panes: %v", len(got), got)
+		t.Fatalf("created %d tabs: %v", len(got), got)
 	}
 	cwd := cwdOf(t, got[1])
 	if cwd == project {
@@ -475,7 +479,7 @@ func TestTheWorkerIsGivenAWorktreeOfItsOwnOnItsOwnBranch(t *testing.T) {
 	}
 	got := splits(t, f)
 	if len(got) != 1 {
-		t.Fatalf("split %d panes: %v", len(got), got)
+		t.Fatalf("created %d tabs: %v", len(got), got)
 	}
 	cwd := cwdOf(t, got[0])
 	if cwd == project || strings.HasPrefix(cwd, project+string(filepath.Separator)) {
@@ -515,7 +519,7 @@ func TestWithoutAWorktreeNothingIsSpawned(t *testing.T) {
 	}
 
 	if got := splits(t, f); len(got) != 0 {
-		t.Fatalf("split %d panes with no worktree to be had: %v", len(got), got)
+		t.Fatalf("created %d tabs with no worktree to be had: %v", len(got), got)
 	}
 	if len(l.Bindings()) != 0 {
 		t.Fatalf("something was bound without a worktree: %+v", l.Bindings())
@@ -625,13 +629,13 @@ func TestARestartRetiresAVerifierWhoseSubmissionLeftReview(t *testing.T) {
 	// Unbound is not enough. The pane has to be closed, or the reap below
 	// takes the tree out from under a live process.
 	var closed bool
-	for _, c := range calls(t, f, "pane close") {
-		if strings.Contains(c, "wM:p10") {
+	for _, c := range calls(t, f, "tab close") {
+		if strings.Contains(c, "wM:t10") {
 			closed = true
 		}
 	}
 	if !closed {
-		t.Fatalf("the verifier's pane was left open while its tree was reaped: %v", calls(t, f, "pane close"))
+		t.Fatalf("the verifier's tab was left open while its tree was reaped: %v", calls(t, f, "tab close"))
 	}
 	if _, err := os.Stat(v.Worktree); !os.IsNotExist(err) {
 		t.Fatalf("the retired verifier's checkout is still there: %v", err)
@@ -665,7 +669,7 @@ func TestARestartLeavesALiveVerifierAndItsCheckoutAlone(t *testing.T) {
 	if _, ok := bindingFor(next, "wM:p10"); !ok {
 		t.Fatalf("the live verifier was not re-adopted: %+v", next.Bindings())
 	}
-	for _, c := range calls(t, f, "pane close") {
+	for _, c := range calls(t, f, "tab close") {
 		if strings.Contains(c, "wM:p10") {
 			t.Fatalf("a restart closed a verifier still reading a submission: %v", c)
 		}
@@ -694,9 +698,9 @@ func TestAVerifierIsAddressedAtTheTasksPaneOfOrigin(t *testing.T) {
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("second tick: %v", err)
 	}
-	all := calls(t, f, "pane split")
+	all := calls(t, f, "tab create")
 	if len(all) != 2 {
-		t.Fatalf("split %d panes: %v", len(all), all)
+		t.Fatalf("created %d tabs: %v", len(all), all)
 	}
 	want := "--env " + spawn.DispatcherPaneVar + "=wZ:p2"
 	for i, got := range all {
@@ -805,7 +809,7 @@ func TestNoVerifierIsSpawnedForAWorkerBindingThatNamesNoBranch(t *testing.T) {
 	}
 
 	if got := splits(t, f); len(got) != 1 {
-		t.Fatalf("split %d panes with no commit to read: %v", len(got), got)
+		t.Fatalf("created %d tabs with no commit to read: %v", len(got), got)
 	}
 	for _, b := range l.Bindings() {
 		if b.IsVerifier() {

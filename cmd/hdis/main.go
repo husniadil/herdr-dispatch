@@ -148,6 +148,10 @@ func serve(argv []string) error {
 			ConfirmCeiling: *confirmCeiling,
 			ShellCeiling:   spawn.DefaultShellCeiling,
 			Poll:           2 * time.Second,
+			// How many workers may share one tab before the next opens its
+			// own, which is the measured readable width turned into a count.
+			MaxPanesPerTab: cfg.Layout.MaxPanesPerTab,
+			Log:            log.Default(),
 		},
 		// A verifier gets a checkout of its own, never the project directory
 		// its worker holds and the operator reviews in.

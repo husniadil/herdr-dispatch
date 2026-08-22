@@ -84,8 +84,8 @@ func TestARestartDoesNotDispatchATaskWhoseWorkerPaneIsStillAlive(t *testing.T) {
 	if err := next.Tick(context.Background()); err != nil {
 		t.Fatalf("tick after restart: %v", err)
 	}
-	if got := calls(t, f, "pane split"); len(got) != 1 {
-		t.Fatalf("split %d panes for one task: %v", len(got), got)
+	if got := calls(t, f, "tab create"); len(got) != 1 {
+		t.Fatalf("created %d tabs for one task: %v", len(got), got)
 	}
 	if got := next.Bindings(); len(got) != 1 || got[0].Pane != "wM:p9" {
 		t.Fatalf("bindings: %+v", got)
@@ -162,8 +162,8 @@ func TestARestartDropsABindingWhoseTaskMovedOn(t *testing.T) {
 			if tc.retires {
 				want = 1
 			}
-			if got := calls(t, f, "pane close"); len(got) != want {
-				t.Fatalf("closed %d panes, want %d: %v", len(got), want, got)
+			if got := calls(t, f, "tab close"); len(got) != want {
+				t.Fatalf("closed %d tabs, want %d: %v", len(got), want, got)
 			}
 		})
 	}
@@ -276,9 +276,9 @@ func TestARestartRetiresThePaneOfABindingWhoseTaskFinished(t *testing.T) {
 		t.Fatalf("the binding survived a finished task: %+v", got)
 	}
 	// Unbound is not enough: the pane has to be gone.
-	got := calls(t, f, "pane close")
-	if len(got) != 1 || !strings.Contains(got[0], "wM:p9") {
-		t.Fatalf("the pane of a finished task was left open: %v", got)
+	got := calls(t, f, "tab close")
+	if len(got) != 1 || !strings.Contains(got[0], "wM:t9") {
+		t.Fatalf("the tab of a finished task was left open: %v", got)
 	}
 }
 
@@ -301,7 +301,7 @@ func TestARestartRetiresNoPaneItDidNotStrand(t *testing.T) {
 		if _, err := next.Adopt(context.Background()); err != nil {
 			t.Fatalf("adopt: %v", err)
 		}
-		for _, c := range calls(t, f, "pane close") {
+		for _, c := range calls(t, f, "tab close") {
 			if strings.Contains(c, "wM:pX") {
 				t.Fatalf("a restart closed a pane it never opened: %v", c)
 			}
@@ -324,7 +324,7 @@ func TestARestartRetiresNoPaneItDidNotStrand(t *testing.T) {
 		if n != 1 {
 			t.Fatalf("re-adopted %d bindings, want 1", n)
 		}
-		if got := calls(t, f, "pane close"); len(got) != 0 {
+		if got := calls(t, f, "tab close"); len(got) != 0 {
 			t.Fatalf("a restart closed a live worker's pane: %v", got)
 		}
 	})
@@ -364,7 +364,7 @@ func TestARestartAdoptsALivePaneThatAlreadyClaimedItsTask(t *testing.T) {
 	if len(b) != 1 || b[0].TaskID != "01AAA" || b[0].Pane != "wM:p9" || b[0].Kind != decide.KindWorker {
 		t.Fatalf("bindings: %+v", b)
 	}
-	if got := calls(t, f, "pane close"); len(got) != 0 {
+	if got := calls(t, f, "tab close"); len(got) != 0 {
 		t.Fatalf("a live worker's pane was closed: %v", got)
 	}
 	if got := calls(t, f, "task release"); len(got) != 0 {
@@ -390,7 +390,7 @@ func TestARestartTouchesNothingThatIsNotItsOwn(t *testing.T) {
 		if got := l.Bindings(); len(got) != 0 {
 			t.Fatalf("a pane this daemon never opened was adopted: %+v", got)
 		}
-		if got := calls(t, f, "pane close"); len(got) != 0 {
+		if got := calls(t, f, "tab close"); len(got) != 0 {
 			t.Fatalf("a pane this daemon never opened was closed: %v", got)
 		}
 	})
@@ -535,5 +535,79 @@ func TestARestartLeavesAPaneWhoseProjectCannotBeRead(t *testing.T) {
 	}
 	if got := calls(t, f, "task get"); len(got) != 0 {
 		t.Fatalf("the board was asked about a task nothing could name: %v", got)
+	}
+}
+
+// CRITERION 4. Ownership survives a pane whose agent name Herdr has dropped.
+//
+// This is note 24's observation made into a test. Herdr does not keep the
+// agent name: the same pane, the same process and the same agent_session
+// were measured answering with "name":"hdis-20" at 00:39 and with no name
+// field at all at 00:57. Until this change that prefix WAS the ownership
+// test, so a pane in that state stopped being this daemon's — nothing logged
+// it, nothing adopted it, nothing retired it, and it sat live forever with
+// its task already finished.
+//
+// The fake here reports exactly that: a live pane, no name, and `agent list`
+// empty, which is what Herdr answers once the name is gone. What still
+// identifies it is the CHECKOUT — a directory under this daemon's own state
+// dir, named for the lane and the task, which nothing else on the machine
+// writes to and no process can take away.
+//
+// It is proved at both ends, because recognition that does not lead anywhere
+// is not ownership: the pane is ADOPTED while its row is live, and RETIRED
+// when its row is finished.
+func TestAPaneWhoseAgentNameHerdrDroppedIsStillAdoptedAndStillRetired(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		status  string
+		adopted int
+		closed  int
+	}{
+		{name: "a live row is adopted", status: "doing", adopted: 1},
+		{name: "a finished row is retired", status: "done", closed: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			l, f := newLoop(t)
+			// The checkout this daemon would have handed the worker for
+			// task 7, made where a real one is made and named as one.
+			root := l.Worktrees.RootDir()
+			tree := filepath.Join(root, worktree.WorkPrefix+"7-abc123")
+			if err := os.MkdirAll(tree, 0o755); err != nil {
+				t.Fatalf("checkout: %v", err)
+			}
+
+			// A live pane with NO name field, which is the whole point, and
+			// an agent list that does not mention it either.
+			f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[`+
+				`{"pane_id":"wM:p9","agent":"claude","agent_status":"working","cwd":"`+tree+
+				`","tab_id":"wM:t9","workspace_id":"wM","focused":false,"revision":1}]}}`)
+			agentsAre(t, f, "")
+			f.Write(t, "tabs.json", `{"id":"x","result":{"type":"tab_list","tabs":[`+
+				`{"tab_id":"wM:t9","workspace_id":"wM","label":"hdis task 7","pane_count":1}]}}`)
+			f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"`+root+
+				`","title":"do the thing","status":"`+tc.status+`","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`)
+			f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
+
+			var said strings.Builder
+			l.Log = log.New(&said, "", 0)
+			n, err := l.Adopt(context.Background())
+			if err != nil {
+				t.Fatalf("adopt: %v", err)
+			}
+			if n != tc.adopted {
+				t.Fatalf("adopted %d pane(s) with no agent name, want %d; the operator was told: %q",
+					n, tc.adopted, said.String())
+			}
+			if tc.adopted == 1 {
+				b := l.Bindings()
+				if len(b) != 1 || b[0].Pane != "wM:p9" || b[0].TaskID != "01AAA" {
+					t.Fatalf("a nameless pane was not bound to its task: %+v", b)
+				}
+			}
+			if got := len(calls(t, f, "tab close")) + len(calls(t, f, "pane close")); got != tc.closed {
+				t.Fatalf("a nameless pane was closed %d time(s), want %d", got, tc.closed)
+			}
+		})
 	}
 }

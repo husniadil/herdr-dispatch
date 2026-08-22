@@ -194,3 +194,76 @@ func TestAVerificationLaneWithNoProfileIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// CRITERION 6. The measured pane-width cap lives in the config document, and
+// the number the code falls back to is the number that was measured.
+//
+// It is a correctness bound rather than a preference, so it may be raised and
+// never lowered: below MeasuredReadableColumns the dispatcher cannot trust
+// what it reads off a worker's screen, and every judgement it makes about a
+// worker comes from reading that screen.
+func TestTheMeasuredPaneWidthCapIsInTheConfigAndCannotBeLowered(t *testing.T) {
+	const profiles = `"default":"w","profiles":{"w":{"provider":"claude"}}`
+
+	t.Run("a document that says nothing takes the measured numbers", func(t *testing.T) {
+		c, err := Parse([]byte(`{` + profiles + `}`))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if c.Layout.MinPaneColumns != MeasuredReadableColumns {
+			t.Errorf("min_pane_columns defaulted to %d, and %d is what was measured",
+				c.Layout.MinPaneColumns, MeasuredReadableColumns)
+		}
+		if c.Layout.MaxPanesPerTab != DefaultMaxPanesPerTab {
+			t.Errorf("max_panes_per_tab defaulted to %d, want %d",
+				c.Layout.MaxPanesPerTab, DefaultMaxPanesPerTab)
+		}
+	})
+
+	t.Run("an operator may ask for wider", func(t *testing.T) {
+		c, err := Parse([]byte(`{` + profiles + `,"layout":{"min_pane_columns":80}}`))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if c.Layout.MinPaneColumns != 80 {
+			t.Errorf("min_pane_columns: got %d, want 80", c.Layout.MinPaneColumns)
+		}
+	})
+
+	t.Run("narrower than what was measured is refused", func(t *testing.T) {
+		_, err := Parse([]byte(`{` + profiles + `,"layout":{"min_pane_columns":20}}`))
+		if err == nil {
+			t.Fatal("a pane narrower than the measured floor was accepted, and the dispatcher cannot read one")
+		}
+		if !strings.Contains(err.Error(), "min_pane_columns") {
+			t.Errorf("the refusal does not name the key an operator has to change: %v", err)
+		}
+	})
+
+	t.Run("a tab that may hold no worker is refused", func(t *testing.T) {
+		if _, err := Parse([]byte(`{` + profiles + `,"layout":{"max_panes_per_tab":-1}}`)); err == nil {
+			t.Fatal("a tab that can never be spawned into was accepted")
+		}
+	})
+
+	// The cap is not a free number: it is what the measured window width and
+	// the measured readable floor work out to, given that splits alternate
+	// and a pane's width therefore halves only every second one.
+	t.Run("the cap follows from the two measurements", func(t *testing.T) {
+		width, panes := MeasuredWindowColumns, 1
+		for {
+			next := width
+			if panes%2 == 1 {
+				next = width / 2
+			}
+			if next < MeasuredReadableColumns {
+				break
+			}
+			width, panes = next, panes+1
+		}
+		if panes != DefaultMaxPanesPerTab {
+			t.Fatalf("a %d-column window at a %d-column floor holds %d readable panes, and the cap is %d",
+				MeasuredWindowColumns, MeasuredReadableColumns, panes, DefaultMaxPanesPerTab)
+		}
+	})
+}

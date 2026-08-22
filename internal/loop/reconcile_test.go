@@ -50,6 +50,7 @@ func TestARestartAdoptsAStaleReservationWhoseWorkerIsAlive(t *testing.T) {
 	l.Board = &htask.Client{Principal: htask.PrincipalFor(l.BasePane)}
 	heldByUs(t, f, htask.PrincipalFor("wM:p1"))
 	f.Write(t, "panes.json", panesWith("working"))
+	f.Write(t, "tabs.json", `{"id":"x","result":{"type":"tab_list","tabs":[]}}`)
 	agentsAre(t, f, `{"name":"hdis-7","pane_id":"wM:p9","agent":"claude","agent_status":"working","cwd":"/src/p"}`)
 	// Nothing is ready any more: the board is holding the task for us.
 	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
@@ -78,7 +79,10 @@ func TestARestartReleasesAStaleReservationWithNoLiveWorker(t *testing.T) {
 	l.Board = &htask.Client{Principal: htask.PrincipalFor(l.BasePane)}
 	heldByUs(t, f, htask.PrincipalFor("wM:p1"))
 	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[]}}`)
+	f.Write(t, "tabs.json", `{"id":"x","result":{"type":"tab_list","tabs":[]}}`)
 	f.Bin(t, "herdr", `case "$1 $2" in
+"tab create") echo '{"id":"x","result":{"type":"tab_created","tab":{"tab_id":"wM:t9","workspace_id":"wM","label":"hdis-7"},"root_pane":{"pane_id":"wM:p9","workspace_id":"wM","tab_id":"wM:t9","terminal_id":"x","focused":false,"agent_status":"unknown","revision":0}}}' ;;
+"tab list") cat "$HDIS_FAKE_DIR/tabs.json" ;;
 "pane list") cat "$HDIS_FAKE_DIR/panes.json" ;;
 "agent get") echo '{"error":{"code":"agent_not_found","message":"no agent hdis-7"}}' >&2; exit 1 ;;
 *) echo '{"id":"x","result":{"type":"ok"}}' ;;
@@ -119,6 +123,7 @@ func TestARestartTellsItsOwnStaleReservationFromAPeers(t *testing.T) {
 			l.Board = &htask.Client{Principal: htask.PrincipalFor(l.BasePane)}
 			heldByUs(t, f, tc.holder)
 			f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[]}}`)
+			f.Write(t, "tabs.json", `{"id":"x","result":{"type":"tab_list","tabs":[]}}`)
 			f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
 			l.Log = log.New(io.Discard, "", 0)
 			if _, err := l.Adopt(context.Background()); err != nil {
@@ -157,6 +162,7 @@ func TestAReservationOutlivesTheDaemonThatMadeIt(t *testing.T) {
 	next := restarted(t, l)
 	next.Board = l.Board
 	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[]}}`)
+	f.Write(t, "tabs.json", `{"id":"x","result":{"type":"tab_list","tabs":[]}}`)
 	if _, err := next.Adopt(context.Background()); err != nil {
 		t.Fatalf("adopt: %v", err)
 	}
@@ -221,6 +227,7 @@ func TestARestartKeepsWhatItDidNotStrand(t *testing.T) {
 		}
 	}
 	f.Write(t, "panes.json", panesWith("working"))
+	f.Write(t, "tabs.json", `{"id":"x","result":{"type":"tab_list","tabs":[]}}`)
 	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"review"},"ready":false,"dependents":[]}`)
 	if err := l.Store.Save(store.State{Bindings: []decide.Binding{
 		{TaskID: "01AAA", Pane: "wM:p9", Kind: decide.KindVerifier, Worktree: bound, PromptedAt: clock, Prompts: 1},

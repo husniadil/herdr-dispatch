@@ -90,6 +90,9 @@ type record struct {
 	// remove it, and a startup reap would take it while the verifier is
 	// still working in it.
 	Worktree string `json:"worktree,omitempty"`
+	// Tab is the tab the pane was opened in, so a restart can close it when
+	// its last worker leaves.
+	Tab string `json:"tab,omitempty"`
 	// Branch is where a worker's commits are. The checkout is removed when
 	// the pane is retired and the branch is not, so a binding that comes
 	// back without it leaves an operator with no name for the work and a
@@ -127,6 +130,7 @@ func (b *Bindings) Load() (State, error) {
 			Kind:       r.Kind,
 			Verified:   r.Verified,
 			Worktree:   r.Worktree,
+			Tab:        r.Tab,
 			Branch:     r.Branch,
 		})
 	}
@@ -166,6 +170,7 @@ func (b *Bindings) Save(state State) error {
 			Kind:         kindOf(x),
 			Verified:     x.Verified,
 			Worktree:     x.Worktree,
+			Tab:          x.Tab,
 			Branch:       x.Branch,
 		})
 	}

@@ -144,18 +144,30 @@ func (l *Loop) Adopt(ctx context.Context) (int, error) {
 		}
 	}
 
-	panes, err := l.Herdr.Panes(ctx)
+	rowsAlive, err := l.Herdr.PaneList(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("herdr cannot say which panes are alive, so %d persisted binding(s) stay unadopted: %w", len(held.Bindings), err)
+	}
+	panes := make(map[string]string, len(rowsAlive))
+	for _, row := range rowsAlive {
+		panes[row.PaneID] = row.Status
 	}
 	agents, err := l.Herdr.Agents(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("herdr cannot say which agents it has registered, so %d persisted binding(s) stay unadopted: %w", len(held.Bindings), err)
 	}
+	// The tab labels are the second evidence of ownership, and the one that
+	// does not depend on Herdr still holding an agent name. A tab list that
+	// cannot be read costs only that evidence: the names and the bindings
+	// still answer, so the restart goes on rather than refusing.
+	tabs, err := l.Herdr.Tabs(ctx)
+	if err != nil {
+		l.logf("herdr cannot list its tabs, so a pane is this daemon's only if its agent name or a binding says so: %v", err)
+	}
 
 	kept := make([]decide.Binding, 0, len(held.Bindings))
 	rows := make(map[string]htask.Task, len(held.Bindings))
-	for _, p := range l.ourPanes(ctx, panes, agents, held.Bindings) {
+	for _, p := range l.ourPanes(ctx, rowsAlive, agents, tabs, held.Bindings) {
 		b, row, ok := l.reconcile(ctx, p)
 		if !ok {
 			continue
@@ -175,6 +187,15 @@ func (l *Loop) Adopt(ctx context.Context) (int, error) {
 			continue
 		}
 		mine = append(mine, r)
+	}
+
+	// The tabs the previous process opened go back to the pipeline before
+	// anything else: a retire that comes out of this reconciliation has to
+	// know which tab a pane is in, and only the store still says.
+	if l.Spawn != nil {
+		for _, b := range kept {
+			l.Spawn.Adopt(b.Pane, b.Tab)
+		}
 	}
 
 	l.mu.Lock()
@@ -211,6 +232,10 @@ type ourPane struct {
 	// the pane works in. It is empty, and unused, when ref is an id: an id
 	// belongs to no project and is read across all of them.
 	project string
+	// tab is the tab the pane sits in, when it is one this dispatcher
+	// opened. A pane in the operator's own tab carries none, so nothing a
+	// restart does can close it.
+	tab     string
 	binding *decide.Binding
 }
 
@@ -224,15 +249,31 @@ type ourPane struct {
 //
 // A binding whose pane is gone names nothing to reconcile, and is dropped
 // here with a word to the operator.
-func (l *Loop) ourPanes(ctx context.Context, panes map[string]string, agents []herdr.Agent, held []decide.Binding) []ourPane {
+func (l *Loop) ourPanes(ctx context.Context, alive []herdr.Agent, agents []herdr.Agent, tabs []herdr.Tab, held []decide.Binding) []ourPane {
+	panes := make(map[string]bool, len(alive))
+	for _, row := range alive {
+		panes[row.PaneID] = true
+	}
+	// Which live panes sit in a tab this dispatcher opened. A tab the
+	// operator made is absent, so a binding built here can never name one.
+	label := make(map[string]string, len(tabs))
+	for _, t := range tabs {
+		label[t.TabID] = t.Label
+	}
+	ourTab := make(map[string]string, len(alive))
+	for _, row := range alive {
+		if spawn.OwnTab(label[row.TabID]) {
+			ourTab[row.PaneID] = row.TabID
+		}
+	}
 	out := make([]ourPane, 0, len(agents))
 	at := make(map[string]int, len(agents))
-	for _, a := range agents {
+	for _, a := range l.named(alive, agents, tabs) {
 		kind, seq, ok := lane(a.Name)
 		if !ok || a.PaneID == "" {
 			continue
 		}
-		if _, alive := panes[a.PaneID]; !alive {
+		if !panes[a.PaneID] {
 			continue
 		}
 		// A pane names its task by number, and a number is unique only
@@ -246,11 +287,11 @@ func (l *Loop) ourPanes(ctx context.Context, panes map[string]string, agents []h
 			continue
 		}
 		at[a.PaneID] = len(out)
-		out = append(out, ourPane{pane: a.PaneID, kind: kind, ref: strconv.Itoa(seq), project: project})
+		out = append(out, ourPane{pane: a.PaneID, kind: kind, ref: strconv.Itoa(seq), project: project, tab: ourTab[a.PaneID]})
 	}
 	for i := range held {
 		b := held[i]
-		if _, alive := panes[b.Pane]; !alive {
+		if !panes[b.Pane] {
 			l.logf("task %s: pane %s is gone, dropping the binding a restart found", b.TaskID, b.Pane)
 			continue
 		}
@@ -265,6 +306,120 @@ func (l *Loop) ourPanes(ctx context.Context, panes map[string]string, agents []h
 		out = append(out, ourPane{pane: b.Pane, kind: bindingKind(b), ref: b.TaskID, binding: &b})
 	}
 	return out
+}
+
+// named is every live pane carrying one of this daemon's own names, from
+// either evidence, with each pane appearing once.
+//
+// Herdr's agent name is the first evidence and the more precise one: it
+// carries the pane's own cwd, which is what says the project a task number
+// is unique in. The tab label is the second, and it exists because the first
+// can vanish while the work does not — Herdr drops the agent name when the
+// client it registered exits, and a pane whose agent is gone but whose task
+// is still live is a pane this daemon opened and still owns. The label is
+// written at `tab create` and belongs to the tab, so nothing a process does
+// takes it away.
+//
+// A pane covered by both is counted once, from the agent record, which is
+// the one with the cwd on it.
+func (l *Loop) named(alive []herdr.Agent, agents []herdr.Agent, tabs []herdr.Tab) []herdr.Agent {
+	out := make([]herdr.Agent, 0, len(agents)+len(alive))
+	seen := make(map[string]bool, len(agents))
+	for _, a := range agents {
+		if a.PaneID == "" || seen[a.PaneID] {
+			continue
+		}
+		if _, _, ok := lane(a.Name); !ok {
+			continue
+		}
+		seen[a.PaneID] = true
+		out = append(out, a)
+	}
+
+	label := make(map[string]string, len(tabs))
+	for _, t := range tabs {
+		label[t.TabID] = t.Label
+	}
+	for _, row := range alive {
+		if row.PaneID == "" || seen[row.PaneID] {
+			continue
+		}
+		name := l.nameFor(row, label[row.TabID])
+		if name == "" {
+			continue
+		}
+		seen[row.PaneID] = true
+		row.Name = name
+		out = append(out, row)
+	}
+	return out
+}
+
+// nameFor is this daemon's own name for a live pane Herdr no longer gives a
+// name to, from the two evidences that are not Herdr's to drop.
+//
+// The CHECKOUT is the stronger of the two and it is tried first. Every agent
+// this dispatcher brings up is given a directory of its own under this
+// daemon's state dir, named for its lane and its task — nothing else on the
+// machine writes there, so a pane sitting in one is a pane this daemon opened,
+// and the directory's own name says which task and which lane. It is Herdr's
+// word about the pane's cwd and never Herdr's word about an agent, which is
+// the field that was measured going missing.
+//
+// The tab LABEL deliberately does not serve here. A tab holds up to
+// config.DefaultMaxPanesPerTab workers and its label names only the task it
+// was opened for, so reading a pane's task off the tab it happens to sit in
+// would give every worker in that tab the first one's number. The label is
+// the close guard and the operator's signpost; the checkout is the identity.
+func (l *Loop) nameFor(row herdr.Agent, label string) string {
+	if l.Worktrees == nil {
+		return ""
+	}
+	root := l.Worktrees.RootDir()
+	if root == "" || row.Cwd == "" {
+		return ""
+	}
+	rel, err := filepath.Rel(root, row.Cwd)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return ""
+	}
+	name, ok := nameOfCheckout(rel)
+	if !ok {
+		return ""
+	}
+	if !spawn.OwnTab(label) && label != "" {
+		// The checkout says the pane is ours and the tab says it is the
+		// operator's. That is a worker the operator has moved, which is
+		// theirs to arrange; it is still ours to drive.
+		l.logf("pane %s works in this daemon's own checkout %s but sits in the operator's tab %q; driving it and leaving the tab alone", row.PaneID, row.Cwd, label)
+	}
+	return name
+}
+
+// nameOfCheckout reads one of this daemon's own checkout directory names —
+// `hdis-work-<seq>-<random>` or `hdis-verify-<seq>-<random>` — back into the
+// agent name that lane and task would have registered under. It is the
+// mirror of the reap, which already removes a checkout under this root that
+// no binding names; this recognises the pane sitting in one.
+func nameOfCheckout(rel string) (string, bool) {
+	dir, _, _ := strings.Cut(rel, string(filepath.Separator))
+	verifier := false
+	rest, ok := strings.CutPrefix(dir, worktree.WorkPrefix)
+	if !ok {
+		if rest, ok = strings.CutPrefix(dir, worktree.VerifyPrefix); !ok {
+			return "", false
+		}
+		verifier = true
+	}
+	digits, _, _ := strings.Cut(rest, "-")
+	seq, err := strconv.Atoi(digits)
+	if err != nil || seq <= 0 {
+		return "", false
+	}
+	if verifier {
+		return verifierName(seq), true
+	}
+	return workerName(seq), true
 }
 
 // reconcile asks the one question of one live pane: what is it, and what
@@ -320,7 +475,11 @@ func (l *Loop) reconcile(ctx context.Context, p ourPane) (decide.Binding, htask.
 	}
 
 	if p.binding != nil {
-		return *p.binding, row, true
+		b := *p.binding
+		if b.Tab == "" {
+			b.Tab = p.tab
+		}
+		return b, row, true
 	}
 	// A live pane working a live row that no binding names. The goal reached
 	// it — the row it is on says so — so it counts as delivered once, from
@@ -330,6 +489,7 @@ func (l *Loop) reconcile(ctx context.Context, p ourPane) (decide.Binding, htask.
 		TaskID:     row.ID,
 		Pane:       p.pane,
 		Kind:       p.kind,
+		Tab:        p.tab,
 		PromptedAt: l.now(),
 		Prompts:    1,
 	}, row, true
@@ -675,6 +835,7 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 	// is far too long to type intact. The worker reads the criteria itself.
 	pane, err := l.Spawn.Run(ctx, spawn.Request{
 		Name:       workerName(row.Seq),
+		Label:      spawn.TabLabel(row.Seq),
 		BasePane:   l.BasePane,
 		OriginPane: row.PaneID,
 		Cwd:        tree,
@@ -702,6 +863,7 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 		Pane:       pane,
 		Kind:       decide.KindWorker,
 		Worktree:   tree,
+		Tab:        l.Spawn.TabOf(pane),
 		Branch:     branch,
 		PromptedAt: l.now(),
 		Prompts:    1,
@@ -750,6 +912,7 @@ func (l *Loop) spawnVerifier(ctx context.Context, a decide.Action) error {
 	}
 	pane, err := l.Spawn.Run(ctx, spawn.Request{
 		Name:       verifierName(row.Seq),
+		Label:      spawn.TabLabel(row.Seq),
 		BasePane:   l.BasePane,
 		OriginPane: row.PaneID,
 		Cwd:        tree,
@@ -771,6 +934,7 @@ func (l *Loop) spawnVerifier(ctx context.Context, a decide.Action) error {
 		Pane:       pane,
 		Kind:       decide.KindVerifier,
 		Worktree:   tree,
+		Tab:        l.Spawn.TabOf(pane),
 		PromptedAt: l.now(),
 		Prompts:    1,
 	})

@@ -55,6 +55,8 @@ const herdrScript = `case "$1 $2" in
     exit 1
   fi
   cat "$HDIS_FAKE_DIR/screen.txt" ;;
+"tab create") echo '{"id":"x","result":{"type":"tab_created","tab":{"tab_id":"wM:t9","workspace_id":"wM","label":"hdis-7"},"root_pane":{"pane_id":"wM:p9","workspace_id":"wM","tab_id":"wM:t9","terminal_id":"x","focused":false,"agent_status":"unknown","revision":0}}}' ;;
+"tab list") cat "$HDIS_FAKE_DIR/tabs.json" ;;
 "pane list") cat "$HDIS_FAKE_DIR/panes.json" ;;
 "agent get") cat "$HDIS_FAKE_DIR/agentget.json" ;;
 "agent list") cat "$HDIS_FAKE_DIR/agents.json" ;;
@@ -102,6 +104,7 @@ func newLoop(t *testing.T) (*Loop, *fake.Fake) {
 	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"todo"},"ready":false,"dependents":[]}`)
 	f.Write(t, "goal.txt", "do the thing · Done when: it is done")
 	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[]}}`)
+	f.Write(t, "tabs.json", `{"id":"x","result":{"type":"tab_list","tabs":[]}}`)
 	f.Write(t, "agents.json", `{"id":"x","result":{"type":"agent_list","agents":[]}}`)
 	f.Write(t, "screen.txt", "⎿  Goal set: do the thing\n  ◎ /goal active\n")
 	// Idle, so the screen is what confirms the goal rather than the status.
@@ -195,8 +198,8 @@ func TestASecondTickDoesNotDispatchATaskItAlreadyPrompted(t *testing.T) {
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("second tick: %v", err)
 	}
-	if got := calls(t, f, "pane split"); len(got) != 1 {
-		t.Fatalf("split %d panes for one task", len(got))
+	if got := calls(t, f, "tab create"); len(got) != 1 {
+		t.Fatalf("created %d tabs for one task", len(got))
 	}
 	if len(l.bindings) != 1 {
 		t.Fatalf("bindings: %+v", l.bindings)
@@ -242,7 +245,7 @@ func TestAnUnreachableBoardFailsTheTickWithoutSpawning(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "the daemon is not answering") {
 		t.Fatalf("want the board's own message, got %v", err)
 	}
-	if got := calls(t, f, "pane split"); len(got) != 0 {
+	if got := calls(t, f, "tab create"); len(got) != 0 {
 		t.Fatalf("spawned with no board to read: %v", got)
 	}
 	if len(l.bindings) != 0 {
@@ -315,7 +318,7 @@ func TestAFlakyReadStillReachesTheReviewNotification(t *testing.T) {
 	if len(l.bindings) != 1 || l.bindings[0].Pane != "wM:p9" {
 		t.Fatalf("bindings: %+v", l.bindings)
 	}
-	if got := calls(t, f, "pane close"); len(got) != 0 {
+	if got := calls(t, f, "tab close"); len(got) != 0 {
 		t.Fatalf("a worker that came back readable was retired: %v", got)
 	}
 
@@ -344,7 +347,7 @@ func TestAnUnreadableConfirmKeepsTheBindingSoReviewIsStillAnnounced(t *testing.T
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("tick: %v", err)
 	}
-	if got := calls(t, f, "pane close"); len(got) != 0 {
+	if got := calls(t, f, "tab close"); len(got) != 0 {
 		t.Fatalf("a worker that could not be read was killed: %v", got)
 	}
 	if len(l.bindings) != 1 || l.bindings[0].TaskID != "01AAA" || l.bindings[0].Pane != "wM:p9" {
@@ -404,7 +407,7 @@ func TestAKeptPaneBindingSuppressesASecondSpawnOnTheNextTick(t *testing.T) {
 			t.Fatalf("tick %d: %v", i+2, err)
 		}
 	}
-	if got := calls(t, f, "pane split"); len(got) != 1 {
+	if got := calls(t, f, "tab create"); len(got) != 1 {
 		t.Fatalf("one task got %d spawn attempts across ticks", len(got))
 	}
 	if len(l.bindings) != 1 || l.bindings[0].Pane != "wM:p9" {
@@ -432,10 +435,10 @@ func TestAKeptPaneWhoseGoalRegisteredLateContinuesNormally(t *testing.T) {
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("second tick: %v", err)
 	}
-	for _, verb := range []string{"pane close", "agent prompt", "pane split"} {
-		if got := calls(t, f, verb); verb == "pane split" && len(got) != 1 {
-			t.Fatalf("split %d panes for one task", len(got))
-		} else if verb != "pane split" && len(got) != 0 {
+	for _, verb := range []string{"tab close", "agent prompt", "tab create"} {
+		if got := calls(t, f, verb); verb == "tab create" && len(got) != 1 {
+			t.Fatalf("created %d tabs for one task", len(got))
+		} else if verb != "tab create" && len(got) != 0 {
 			t.Fatalf("a late goal triggered %q: %v", verb, got)
 		}
 	}
@@ -464,7 +467,7 @@ func TestAKeptPaneStillGoallessPastTheLargerCeilingIsGivenUp(t *testing.T) {
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("first tick: %v", err)
 	}
-	if got := calls(t, f, "pane close"); len(got) != 0 {
+	if got := calls(t, f, "tab close"); len(got) != 0 {
 		t.Fatalf("the pane was retired on the tick the confirm ran out: %v", got)
 	}
 	if len(l.bindings) != 1 {
@@ -483,8 +486,8 @@ func TestAKeptPaneStillGoallessPastTheLargerCeilingIsGivenUp(t *testing.T) {
 	if got := calls(t, f, "agent prompt"); len(got) != 1 {
 		t.Fatalf("nudged %d times before giving up: %v", len(got), got)
 	}
-	if got := calls(t, f, "pane close"); len(got) != 1 {
-		t.Fatalf("a pane that never got a goal was closed %d times", len(got))
+	if got := calls(t, f, "tab close"); len(got) != 1 {
+		t.Fatalf("a tab whose worker never got a goal was closed %d times", len(got))
 	}
 	if len(l.bindings) != 0 {
 		t.Fatalf("the binding outlived the give-up: %+v", l.bindings)
@@ -542,8 +545,8 @@ func TestGivingUpOnACodexWorkerRemovesItsSettingsFile(t *testing.T) {
 			t.Fatalf("tick at %s: %v", at, err)
 		}
 	}
-	if got := calls(t, f, "pane close"); len(got) != 1 {
-		t.Fatalf("the pane was closed %d times", len(got))
+	if got := calls(t, f, "tab close"); len(got) != 1 {
+		t.Fatalf("the tab was closed %d times", len(got))
 	}
 	if got := settingsFiles(t, dir); len(got) != 0 {
 		t.Fatalf("the settings file outlived the give-up: %v", got)
@@ -628,7 +631,7 @@ func TestAWorkerIsSpawnedInItsOwnWorktreeNeverTheProjectDirectory(t *testing.T) 
 
 	split := splits(t, f)
 	if len(split) != 1 {
-		t.Fatalf("pane split ran %d times: %v", len(split), split)
+		t.Fatalf("tab create ran %d times: %v", len(split), split)
 	}
 	cwd := cwdOf(t, split[0])
 	if cwd == "/src/p" {
@@ -659,7 +662,7 @@ func TestAWorkerIsNotSpawnedAtAllWhenItCanBeGivenNoWorktree(t *testing.T) {
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("tick: %v", err)
 	}
-	if got := calls(t, f, "pane split"); len(got) != 0 {
+	if got := calls(t, f, "tab create"); len(got) != 0 {
 		t.Fatalf("a worker came up with nowhere of its own to work: %v", got)
 	}
 	if len(l.bindings) != 0 {

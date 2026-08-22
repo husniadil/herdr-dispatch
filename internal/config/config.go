@@ -56,6 +56,84 @@ type Verify struct {
 	Profile string `json:"profile"`
 }
 
+// MeasuredReadableColumns is the narrowest pane whose detection text this
+// repo's own matches still read correctly, measured rather than guessed.
+//
+// It matters because reading a worker is how the dispatcher knows anything
+// about it. Every judgement in the spawn pipeline goes through `herdr pane
+// read --source detection` and a substring match — the startup dialog in
+// TrustDialogMarkers, the registered goal in GoalMarkers — and a pane narrow
+// enough word-wraps the phrase those matches look for, so the match fails
+// while the worker is perfectly fine. That is a daemon believing the wrong
+// thing about a worker it is driving, which is why this is a correctness
+// number and not a taste one.
+//
+// Measured on 2026-08-23 against herdr 0.8.2 and claude 2.1.239, in a
+// throwaway workspace: nine panes of measured width (21, 23, 25, 27, 29, 31,
+// 38, 43 and 52 columns, each read back with `stty size`), a real Claude
+// worker brought up in every one, and each given the real PointerGoal
+// condition. What it showed:
+//
+//   - At 21 columns only "goal set:" survived; "/goal active" was truncated
+//     by the status line, so one of the two markers was already unreadable.
+//   - At 23 columns and above both GoalMarkers read whole, every time.
+//   - Claude renders its dialog and status body at the pane's columns minus
+//     three, word-wrapped: in the 52-column pane the longest body line was
+//     49 characters.
+//
+// The cap follows from that last rule and the LONGEST phrase the detector
+// matches, which is the 37-character trust-dialog marker: it needs 37 + 3 =
+// 40 columns to land on one line, and one that wraps is one that never
+// matches. So 40, the widest requirement of any marker in use, and not the
+// 23 the goal markers alone would have allowed.
+//
+// Two things this measurement is NOT. It is not a claim that the trust
+// marker currently matches anything — it does not, at any width, because
+// claude 2.1.239 rewrote that dialog; that is a separate defect and this
+// number is what the marker WOULD need once it is fixed. And it is not the
+// reason a narrow pane loses a typed line: at 25, 27 and 29 columns the
+// condition arrived whole and only the Enter was lost, which an explicit
+// send-keys then delivered.
+const MeasuredReadableColumns = 40
+
+// MeasuredWindowColumns is how wide one whole tab was in the same session:
+// the root pane of a fresh tab reported 226 columns to `stty size`, and the
+// six panes split across it summed to the same.
+const MeasuredWindowColumns = 226
+
+// DefaultMaxPanesPerTab is how many workers may share one of this
+// dispatcher's tabs, and it follows from the two numbers above rather than
+// from taste.
+//
+// Splits alternate right and down and always divide the LAST pane, so a
+// pane's width halves only every SECOND split. Starting from
+// MeasuredWindowColumns the widths run 226, 113, 113, 56, 56, and then 28.
+// Five panes all clear MeasuredReadableColumns; the sixth does not, and a
+// pane that narrow is one whose detection text this dispatcher can no longer
+// read. So five, and the next worker opens a tab of its own.
+const DefaultMaxPanesPerTab = 5
+
+// Layout is where a worker is placed. There is one placement — a tab of its
+// own — and this is the number that says why.
+type Layout struct {
+	// MinPaneColumns is the width a worker's pane must be readable at.
+	// Zero means MeasuredReadableColumns; it may be raised and never
+	// lowered past what was measured, because below it the dispatcher
+	// cannot trust its own reading of the pane.
+	//
+	// Nothing splits a worker into an existing tab, and this is the whole
+	// reason: Herdr reports no column count for a pane, so the width a
+	// worker will be read at cannot be checked after the fact. It can only
+	// be GUARANTEED beforehand, by giving the worker a tab nothing else is
+	// in.
+	MinPaneColumns int `json:"min_pane_columns"`
+	// MaxPanesPerTab is how many workers may share one of this dispatcher's
+	// tabs before the next opens a tab of its own. Zero means
+	// DefaultMaxPanesPerTab, which is what MinPaneColumns and the measured
+	// window width work out to.
+	MaxPanesPerTab int `json:"max_panes_per_tab"`
+}
+
 // Config is the whole document: named profiles, the one every project gets
 // unless it says otherwise, and the projects that say otherwise.
 type Config struct {
@@ -67,6 +145,9 @@ type Config struct {
 	Proxy string `json:"proxy"`
 	// Verify is the verification lane: off unless the document turns it on.
 	Verify Verify `json:"verify"`
+	// Layout is where a worker is placed and the width it must be readable
+	// at.
+	Layout Layout `json:"layout"`
 	// Pane is the pane worker panes are split off, for a daemon that was
 	// not started inside one and was given no -pane. Without it, and
 	// without either of those, nothing can be spawned at all.
@@ -119,6 +200,19 @@ func Parse(b []byte) (Config, error) {
 		if _, ok := c.Profiles[c.Verify.Profile]; !ok {
 			return Config{}, fmt.Errorf("hdis config: the verification lane names profile %q, which is not defined", c.Verify.Profile)
 		}
+	}
+	if c.Layout.MinPaneColumns == 0 {
+		c.Layout.MinPaneColumns = MeasuredReadableColumns
+	}
+	if c.Layout.MinPaneColumns < MeasuredReadableColumns {
+		return Config{}, fmt.Errorf("hdis config: layout.min_pane_columns is %d, and %d is the narrowest pane the detection text was measured to read correctly at; below it the dispatcher cannot trust what it reads off a worker",
+			c.Layout.MinPaneColumns, MeasuredReadableColumns)
+	}
+	if c.Layout.MaxPanesPerTab == 0 {
+		c.Layout.MaxPanesPerTab = DefaultMaxPanesPerTab
+	}
+	if c.Layout.MaxPanesPerTab < 1 {
+		return Config{}, fmt.Errorf("hdis config: layout.max_panes_per_tab is %d, and a tab that may hold no worker at all can never be spawned into", c.Layout.MaxPanesPerTab)
 	}
 	for project, name := range c.Projects {
 		if _, ok := c.Profiles[name]; !ok {

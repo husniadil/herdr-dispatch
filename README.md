@@ -217,9 +217,10 @@ ledger.
 1. For a `codex` profile, `proxenos settings` first. A daemon that is
    down fails here, in the daemon's own words, rather than thirty seconds
    later as a startup timeout with the cause hidden in a pane.
-2. `herdr pane split` off the dispatcher's pane, in the task's own project,
-   with `--env HDIS_DISPATCHER_PANE=<the report address>` and `--env
-   FORCE_PROMPT_CACHING_5M=1` — see
+2. `herdr tab create` in the filer's workspace, in the task's own checkout,
+   with `--label "hdis task <n>"`, `--env HDIS_DISPATCHER_PANE=<the report
+   address>` and `--env FORCE_PROMPT_CACHING_5M=1` — see
+   [Where a worker comes up](#where-a-worker-comes-up),
    [The dispatcher's address](#the-dispatchers-address) and
    [The worker's prompt cache](#the-workers-prompt-cache).
 3. For a `codex` profile, the routing arrives in two halves. The settings
@@ -257,9 +258,110 @@ ledger.
    refused leaves the worker idle, so the command succeeds. A spawn that
    cannot confirm the goal retires its own half-built pane.
 
+## Where a worker comes up
+
+**A worker never shares a human's tab.** It comes up in a tab this daemon
+created with `herdr tab create`, and the operator's own tab is never split to
+make room for it.
+
+That is a correctness rule and not a tidiness one. Everything this daemon
+knows about a worker it reads off the worker's SCREEN — `herdr pane read
+--source detection`, matched against the phrases a startup dialog and a
+registered goal leave behind. Every pane added to a tab narrows every other
+pane in it, and a pane narrow enough word-wraps the very phrase the match is
+looking for, so the match fails while the worker is perfectly fine. That is
+the daemon believing the wrong thing about a worker it is driving.
+
+**The workspace is the filer's.** The tab is created in the workspace of the
+pane the task was FILED from when the board names one AND that pane is still
+alive, and in the daemon's own workspace otherwise. This daemon serves every
+board on the machine, so the operator who started it is routinely not the
+operator who filed the task, and a worker belongs on the screen of whoever
+wanted it. Liveness is checked at the moment of the spawn: an address can fall
+back lazily because it is only read on demand, a placement cannot. A pane of
+origin the operator has since closed falls back rather than failing the spawn
+— a task filed from a window that is gone is an ordinary task.
+
+**Inside one of this daemon's own tabs, workers share.** Splits alternate
+right and down with an explicit `--ratio`, so the tab fills as a grid rather
+than a row of slivers, and the split is taken off the LAST pane in the tab.
+A tab already holding `layout.max_panes_per_tab` workers takes no more: the
+next worker opens another tab, in the same workspace.
+
+**The cap is measured, not guessed.** See
+[The readable width](#the-readable-width).
+
+**A tab this daemon creates is a thing it owns and must give back.** It is
+closed when its LAST worker leaves, its id is written on the binding so a
+restart can still give it back, and a tab the operator made is NEVER closed
+here — the label is the guard, exactly the way the worktree reap is bounded by
+its own root and prefix. A worker the operator has dragged into a tab of their
+own is retired as a pane, and their tab stays.
+
+The label is written for two readers at once. `hdis task 41` on a tab is
+something a person can pick out of a row of tabs, which is the one thing a tab
+has that a pane does not, and `hdis status` prints it beside the pane. It is
+also what tells this daemon the tab is its own.
+
+## The readable width
+
+`layout.min_pane_columns` is the narrowest pane whose detection text this
+repo's own matches still read correctly, and `layout.max_panes_per_tab` is
+what that width works out to as a count. Both were MEASURED rather than
+guessed, and the measurement is recorded beside them in
+`internal/config/config.go`.
+
+Measured on 2026-08-23 against herdr 0.8.2 and claude 2.1.239, in a throwaway
+workspace that was torn down afterwards: nine panes of measured width — 21,
+23, 25, 27, 29, 31, 38, 43 and 52 columns, each read back with `stty size` —
+a real Claude worker brought up in every one, and each given the real
+`PointerGoal` condition.
+
+- At **21 columns** only `goal set:` survived. `/goal active` was truncated by
+  the status line, so one of the two markers was already unreadable.
+- At **23 columns and above** both goal markers read whole, every time.
+- Claude renders its dialog and status body at the pane's columns **minus
+  three**, word-wrapped: in the 52-column pane the longest body line was 49
+  characters.
+
+The floor follows from that last rule and the LONGEST phrase the detector
+matches, which is the 37-character trust-dialog marker: it needs 37 + 3 = 40
+columns to land on one line, and a phrase that wraps is a phrase that never
+matches. So **40 columns**, the widest requirement of any marker in use, and
+not the 23 the goal markers alone would have allowed.
+
+A whole tab measured 226 columns. Because splits alternate, a pane's width
+halves only every SECOND split, so the widths run 226, 113, 113, 56, 56 and
+then 28. Five panes clear the floor and the sixth does not, which is where
+**5** comes from. `min_pane_columns` may be raised and never lowered below
+what was measured.
+
+One thing the measurement is NOT: it is not a claim that the trust marker
+currently matches anything. It does not, at any width — see
+[Known defect: the trust-dialog wording](#known-defect-the-trust-dialog-wording).
+
+## Known defect: the trust-dialog wording
+
+`TrustDialogMarkers` is `"do you trust the files in this folder"`, and claude
+2.1.239 no longer renders that phrase. Its dialog now reads:
+
+```
+Quick safety check: Is this a project you created or one you trust? …
+❯ 1. Yes, I trust this folder
+```
+
+Measured at all five widths above: the marker matched at NONE of them. So
+`answerStartupDialog` never recognises the dialog and never presses Enter; the
+spawn survives only because the confirm step's ceiling outlasts it or the
+dialog does not appear at all.
+
+This is a real defect and it is **not** fixed here — it is a detector-wording
+bug, not a placement one, and it is filed separately. The 40-column floor
+above is what that marker WOULD need once the wording is corrected.
+
 ## The dispatcher's address
 
-Every pane this daemon splits — worker and verifier alike — is launched with
+Every pane this daemon opens — worker and verifier alike — is launched with
 
 ```
 HDIS_DISPATCHER_PANE=<the report address>
@@ -277,9 +379,8 @@ takes ready tasks off every project's board, so the operator who started it is
 routinely not the operator who filed the task. The verification lane follows
 the same rule. A task an operator filed at a terminal legitimately has no pane
 of origin — nothing with a pane created it — and for those the daemon's own
-pane is the only address there is. What does NOT move is the pane a worker is
-split off: that stays the base pane in both branches, because this daemon has
-only its own pane to split from.
+pane is the only address there is. The PLACEMENT now follows the same rule, which it did not before: see
+[Where a worker comes up](#where-a-worker-comes-up).
 
 It is an address and nothing more. It says where to answer — normally the pane
 the task was filed from, and the daemon's own pane only when nothing with a
@@ -292,7 +393,7 @@ that way.
 
 ## The worker's prompt cache
 
-Every pane this daemon splits is also launched with
+Every pane this daemon opens is also launched with
 
 ```
 FORCE_PROMPT_CACHING_5M=1
@@ -306,7 +407,7 @@ the short one for the same reason. The client reads this variable before
 every other rule, so a worker pane settles the question on the way up.
 
 It reaches worker panes and nothing else. The operator's own session keeps
-the 1-hour TTL, which is why the variable is set on the split rather than in
+the 1-hour TTL, which is why the variable is set on the tab rather than in
 the launcher's environment, where the operator's sessions would read it too.
 On the `codex` path it is inert: a relayed `cache_control` has no equivalent
 upstream there and is not forwarded, so it changes only what a worker talking
@@ -353,8 +454,29 @@ that question, not a case added to a list.
 The two facts are read now, and neither is guessed at. Herdr says which panes
 are alive and which agent name each one registered under, and this daemon's
 names — `hdis-<task>` for a worker, `hdis-v-<task>` for a verifier — carry the
-task number, so the name is what says a live pane is its own and which row to
-read. A number is unique only inside a project, so it is not a task's address
+task number, so the name says a live pane is its own and which row to read.
+
+**The name is a label and never the only ownership test**, because Herdr does
+not keep it. Measured on wM:p4E, 2026-08-23: at 00:39 `herdr agent get`
+answered `"name":"hdis-20"`, and at 00:57 the same pane, the same pid and the
+same `agent_session` answered with no name field at all. A pane in that state
+used to stop being this daemon's — nothing logged it, nothing adopted it,
+nothing retired it, and it sat live with its task already finished.
+
+The durable signal is the CHECKOUT. Every agent this dispatcher brings up is
+given a directory of its own under `<state_dir>/worktrees`, named
+`hdis-work-<task>-…` or `hdis-verify-<task>-…`. Nothing else on the machine
+writes there, so a pane whose cwd is one of those is a pane this daemon
+opened, and the directory's own name says which task and which lane. It is
+Herdr's word about the pane's CWD and never Herdr's word about an agent, which
+is the field that was measured going missing. It is the exact mirror of the
+reap, which already removes a checkout under that root that no binding names.
+
+The tab label deliberately does NOT serve as identity. A tab holds several
+workers and its label names only the task it was opened for, so reading a
+pane's task off its tab would give every worker in that tab the first one's
+number. The label is the close guard and the operator's signpost; the checkout
+is the identity. A number is unique only inside a project, so it is not a task's address
 on its own: the project comes from the checkout the pane is working in, which
 git names by way of the repository a worktree was cut from. A worker in its
 worktree, a verifier in its detached one, and a pane opened before either
@@ -364,9 +486,9 @@ board-agnostic and keeps `--all-projects`, because an ID belongs to no
 project; the board refuses a bare number across projects by design, and
 nothing here asks it to stop. The persisted bindings are a hint on top of that, never the frame: they
 carry what Herdr cannot — when the goal was delivered, how often, whether
-review was announced, which checkout a pane was given and which branch a
-worker's commits are on — and they cover the
-seconds after a `pane split` in which the agent has not registered yet.
+review was announced, which checkout a pane was given, which TAB it was placed
+in and which branch a worker's commits are on — and they cover the
+seconds after a `tab create` in which the agent has not registered yet.
 
 The answers, all of them consequences of the one question:
 
@@ -425,7 +547,7 @@ start.
 
 **The window that is left.** A pane becomes this daemon's own to Herdr when
 the agent in it registers, and the binding is written after the spawn returns.
-A crash in between the `pane split` and the registration loses both: the pane
+A crash in between the `tab create` and the registration loses both: the pane
 is alive, nothing names it, and the task is dispatched again into a fresh one
 with the old pane left behind. Closing that window would mean writing a
 binding before the pane exists to bind to, which trades a rare orphan for
