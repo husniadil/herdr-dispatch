@@ -49,6 +49,33 @@ it leaves the daemon running. Stopping writes nothing to the board.
 The manifest's version is the version `hdis version` prints, and a named test
 fails the gate when the two drift apart.
 
+Then link the agent skill, which the install does not place for you:
+
+```sh
+root=$(herdr plugin list --plugin herdr-dispatch --json | jq -r '.result.plugins[0].plugin_root')
+ln -s "$root/skills/dispatch" ~/.claude/skills/dispatch
+```
+
+Herdr keeps an installed plugin under `~/.config/herdr/plugins/github/`, in a
+directory named for the plugin id and a hash of where it came from — ask for
+`plugin_root` rather than writing that path out, because the hash is not
+something you can predict.
+
+To develop against a checkout:
+
+```sh
+make build && make test-full
+herdr plugin link .
+ln -s "$PWD/skills/dispatch" ~/.claude/skills/dispatch
+```
+
+The symlink is what puts the skill in front of an agent — nothing in the Herdr
+manifest installs it, because the skill is read by the harness and not by
+Herdr. Link it rather than copy it: the checkout stays the single source, and a
+copy is a second version of the truth from the next commit onwards. The MCP
+door carries the same facts in its instructions, but only for a client that
+has the door wired in; the skill is what a harness without it ever reads.
+
 This plugin satisfies **version 0.6.0** of the Herdr plugin contract.
 `hdis doctor` says so in both its shapes, as its own top-level `contract`
 field, distinct from the `board.contract` it relays from `htask`.
@@ -241,7 +268,7 @@ HDIS_DISPATCHER_PANE=<the report address>
 in its environment, and both conditions tell the agent to answer there rather
 than at a pane id written into their text. An agent that comes up in one of
 these panes may read the variable to find out where to report; the text stays
-valid whatever pane the daemon is running on this time.
+valid whatever pane that turns out to be.
 
 The address is the pane the task was CREATED FROM when the board's row names
 one, and the daemon's own base pane only when it does not. A report belongs to
@@ -255,9 +282,11 @@ there is. What does NOT move is the pane a worker is split off: that stays the
 base pane in both branches, because this daemon has only its own pane to split
 from.
 
-It is an address and nothing more. It says where the dispatcher is, never who
-the reader is: the sender stamped on any message the agent then writes comes
-from the mail daemon's own reading of `HERDR_PANE_ID`, which is Herdr's word
+It is an address and nothing more. It says where to answer — normally the pane
+the task was filed from, and the daemon's own pane only when nothing with a
+pane filed it — never who the reader is: the sender stamped on any message the
+agent then writes comes from the mail daemon's own reading of `HERDR_PANE_ID`,
+which is Herdr's word
 about the pane it runs in, and never from this variable. Publishing the
 address is the whole of hdis's part — nothing in this binary imports, reads or
 runs herdr-mail, and a named test walks the source to keep it that way.
