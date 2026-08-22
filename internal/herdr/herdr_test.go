@@ -240,3 +240,28 @@ func TestPaneReadCarriesTheHerdrErrorCode(t *testing.T) {
 		t.Fatalf("want a pane_not_found refusal, got %v", err)
 	}
 }
+
+// Every agent herdr has registered, with the name it registered under. This
+// is how a restart enumerates the panes this daemon opened: the name carries
+// the task number, and nothing else in Herdr does.
+func TestAgentsListEveryRegisteredWorkerWithItsName(t *testing.T) {
+	c, f := client(t)
+	f.Bin(t, "herdr", `echo '{"id":"x","result":{"type":"agent_list","agents":[
+{"name":"hdis-7","pane_id":"wM:p9","agent":"claude","agent_status":"working"},
+{"pane_id":"wM:p1","agent":"claude","agent_status":"idle"}]}}'`)
+
+	agents, err := c.Agents(context.Background())
+	if err != nil {
+		t.Fatalf("agents: %v", err)
+	}
+	want := []Agent{
+		{Name: "hdis-7", PaneID: "wM:p9", Agent: "claude", Status: "working"},
+		{PaneID: "wM:p1", Agent: "claude", Status: "idle"},
+	}
+	if !reflect.DeepEqual(agents, want) {
+		t.Fatalf("got %v, want %v", agents, want)
+	}
+	if got, want := f.Calls(t)[0], "agent list"; got != want {
+		t.Fatalf("argv: got %q, want %q", got, want)
+	}
+}

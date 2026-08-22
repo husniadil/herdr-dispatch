@@ -50,7 +50,7 @@ func TestARestartAdoptsAStaleReservationWhoseWorkerIsAlive(t *testing.T) {
 	l.Board = &htask.Client{Principal: htask.PrincipalFor(l.BasePane)}
 	heldByUs(t, f, htask.PrincipalFor("wM:p1"))
 	f.Write(t, "panes.json", panesWith("working"))
-	f.Write(t, "agentget.json", `{"id":"x","result":{"type":"agent_info","agent":{"name":"hdis-7","pane_id":"wM:p9","agent_status":"working","interactive_ready":true}}}`)
+	agentsAre(t, f, `{"name":"hdis-7","pane_id":"wM:p9","agent":"claude","agent_status":"working"}`)
 	// Nothing is ready any more: the board is holding the task for us.
 	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
 

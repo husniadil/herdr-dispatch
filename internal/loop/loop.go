@@ -14,6 +14,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -84,14 +85,21 @@ func (l *Loop) Tick(ctx context.Context) error {
 	return nil
 }
 
-// Adopt reads the persisted bindings and takes back the ones reality still
-// agrees with. It is run once, before the first tick.
+// Adopt reconciles the dispatcher with reality, once, before the first tick.
 //
-// Verification is against the two systems that own the facts: the pane must
-// still be one Herdr lists, and the task must still be one this pane is
-// driving. A binding that fails either is dropped with a line in the log and
-// nothing is done to its pane — retiring a worker on the strength of a
-// binding a restart could not verify is the split this is here to prevent.
+// It reasons from two facts read now: every live pane this daemon opened,
+// and the board row each of those panes is working. Of each pane it asks one
+// question — what is this, and what still needs doing — and the answer is
+// the whole of the restart policy. A pane whose row is still live is
+// adopted, whether or not a binding survived to name it; a pane whose row is
+// finished, gone, or no longer its own is retired or let go. The shapes of
+// restart debris are consequences of that question, not cases to enumerate.
+//
+// The persisted bindings are a hint and never the frame. What they carry
+// that Herdr cannot — how often a goal was delivered and when, whether
+// review was announced, which checkout a verifier was given — is kept on the
+// pane it names; a binding whose pane is gone is dropped, because the pane
+// was the thing it was about.
 //
 // Herdr being unreachable is different from a pane being gone, and adopting
 // on that guess would hand a live worker's task to a second pane. Nothing is
@@ -114,52 +122,21 @@ func (l *Loop) Adopt(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("herdr cannot say which panes are alive, so %d persisted binding(s) stay unadopted: %w", len(held.Bindings), err)
 	}
+	agents, err := l.Herdr.Agents(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("herdr cannot say which agents it has registered, so %d persisted binding(s) stay unadopted: %w", len(held.Bindings), err)
+	}
 
 	kept := make([]decide.Binding, 0, len(held.Bindings))
 	rows := make(map[string]htask.Task, len(held.Bindings))
-	for _, b := range held.Bindings {
-		if _, alive := panes[b.Pane]; !alive {
-			l.logf("task %s: pane %s is gone, dropping the binding a restart found", b.TaskID, b.Pane)
+	for _, p := range l.ourPanes(panes, agents, held.Bindings) {
+		b, row, ok := l.reconcile(ctx, p)
+		if !ok {
 			continue
 		}
-		row, err := l.Board.Get(ctx, b.TaskID)
-		if err != nil {
-			var refusal *htask.Refusal
-			if errors.As(err, &refusal) && refusal.Code == string(codes.NotFound) {
-				l.logf("task %s: the board has no such task, dropping the binding a restart found", b.TaskID)
-				continue
-			}
-			// The board could not answer, which is not an answer that the
-			// task moved on. Hold it, exactly as a tick holds it.
-			l.logf("task %s: cannot be read, holding the binding a restart found: %v", b.TaskID, err)
-			kept = append(kept, b)
-			continue
+		if row.ID != "" {
+			rows[row.ID] = row
 		}
-		if decide.Terminal(row.Status) {
-			l.logf("task %s is %s, dropping the binding a restart found on pane %s and retiring the pane with it", b.TaskID, row.Status, b.Pane)
-			l.retirePane(ctx, b.Pane)
-			continue
-		}
-		if b.IsVerifier() {
-			// A verifier holds no claim, so the claim is not what says its
-			// binding is still real. What it was brought up to read is: the
-			// submission it was checking has to still be in review.
-			if row.Status != "review" {
-				// And the pane goes with it. A verifier with nothing left to
-				// read is retired on a live daemon the moment the submission
-				// settles; a restart owes the same. Leaving it open is worse
-				// here than for a worker: the drop unnames its checkout, and
-				// the reap below would then remove the tree out from under a
-				// process still running in it.
-				l.logf("task %s is %s, dropping the verifier binding a restart found on pane %s and retiring the pane with it", b.TaskID, row.Status, b.Pane)
-				l.retirePane(ctx, b.Pane)
-				continue
-			}
-		} else if claimed := row.Pane(); claimed != "" && claimed != b.Pane {
-			l.logf("task %s is held by %s, not by pane %s; dropping the binding a restart found", b.TaskID, claimed, b.Pane)
-			continue
-		}
-		rows[row.ID] = row
 		kept = append(kept, b)
 	}
 
@@ -186,13 +163,163 @@ func (l *Loop) Adopt(ctx context.Context) (int, error) {
 			len(kept), len(held.Bindings), len(mine), len(held.Reservations), l.Store.Path)
 	}
 
-	// The bindings were only ever half the restart window. The other half is
-	// what the bindings owned and no longer name: a task the board is still
-	// holding for this daemon, and a checkout under this daemon's own state
-	// dir. Both are resolved here, on facts read now.
-	l.reclaim(ctx, panes)
+	// The panes were only ever half the restart window. The other half is
+	// what this daemon holds on the board and no pane is working: a task
+	// reserved and never spawned for, and a checkout under this daemon's own
+	// state dir. Both are resolved here, on facts read now.
+	l.release(ctx)
 	l.reap(ctx)
 	return len(kept), nil
+}
+
+// ourPane is one live pane this daemon opened, and what is known about it:
+// the lane it was opened for, the board row it is working, and the binding
+// that survived to name it, if one did.
+type ourPane struct {
+	pane string
+	kind string
+	// ref is how the board is asked about it: a task id when a binding
+	// carries one, otherwise the task number the agent registered under.
+	ref     string
+	binding *decide.Binding
+}
+
+// ourPanes is every live pane this daemon opened, in a stable order.
+//
+// A pane is this daemon's on either of two evidences, and it needs only one.
+// Herdr knows the name the agent registered under, and this daemon's names
+// carry the task number — that is what finds a worker no binding was ever
+// written for. The bindings cover the other window: a pane split seconds ago,
+// whose agent has not registered yet and which `agent list` does not mention.
+//
+// A binding whose pane is gone names nothing to reconcile, and is dropped
+// here with a word to the operator.
+func (l *Loop) ourPanes(panes map[string]string, agents []herdr.Agent, held []decide.Binding) []ourPane {
+	out := make([]ourPane, 0, len(agents))
+	at := make(map[string]int, len(agents))
+	for _, a := range agents {
+		kind, seq, ok := lane(a.Name)
+		if !ok || a.PaneID == "" {
+			continue
+		}
+		if _, alive := panes[a.PaneID]; !alive {
+			continue
+		}
+		at[a.PaneID] = len(out)
+		out = append(out, ourPane{pane: a.PaneID, kind: kind, ref: strconv.Itoa(seq)})
+	}
+	for i := range held {
+		b := held[i]
+		if _, alive := panes[b.Pane]; !alive {
+			l.logf("task %s: pane %s is gone, dropping the binding a restart found", b.TaskID, b.Pane)
+			continue
+		}
+		if j, seen := at[b.Pane]; seen {
+			out[j].binding = &b
+			out[j].ref = b.TaskID
+			out[j].kind = bindingKind(b)
+			continue
+		}
+		at[b.Pane] = len(out)
+		out = append(out, ourPane{pane: b.Pane, kind: bindingKind(b), ref: b.TaskID, binding: &b})
+	}
+	return out
+}
+
+// reconcile asks the one question of one live pane: what is it, and what
+// still needs doing. It returns the binding to keep, the row behind it, and
+// whether anything is kept at all.
+func (l *Loop) reconcile(ctx context.Context, p ourPane) (decide.Binding, htask.Task, bool) {
+	row, err := l.Board.Get(ctx, p.ref)
+	if err != nil {
+		var refusal *htask.Refusal
+		if errors.As(err, &refusal) && refusal.Code == string(codes.NotFound) {
+			l.logf("pane %s: the board has no task %s, so there is nothing for it to be doing; letting it go", p.pane, p.ref)
+			return decide.Binding{}, htask.Task{}, false
+		}
+		// The board could not answer, which is not an answer that the task
+		// moved on. A pane with a binding is held, exactly as a tick holds
+		// it; a pane with none cannot be bound to a row nobody can read, and
+		// is left alone rather than acted on.
+		if p.binding == nil {
+			l.logf("pane %s: task %s cannot be read, so it is left as it is: %v", p.pane, p.ref, err)
+			return decide.Binding{}, htask.Task{}, false
+		}
+		l.logf("task %s: cannot be read, holding the binding a restart found: %v", p.ref, err)
+		return *p.binding, htask.Task{}, true
+	}
+
+	switch {
+	case decide.Terminal(row.Status):
+		// A finished task takes its pane with it. Nothing else will ever
+		// close a pane this daemon opened for work that is over.
+		l.logf("task %s is %s, retiring the pane %s this daemon opened for it", row.ID, row.Status, p.pane)
+		l.retirePane(ctx, p.pane)
+		return decide.Binding{}, htask.Task{}, false
+	case p.kind == decide.KindVerifier:
+		// A verifier holds no claim, so a claim is not what says its pane is
+		// still real. What it was brought up to read is: the submission it
+		// was checking has to still be in review. The pane goes with it
+		// otherwise — a verifier with nothing left to read is retired on a
+		// live daemon the moment the submission settles, and leaving it open
+		// here would let the reap remove the tree out from under it.
+		if row.Status != "review" {
+			l.logf("task %s is %s, retiring the verifier pane %s with nothing left to read", row.ID, row.Status, p.pane)
+			l.retirePane(ctx, p.pane)
+			return decide.Binding{}, htask.Task{}, false
+		}
+	default:
+		if claimed := row.Pane(); claimed != "" && claimed != p.pane {
+			// Whose worker the task is now is the board's answer, not a
+			// restart's, and the pane is not this daemon's to close on the
+			// strength of it.
+			l.logf("task %s is held by %s, not by pane %s; letting the pane go unbound", row.ID, claimed, p.pane)
+			return decide.Binding{}, htask.Task{}, false
+		}
+	}
+
+	if p.binding != nil {
+		return *p.binding, row, true
+	}
+	// A live pane working a live row that no binding names. The goal reached
+	// it — the row it is on says so — so it counts as delivered once, from
+	// now: the claim timeout has nothing earlier to measure from.
+	l.logf("task %s: pane %s is working it and no binding named it; adopting the worker a restart lost", row.ID, p.pane)
+	return decide.Binding{
+		TaskID:     row.ID,
+		Pane:       p.pane,
+		Kind:       p.kind,
+		PromptedAt: l.now(),
+		Prompts:    1,
+	}, row, true
+}
+
+// bindingKind is the lane a binding names, with the empty kind of a binding
+// written before the verification lane existed reading as a worker.
+func bindingKind(b decide.Binding) string {
+	if b.IsVerifier() {
+		return decide.KindVerifier
+	}
+	return decide.KindWorker
+}
+
+// lane reads one of this daemon's own agent names: which lane the pane was
+// opened for and which task number it was opened on. A name this daemon does
+// not write is not this daemon's pane.
+func lane(name string) (string, int, bool) {
+	rest, ok := strings.CutPrefix(name, "hdis-")
+	if !ok {
+		return "", 0, false
+	}
+	kind := decide.KindWorker
+	if v, isVerifier := strings.CutPrefix(rest, "v-"); isVerifier {
+		kind, rest = decide.KindVerifier, v
+	}
+	seq, err := strconv.Atoi(rest)
+	if err != nil || seq <= 0 {
+		return "", 0, false
+	}
+	return kind, seq, true
 }
 
 // retirePane closes a pane a dropped binding named, through the same pipeline
@@ -218,26 +345,23 @@ func (l *Loop) principal() string {
 	return htask.PrincipalFor(l.BasePane)
 }
 
-// reclaim resolves every task the board says this dispatcher is holding that
-// no binding names. It is the reservation window seen from the board: a
-// daemon that went down between reserving a task and writing its binding
-// leaves a hold nothing alive owns.
+// release hands back every task the board says this dispatcher is holding
+// that no adopted pane is working. It is the reservation window seen from
+// the board: a daemon that went down between reserving a task and bringing a
+// pane up leaves a hold nothing alive owns.
 //
-// The hold is not guessed at. Herdr is asked whether a pane is working that
-// task, by the agent name a worker for it registers under, and the answer
-// decides: a live pane is adopted, and only a task with no pane behind it is
-// handed back. Either way the operator is told which it was.
-//
-// `--mine` is scoped to the principal, and the principal carries this
-// daemon's pane, so a peer daemon's hold is never in the answer to begin
-// with.
-func (l *Loop) reclaim(ctx context.Context, panes map[string]string) {
+// It runs after the panes are reconciled, and that order is the whole of its
+// safety: a task a live pane is working is already bound by then, so the
+// only holds left are ones with no worker behind them. `--mine` is scoped to
+// the principal, and the principal carries this daemon's pane, so a peer
+// daemon's hold is never in the answer to begin with.
+func (l *Loop) release(ctx context.Context) {
 	if l.Board == nil {
 		return
 	}
 	held, err := l.Board.Held(ctx)
 	if err != nil {
-		l.logf("the board cannot say what this dispatcher is holding, so nothing is reclaimed: %v", err)
+		l.logf("the board cannot say what this dispatcher is holding, so nothing is handed back: %v", err)
 		return
 	}
 
@@ -251,25 +375,6 @@ func (l *Loop) reclaim(ctx context.Context, panes map[string]string) {
 	for _, row := range held {
 		if bound[row.ID] || row.ClaimedBy != l.principal() {
 			continue
-		}
-		agent, err := l.Herdr.AgentGet(ctx, workerName(row.Seq))
-		if err == nil && agent.PaneID != "" {
-			if _, alive := panes[agent.PaneID]; alive {
-				l.logf("task %s: the board still holds it for this daemon and %s is working it in pane %s; adopting the worker a restart lost",
-					row.ID, workerName(row.Seq), agent.PaneID)
-				l.mu.Lock()
-				l.bindings = append(l.bindings, decide.Binding{
-					TaskID:     row.ID,
-					Pane:       agent.PaneID,
-					Kind:       decide.KindWorker,
-					PromptedAt: l.now(),
-					Prompts:    1,
-				})
-				l.rows[row.ID] = row
-				l.saveLocked()
-				l.mu.Unlock()
-				continue
-			}
 		}
 		l.logf("task %s: the board still holds it for this daemon and no pane is working it; handing it back", row.ID)
 		if err := l.Board.Release(ctx, row.ID, "the dispatcher that reserved this task went down before a worker came up"); err != nil {

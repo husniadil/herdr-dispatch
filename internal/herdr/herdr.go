@@ -169,6 +169,23 @@ func (c *Client) Panes(ctx context.Context) (map[string]string, error) {
 	return byPane, nil
 }
 
+// Agents lists every agent Herdr has registered, with the name it was
+// registered under. `pane list` says which panes are alive but not who is in
+// them; the name is the only place a worker's task number survives a
+// restart, so this is what says which live panes are this daemon's.
+//
+// An agent whose pane has already gone is still listed here until Herdr
+// notices, so the answer is only ever used against `pane list`.
+func (c *Client) Agents(ctx context.Context) ([]Agent, error) {
+	var res struct {
+		Agents []Agent `json:"agents"`
+	}
+	if err := c.result(ctx, &res, "agent", "list"); err != nil {
+		return nil, err
+	}
+	return res.Agents, nil
+}
+
 // AgentPrompt submits a prompt to a worker. It carries a nudge and never a
 // goal: a slash command long enough to be a goal cannot arrive this way.
 func (c *Client) AgentPrompt(ctx context.Context, target, text string) error {

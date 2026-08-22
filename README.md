@@ -281,72 +281,77 @@ second reader for a database to earn. A SQLite driver is a large dependency
 against this repo's standard-library budget, so the reason is recorded here
 instead.
 
-**What happens at start.** Every persisted binding is verified against reality
-before it is taken back, and nothing is done to a pane on the strength of one:
+**What happens at start.** The restart rule is one sentence: for every live
+pane this daemon opened, read the board row that pane is working, and ask what
+the pane is and what still needs doing. Everything below is a consequence of
+that question, not a case added to a list.
 
-- The pane must be one Herdr still lists. A binding whose pane is gone is
-  dropped with a line in the log.
-- The task must still be this pane's to drive. A task the board says is done
-  or cancelled, or one claimed by a different pane, is dropped with a line in
-  the log — the pane is left alone for the operator.
-- A task the board cannot answer for is held, not dropped: a board that is
-  down is not evidence that a task moved on.
+The two facts are read now, and neither is guessed at. Herdr says which panes
+are alive and which agent name each one registered under, and this daemon's
+names — `hdis-<task>` for a worker, `hdis-v-<task>` for a verifier — carry the
+task number, so the name is what says a live pane is its own and which row to
+read. The persisted bindings are a hint on top of that, never the frame: they
+carry what Herdr cannot — when the goal was delivered, how often, whether
+review was announced, which checkout a verifier was given — and they cover the
+seconds after a `pane split` in which the agent has not registered yet.
+
+The answers, all of them consequences of the one question:
+
+- The row is live and the pane is its own: the pane is adopted. A binding that
+  survived is taken back whole, and a pane with no binding — a worker that
+  already CLAIMED, so the board's holder is the worker's own pane and no hold
+  under this daemon's principal names it — is bound from what is read now.
+- The row is done or cancelled: the pane is retired. Nothing else will ever
+  close a pane this daemon opened for work that is over.
+- The pane is a verifier and the row has left review: the pane is retired.
+  A rejection is enough; the submission it was reading is what it was for. The
+  retire is also what keeps the worktree reap safe, since an unbound checkout
+  would otherwise be removed out from under a running verifier.
+- The row is claimed by a pane that is not this one: the pane is let go
+  unbound and left alone. Whose worker the task is now is the board's answer,
+  and not a restart's to act on.
+- The board has no such row, or cannot answer for it: a pane with a binding is
+  held, exactly as a tick holds it — a board that is down is not evidence that
+  a task moved on — and a pane with no binding is left as it is.
+- A binding whose pane Herdr no longer lists names nothing to reconcile, and
+  is dropped with a line in the log.
 - If **Herdr** cannot be reached at all, nothing is adopted, the failure is
   loud, and the store is left where it is for the next start. Adopting on that
   guess is how a live worker's task ends up in a second pane, which is the
   split this exists to prevent. Nothing is spawned while Herdr is down either,
   so the wait costs nothing.
 
-**What a restart adopts.** A worker whose pane Herdr still lists and whose
-task the board still says is its own, and a task the board is still holding
-for this daemon's principal that no binding names, when Herdr says a pane is
-working it — that is the reservation window seen from the board, and the pane
-is adopted rather than the work thrown away. Herdr is asked by the agent name
-a worker for that task registers under; the adoption is never a guess.
-
-**What a restart reaps.** A hold the board is keeping for this daemon that no
-pane is working: it is handed back with `task release` and a note saying the
+**What a restart hands back.** Once every pane is reconciled, a hold the board
+is still keeping for this daemon that no adopted pane is working is stale by
+construction: it is handed back with `task release` and a note saying the
 dispatcher went down before a worker came up, so the task returns to the ready
 list instead of sitting reserved forever. And a checkout under
-`<state_dir>/worktrees` that no binding names: a verifier's binding is the
-only record of where its checkout is, so a binding lost while the daemon was
-down leaves the directory with nothing to remove it. And the pane of a
-binding whose task the board has finished with: the drop is right, but the
-pane is one this daemon opened and the binding still names it at the moment
-of the drop, so it is retired there — the same move a live daemon makes when
-a task it is driving reaches a terminal state. Without it a restart that
-lands after an approval leaves the worker's pane open with nothing aware of
-it. A verifier's pane goes the same way when the submission it was reading
-has left review — a rejection is enough, the task need not be finished — and
-there the retire is what keeps the worktree reap safe: the drop unnames the
-checkout, so a verifier left running would have its tree removed out from
-under it. Every reap is logged with the reason.
+`<state_dir>/worktrees` that no binding names is removed: a verifier's binding
+is the only record of where its checkout is, so a binding lost while the
+daemon was down leaves the directory with nothing to remove it. Every one is
+logged with the reason.
 
-**What a restart will never touch.** Anything under a directory this daemon
-did not create. The worktree reap reads only `<state_dir>/worktrees` — the
-root hdis makes its own checkouts in — and inside it only entries named with
-the `hdis-verify-` prefix hdis names them with; a project directory, a
-worker's tree, and any other directory under that root are left exactly as
-they are. The pane retire is bounded the same way: only a pane one of this
-daemon's own persisted bindings names, so a pane it never opened is never
-closed, and a pane whose task is unfinished is adopted rather than retired.
-It also never touches a hold carrying another daemon's principal:
-`task list --mine` is scoped to the principal, so a peer's row is not even in
-the answer. Lease release stays htask's own — a single stale hold this daemon
-itself is named on is handed back, and the pane-gone sweep and the lease timer
-are never reimplemented here.
+**What a restart will never touch.** A pane this daemon did not open — one
+whose agent name is not its own and which none of its bindings names — is
+never adopted and never closed. A hold carrying another daemon's principal is
+never released: `task list --mine` is scoped to the principal, so a peer's row
+is not even in the answer, and a reservation record naming a peer is left for
+it. Anything outside `<state_dir>/worktrees` is never removed, and inside it
+only entries carrying the `hdis-verify-` prefix hdis names its own with.
+Lease release stays htask's own — a single stale hold this daemon itself is
+named on is handed back, and the pane-gone sweep and the lease timer are never
+reimplemented here.
 
 `hdis doctor` reports the file and how many bindings came back at the last
 start.
 
-**The window that is left.** A binding is written after the spawn returns a
-pane, so a crash between `pane split` and that write loses it: the pane is
-alive, the task is still ready, and nothing records the two together. The next
-start finds no binding for it, and the task is dispatched again into a fresh
-pane with the old one left behind — the same orphan the store removes
-everywhere else. Closing that window would mean writing a binding before the
-pane exists to bind to, which trades a rare orphan for routine bindings to
-panes that never came up.
+**The window that is left.** A pane becomes this daemon's own to Herdr when
+the agent in it registers, and the binding is written after the spawn returns.
+A crash in between the `pane split` and the registration loses both: the pane
+is alive, nothing names it, and the task is dispatched again into a fresh one
+with the old pane left behind. Closing that window would mean writing a
+binding before the pane exists to bind to, which trades a rare orphan for
+routine bindings to panes that never came up.
 
 Two smaller truths about a restart:
 

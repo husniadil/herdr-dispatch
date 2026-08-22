@@ -4,9 +4,16 @@ import (
 	"context"
 	"io"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/husniadil/herdr-dispatch/internal/decide"
+	"github.com/husniadil/herdr-dispatch/internal/fake"
+	"github.com/husniadil/herdr-dispatch/internal/htask"
+	"github.com/husniadil/herdr-dispatch/internal/worktree"
 )
 
 // restarted is the same dispatcher started again: a fresh Loop with nothing
@@ -318,6 +325,112 @@ func TestARestartRetiresNoPaneItDidNotStrand(t *testing.T) {
 		}
 		if got := calls(t, f, "pane close"); len(got) != 0 {
 			t.Fatalf("a restart closed a live worker's pane: %v", got)
+		}
+	})
+}
+
+// agentsAre makes herdr's `agent list` name the panes this daemon opened.
+func agentsAre(t *testing.T, f *fake.Fake, agents string) {
+	t.Helper()
+	f.Write(t, "agents.json", `{"id":"x","result":{"type":"agent_list","agents":[`+agents+`]}}`)
+}
+
+// The sixth shape. The daemon went down between delivering a goal and
+// writing the binding, and by the time it came back the worker had already
+// CLAIMED the task — so the board's holder is the worker's own pane and not
+// this dispatcher's, and nothing looking at holds under its own principal
+// sees the task at all. The pane is live, it is one this daemon opened, and
+// the row it is working says what it is: it is adopted.
+func TestARestartAdoptsALivePaneThatAlreadyClaimedItsTask(t *testing.T) {
+	l, f := newLoop(t)
+	agentsAre(t, f, `{"name":"hdis-7","pane_id":"wM:p9","agent":"claude","agent_status":"working"}`)
+	f.Write(t, "panes.json", panesWith("working"))
+	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"doing","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`)
+	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
+
+	// Nothing was ever written: the restart has no binding to walk.
+	next := restarted(t, l)
+	var said strings.Builder
+	next.Log = log.New(&said, "", 0)
+	n, err := next.Adopt(context.Background())
+	if err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("adopted %d, want the live worker taken back", n)
+	}
+	b := next.Bindings()
+	if len(b) != 1 || b[0].TaskID != "01AAA" || b[0].Pane != "wM:p9" || b[0].Kind != decide.KindWorker {
+		t.Fatalf("bindings: %+v", b)
+	}
+	if got := calls(t, f, "pane close"); len(got) != 0 {
+		t.Fatalf("a live worker's pane was closed: %v", got)
+	}
+	if got := calls(t, f, "task release"); len(got) != 0 {
+		t.Fatalf("a live worker's task was released: %v", got)
+	}
+	if !strings.Contains(said.String(), "wM:p9") {
+		t.Fatalf("the operator was not told which pane was taken back: %q", said.String())
+	}
+}
+
+// The three edges the reconciliation never crosses, whatever it finds.
+func TestARestartTouchesNothingThatIsNotItsOwn(t *testing.T) {
+	t.Run("a pane this daemon never opened", func(t *testing.T) {
+		l, f := newLoop(t)
+		agentsAre(t, f, `{"name":"someone-else","pane_id":"wM:pX","agent":"claude","agent_status":"working"}`)
+		f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[`+
+			`{"pane_id":"wM:pX","agent":"claude","agent_status":"working","focused":false,"revision":1}]}}`)
+		f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
+
+		if _, err := l.Adopt(context.Background()); err != nil {
+			t.Fatalf("adopt: %v", err)
+		}
+		if got := l.Bindings(); len(got) != 0 {
+			t.Fatalf("a pane this daemon never opened was adopted: %+v", got)
+		}
+		if got := calls(t, f, "pane close"); len(got) != 0 {
+			t.Fatalf("a pane this daemon never opened was closed: %v", got)
+		}
+	})
+
+	t.Run("a task held by someone else", func(t *testing.T) {
+		l, f := newLoop(t)
+		l.Board = &htask.Client{Principal: htask.PrincipalFor(l.BasePane)}
+		heldByUs(t, f, htask.PrincipalFor("wM:pZ"))
+		f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[]}}`)
+		f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
+
+		if _, err := l.Adopt(context.Background()); err != nil {
+			t.Fatalf("adopt: %v", err)
+		}
+		if got := calls(t, f, "task release"); len(got) != 0 {
+			t.Fatalf("a hold belonging to another daemon was released: %v", got)
+		}
+	})
+
+	t.Run("a directory outside its own state dir", func(t *testing.T) {
+		l, f := newLoop(t)
+		outside := t.TempDir()
+		root := t.TempDir()
+		l.Worktrees = &worktree.Manager{Root: root, Git: filepath.Join(f.Dir, "git")}
+		removingGit(t, f)
+		theirs := filepath.Join(outside, "hdis-verify-9-elsewhere")
+		stranded := filepath.Join(root, "hdis-verify-7-gone")
+		for _, d := range []string{theirs, stranded} {
+			if err := os.MkdirAll(d, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		if _, err := l.Adopt(context.Background()); err != nil {
+			t.Fatalf("adopt: %v", err)
+		}
+		if _, err := os.Stat(stranded); !os.IsNotExist(err) {
+			t.Fatalf("the reap did not run, so nothing below is proven: %v", err)
+		}
+		if _, err := os.Stat(theirs); err != nil {
+			t.Fatalf("a checkout outside this daemon's own root was removed: %v", err)
 		}
 	})
 }

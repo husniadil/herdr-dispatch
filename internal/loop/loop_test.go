@@ -44,6 +44,7 @@ const herdrScript = `case "$1 $2" in
   cat "$HDIS_FAKE_DIR/screen.txt" ;;
 "pane list") cat "$HDIS_FAKE_DIR/panes.json" ;;
 "agent get") cat "$HDIS_FAKE_DIR/agentget.json" ;;
+"agent list") cat "$HDIS_FAKE_DIR/agents.json" ;;
 "agent start") echo '{"id":"x","error":{"code":"timeout","message":"timed out waiting for agent startup"}}' >&2; exit 1 ;;
 *) echo '{"id":"x","result":{"type":"ok"}}' ;;
 esac`
@@ -59,6 +60,7 @@ func newLoop(t *testing.T) (*Loop, *fake.Fake) {
 	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"todo"},"ready":false,"dependents":[]}`)
 	f.Write(t, "goal.txt", "do the thing · Done when: it is done")
 	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[]}}`)
+	f.Write(t, "agents.json", `{"id":"x","result":{"type":"agent_list","agents":[]}}`)
 	f.Write(t, "screen.txt", "⎿  Goal set: do the thing\n  ◎ /goal active\n")
 	// Idle, so the screen is what confirms the goal rather than the status.
 	f.Write(t, "agentget.json", `{"id":"x","result":{"type":"agent_info","agent":{"pane_id":"wM:p9","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}}}`)
