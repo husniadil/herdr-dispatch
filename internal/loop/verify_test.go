@@ -310,3 +310,27 @@ func TestStatusNamesVerifiersApartFromWorkers(t *testing.T) {
 		t.Fatalf("status kinds: %+v", kinds)
 	}
 }
+
+// Worker and verifier alike: every pane this daemon splits is launched with
+// the dispatcher's own pane in its environment, so whatever comes up in it
+// knows where to answer.
+func TestEveryPaneSplitCarriesTheDispatcherAddress(t *testing.T) {
+	l, f := newVerifyLoop(t, true)
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	submitted(t, f)
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	splits := calls(t, f, "pane split")
+	if len(splits) != 2 {
+		t.Fatalf("split %d panes: %v", len(splits), splits)
+	}
+	want := "--env " + spawn.DispatcherPaneVar + "=" + l.BasePane
+	for i, got := range splits {
+		if !strings.Contains(got, want) {
+			t.Errorf("split %d does not carry %q: %q", i, want, got)
+		}
+	}
+}

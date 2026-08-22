@@ -44,6 +44,16 @@ const Kind = "claude"
 // GoalPrefix turns a condition into the slash command that arms it.
 const GoalPrefix = "/goal "
 
+// DispatcherPaneVar is the environment variable every pane this pipeline
+// splits carries: the pane of the daemon that spawned it, so a worker has an
+// address to answer at without one being typed into its condition.
+//
+// It is an address and nothing more. Publishing it lets a worker send to the
+// dispatcher; it never says who the worker is. The sender on anything the
+// worker then writes is stamped by the mail daemon from HERDR_PANE_ID, which
+// is Herdr's own word about the pane, and never from this variable.
+const DispatcherPaneVar = "HDIS_DISPATCHER_PANE"
+
 // SettingsFileMode is what a spawn's settings file is created with. The
 // document carries the proxy's auth token and the base URL of the daemon
 // that answers with the operator's own quota, and the file lands in a
@@ -73,7 +83,8 @@ const SettingsFileMode = 0o600
 func PointerGoal(seq int) string {
 	return fmt.Sprintf("task %d is submitted for review: claim it with htask task claim %d, "+
 		"read its full criteria with htask task get %d, do the work, then run "+
-		"htask task submit %d with a report and evidence.", seq, seq, seq, seq)
+		"htask task submit %d with a report and evidence. "+
+		"Reach the dispatcher at $"+DispatcherPaneVar+".", seq, seq, seq, seq)
 }
 
 // VerifierGoal composes the /goal condition a VERIFIER boots with. It is a
@@ -92,13 +103,13 @@ func PointerGoal(seq int) string {
 // hand back, so the board note is the one that fits.
 //
 // Rendered with a codex settings path and a profile of --agent claude --model
-// sonnet --effort high, the whole typed line is 477 of the 512 budgeted for a
+// sonnet --effort high, the whole typed line is 493 of the 512 budgeted for a
 // two-digit task; TestTheVerifierLineFitsTheTypedBudget holds it there.
 func VerifierGoal(seq int) string {
 	return fmt.Sprintf("verify task %d: read its report: htask task get %d, run "+
 		"go clean -testcache then the gate CLAUDE.md names, check two claims against the "+
 		"code, make one COMPILING mutation, show it caught, send findings with "+
-		"hmail send human, else htask note add for task %d. "+
+		"hmail send $"+DispatcherPaneVar+", else htask note add for task %d. "+
 		"Never run task approve or task reject: you report, the operator judges.", seq, seq, seq)
 }
 
@@ -109,9 +120,9 @@ func VerifierGoal(seq int) string {
 // with a codex profile of --agent claude --model haiku --effort low and the
 // pointer condition for a two-digit task:
 //
-//	the 185-character pointer condition, and the settings document
+//	the 232-character pointer condition, and the settings document
 //	written to a file under this machine's TMPDIR (a 48-character
-//	directory), render a whole line of 332 characters.
+//	directory), render a whole line of 377 characters.
 //
 // The budget sits at 512: room for a longer temp path, another profile flag
 // and a five-digit task number, and still less than a quarter of the ~1.4k
@@ -271,7 +282,11 @@ func (p *Pipeline) Run(ctx context.Context, req Request) (string, error) {
 	// parser, and shortening the typed line is the settings document's job.
 	agentArgs = append(agentArgs, GoalPrefix+req.Goal)
 
-	pane, err := p.Herdr.PaneSplit(ctx, req.BasePane, p.direction(), req.Cwd)
+	// The dispatcher's address travels in the pane's environment rather than
+	// on the typed line: it costs nothing there, and the condition stays a
+	// pointer that does not go stale when the daemon moves pane.
+	pane, err := p.Herdr.PaneSplit(ctx, req.BasePane, p.direction(), req.Cwd,
+		DispatcherPaneVar+"="+req.BasePane)
 	if err != nil {
 		return "", fmt.Errorf("spawn %s: %w", req.Name, err)
 	}

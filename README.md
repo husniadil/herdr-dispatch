@@ -190,7 +190,9 @@ ledger.
 1. For a `codex` profile, `proxenos settings` first. A daemon that is
    down fails here, in the daemon's own words, rather than thirty seconds
    later as a startup timeout with the cause hidden in a pane.
-2. `herdr pane split` off the dispatcher's pane, in the task's own project.
+2. `herdr pane split` off the dispatcher's pane, in the task's own project,
+   with `--env HDIS_DISPATCHER_PANE=<the daemon's base pane>` — see
+   [The dispatcher's address](#the-dispatchers-address).
 3. For a `codex` profile, the routing arrives in two halves. The settings
    document goes to a private file and is spliced into the worker's argv as
    `--settings <path>`, because that argv is TYPED into the pane and the
@@ -225,6 +227,26 @@ ledger.
    past interactive readiness, so the command times out, and a goal that is
    refused leaves the worker idle, so the command succeeds. A spawn that
    cannot confirm the goal retires its own half-built pane.
+
+## The dispatcher's address
+
+Every pane this daemon splits — worker and verifier alike — is launched with
+
+```
+HDIS_DISPATCHER_PANE=<the daemon's base pane>
+```
+
+in its environment, and both conditions tell the agent to answer there rather
+than at a pane id written into their text. An agent that comes up in one of
+these panes may read the variable to find out where the dispatcher lives; the
+text stays valid whatever pane the daemon is running on this time.
+
+It is an address and nothing more. It says where the dispatcher is, never who
+the reader is: the sender stamped on any message the agent then writes comes
+from the mail daemon's own reading of `HERDR_PANE_ID`, which is Herdr's word
+about the pane it runs in, and never from this variable. Publishing the
+address is the whole of hdis's part — nothing in this binary imports, reads or
+runs herdr-mail, and a named test walks the source to keep it that way.
 
 ## Restarting the dispatcher
 

@@ -58,14 +58,20 @@ const (
 )
 
 // PaneSplit opens a worker pane beside an existing one, without moving the
-// operator's focus, and returns the new pane's id.
-func (c *Client) PaneSplit(ctx context.Context, pane, direction, cwd string) (string, error) {
+// operator's focus, and returns the new pane's id. Each env entry is a
+// KEY=VALUE herdr sets for the process it launches in the new pane, which
+// the agent started there inherits.
+func (c *Client) PaneSplit(ctx context.Context, pane, direction, cwd string, env ...string) (string, error) {
 	var res struct {
 		Pane struct {
 			PaneID string `json:"pane_id"`
 		} `json:"pane"`
 	}
-	if err := c.result(ctx, &res, "pane", "split", "--pane", pane, "--direction", direction, "--cwd", cwd, "--no-focus"); err != nil {
+	argv := []string{"pane", "split", "--pane", pane, "--direction", direction, "--cwd", cwd, "--no-focus"}
+	for _, e := range env {
+		argv = append(argv, "--env", e)
+	}
+	if err := c.result(ctx, &res, argv...); err != nil {
 		return "", err
 	}
 	if res.Pane.PaneID == "" {

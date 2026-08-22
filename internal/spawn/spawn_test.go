@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -802,4 +803,79 @@ func TestTheVerifierLineFitsTheTypedBudget(t *testing.T) {
 	if len(line) > TypedLineBudget {
 		t.Fatalf("the verifier line is %d characters and the budget is %d: %s", len(line), TypedLineBudget, line)
 	}
+}
+
+// A worker needs an address for the dispatcher that spawned it, and the one
+// place it can carry without being typed into a condition is the pane's own
+// environment. Every split this pipeline makes publishes it.
+func TestTheSplitPublishesTheDispatcherPane(t *testing.T) {
+	h := newHarness(t, []string{goalActive}, startRegistered)
+	if _, err := h.pipe.Run(context.Background(), req(claudeProfile())); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	split := splitArgv(t, h)
+	if !hasPair(split, "--env", DispatcherPaneVar+"=wM:p1") {
+		t.Fatalf("the split carries no %s pair: %v", DispatcherPaneVar, split)
+	}
+}
+
+// And it publishes the DAEMON's base pane, never the worker's own pane or
+// anything else: an address that names the wrong pane is worse than none,
+// because a reply reaches a stranger.
+func TestTheDispatcherPaneEnvNamesTheBasePaneAndNotTheWorkersOwn(t *testing.T) {
+	h := newHarness(t, []string{goalActive}, startRegistered)
+	r := req(claudeProfile())
+	r.BasePane = "wM:p4"
+	if _, err := h.pipe.Run(context.Background(), r); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	split := splitArgv(t, h)
+	for i, a := range split {
+		if a == "--env" && i+1 < len(split) && strings.HasPrefix(split[i+1], DispatcherPaneVar+"=") {
+			if got, want := strings.TrimPrefix(split[i+1], DispatcherPaneVar+"="), "wM:p4"; got != want {
+				t.Fatalf("the dispatcher address is %q, and the daemon's base pane is %q", got, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("the split carries no %s pair: %v", DispatcherPaneVar, split)
+}
+
+// Both conditions hand the agent the variable rather than a pane id baked
+// into their text: the text is composed once per task, and the address is
+// whatever the daemon is running on this time.
+func TestBothConditionsAddressTheDispatcherThroughTheEnvVar(t *testing.T) {
+	for name, goal := range map[string]string{"worker": PointerGoal(23), "verifier": VerifierGoal(23)} {
+		if !strings.Contains(goal, "$"+DispatcherPaneVar) {
+			t.Errorf("the %s condition does not name $%s: %s", name, DispatcherPaneVar, goal)
+		}
+		if paneID.MatchString(goal) {
+			t.Errorf("the %s condition writes a pane id into its text: %s", name, goal)
+		}
+	}
+}
+
+// paneID is a herdr pane id — a workspace, a colon, a p and a number — which
+// is exactly what neither condition may carry.
+var paneID = regexp.MustCompile(`\bw[A-Za-z0-9]+:p[0-9]+\b`)
+
+// splitArgv is the argv the fake herdr recorded for the one pane split.
+func splitArgv(t *testing.T, h *harness) []string {
+	t.Helper()
+	for _, argv := range h.Argv(t) {
+		if len(argv) >= 2 && argv[0] == "pane" && argv[1] == "split" {
+			return argv
+		}
+	}
+	t.Fatal("no pane was split")
+	return nil
+}
+
+func hasPair(argv []string, flag, value string) bool {
+	for i, a := range argv {
+		if a == flag && i+1 < len(argv) && argv[i+1] == value {
+			return true
+		}
+	}
+	return false
 }
