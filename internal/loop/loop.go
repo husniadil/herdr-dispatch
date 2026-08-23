@@ -944,7 +944,23 @@ func (l *Loop) rearm(taskID string) {
 // ceiling for a prompted /goal is the operator's, 1024 with 1023 safe, and it
 // lives beside its measurement in spawn.PromptedGoalBudget.
 func (l *Loop) prompt(ctx context.Context, a decide.Action) error {
-	if err := l.Herdr.AgentPrompt(ctx, a.Pane, l.nudge(a)); err != nil {
+	text := l.nudge(a)
+	// §5.9: a consumer rendering text into a bounded artifact clamps at
+	// render time regardless, and says what it dropped. The bound is
+	// measured, the condition is composed from a task number nothing here
+	// bounds, and until now only a test stood between the two — a test that
+	// pins one rendering says nothing about the next number.
+	//
+	// A /goal is clamped to NOTHING rather than to a prefix: the tail of this
+	// condition is what makes the worker keep fixing rather than report and
+	// stop, so a truncated one is a different condition delivered under the
+	// same name. Refusing leaves the submission in review with its shot
+	// unspent, which an operator can see; a silently shortened condition is
+	// the failure nobody would find.
+	if err := promptBudget(text, a.Reason); err != nil {
+		return err
+	}
+	if err := l.Herdr.AgentPrompt(ctx, a.Pane, text); err != nil {
 		return err
 	}
 	l.mu.Lock()
@@ -964,6 +980,20 @@ func (l *Loop) prompt(ctx context.Context, a decide.Action) error {
 	}
 	l.saveLocked()
 	return nil
+}
+
+// promptBudget is the §5.9 render-time clamp for a prompted /goal.
+//
+// Only a /goal is bounded, because only a /goal has a measured ceiling: it is
+// the client's own command parser that stops registering the slash command
+// past spawn.PromptedGoalBudget, and a plain nudge goes to the composer with
+// no such line.
+func promptBudget(text, reason string) error {
+	if !strings.HasPrefix(text, spawn.GoalPrefix) || len(text) <= spawn.PromptedGoalBudget {
+		return nil
+	}
+	return fmt.Errorf("the %s condition renders %d characters against a budget of %d, so it is not delivered: %d characters would have been dropped",
+		reason, len(text), spawn.PromptedGoalBudget, len(text)-spawn.PromptedGoalBudget)
 }
 
 func (l *Loop) nudge(a decide.Action) string {

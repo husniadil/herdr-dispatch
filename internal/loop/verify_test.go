@@ -574,3 +574,31 @@ func TestOnlyTheSelfReviewShotIsArmedAsAGoal(t *testing.T) {
 			len(got), spawn.PromptedGoalBudget)
 	}
 }
+
+// §5.9: a consumer that renders stored text into a bounded artifact MUST clamp
+// at RENDER time and say what it dropped. Until this, the self-review /goal
+// sat at ~985 characters against a 1023 budget with nothing but a test between
+// them — and a test that pins one rendering says nothing about the next one.
+//
+// A /goal is clamped to nothing rather than to a prefix: the tail of this
+// condition is what makes the worker keep fixing rather than report and stop,
+// so a truncated one is a different condition under the same name.
+func TestAPromptedGoalOverItsBudgetIsNotDelivered(t *testing.T) {
+	over := spawn.GoalPrefix + strings.Repeat("x", spawn.PromptedGoalBudget)
+	err := promptBudget(over, decide.ReasonSelfReview)
+	if err == nil {
+		t.Fatal("a /goal past its measured ceiling was delivered anyway")
+	}
+	if !strings.Contains(err.Error(), "dropped") {
+		t.Errorf("the refusal does not say what it dropped: %v", err)
+	}
+
+	if err := promptBudget(spawn.GoalPrefix+"short enough", decide.ReasonSelfReview); err != nil {
+		t.Errorf("a /goal inside the budget was refused: %v", err)
+	}
+	// A plain nudge reaches the composer rather than the command parser, and
+	// has no measured ceiling to clamp against.
+	if err := promptBudget(strings.Repeat("x", spawn.PromptedGoalBudget*2), decide.ReasonStalled); err != nil {
+		t.Errorf("a plain nudge was clamped against a ceiling that is not its own: %v", err)
+	}
+}
