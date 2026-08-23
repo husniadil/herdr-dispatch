@@ -585,3 +585,41 @@ func TestATickSpawnHoldsItsSlotWhileItRuns(t *testing.T) {
 		t.Errorf("the reservation outlived the spawn: %v", got)
 	}
 }
+
+// A spawn that fails for a reason the next tick cannot change — a profile the
+// config does not name, a checkout git refuses to make — used to be retried
+// every tick forever, under a reservation that never came back. The task
+// never started AND the slot it held was spent, so the fleet lost a worker to
+// a task it could not run. The count is bounded; after it, the reservation
+// goes and the task is left on the board.
+func TestASpawnThatKeepsFailingGivesItsSlotBack(t *testing.T) {
+	l, _ := newLoop(t)
+	var said bytes.Buffer
+	l.Log = log.New(&said, "", 0)
+	// The board row's project maps to a profile that is not defined, which is
+	// what spawn() refuses on before it opens anything. Parse rejects such a
+	// document, so it is set after the load — the state a config edited under
+	// a running daemon reaches.
+	l.Config.Projects = map[string]string{"/src/p": "nope"}
+
+	for i := 1; i <= MaxSpawnAttempts; i++ {
+		if err := l.Tick(context.Background()); err != nil {
+			t.Fatalf("tick %d: %v", i, err)
+		}
+		if got := l.Pending(); len(got) != 1 {
+			t.Fatalf("after failure %d the reservation is %v, want the task still held while attempts remain", i, got)
+		}
+	}
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("tick past the bound: %v", err)
+	}
+	if got := l.Pending(); len(got) != 0 {
+		t.Fatalf("the reservation outlived %d failed spawns: %v", MaxSpawnAttempts, got)
+	}
+	if !strings.Contains(said.String(), "spawn attempts failed") {
+		t.Errorf("the slot was given back silently: %q", said.String())
+	}
+	if got := l.Bindings(); len(got) != 0 {
+		t.Fatalf("bindings: %+v", got)
+	}
+}

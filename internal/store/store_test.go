@@ -234,6 +234,25 @@ func TestAReservationSurvivesARoundTripCarryingItsOwner(t *testing.T) {
 	}
 }
 
+// The attempt count is what bounds a spawn that cannot succeed, and a restart
+// that read it back as zero would hand the same doomed task a fresh budget on
+// every start.
+func TestAReservationRemembersHowOftenItsSpawnHasFailed(t *testing.T) {
+	s := tempStore(t)
+	at := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	want := State{Reservations: []Reservation{{TaskID: "01AAA", Owner: "plugin:hdis@wM:p1", At: at, Attempts: 2}}}
+	if err := s.Save(want); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := s.Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(got.Reservations) != 1 || got.Reservations[0].Attempts != 2 {
+		t.Fatalf("reservations: %+v", got.Reservations)
+	}
+}
+
 // Bindings and reservations share one document, written whole, so saving
 // either never drops the other.
 func TestSavingBindingsKeepsTheReservationsBesideThem(t *testing.T) {

@@ -810,7 +810,13 @@ func (l *Loop) apply(ctx context.Context, actions []decide.Action) {
 			// being spawned for and the fleet ends up one worker over
 			// MaxWorkers — after which every later tick reads live >=
 			// MaxWorkers and dispatches nothing at all.
-			l.attempt(a.TaskID)
+			//
+			// It is also what counts the attempts, so a spawn that can never
+			// succeed gives its slot back instead of retrying under it
+			// forever.
+			if !l.attempt(a.TaskID) {
+				continue
+			}
 			err = l.spawn(ctx, a)
 		case decide.Rearm:
 			// The submission the announcement and the verification belonged

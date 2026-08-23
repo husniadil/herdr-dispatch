@@ -277,23 +277,48 @@ func match(rows []htask.Task, ref string) (htask.Task, bool) {
 	return htask.Task{}, false
 }
 
-// attempt takes the slot for a spawn about to run.
+// MaxSpawnAttempts bounds how often one reservation may fail to become a
+// worker before it is given up on.
+//
+// The failures it exists for are the ones that repeat: a profile the config
+// does not name, a checkout git refuses to make. Nothing about the next tick
+// makes either of them likelier to work, so an unbounded retry is a worker
+// slot spent forever on a task that will never start — and with the slot goes
+// every other task the fleet had room for.
+const MaxSpawnAttempts = 3
+
+// attempt takes the slot for a spawn about to run and counts the try.
 //
 // It is what a tick calls before every spawn, and it is idempotent in the
 // only sense that matters: a task reserved by a dispatch keeps that
-// reservation and its owner, and nothing about it moves.
-func (l *Loop) attempt(taskID string) {
+// reservation and its owner, and only the count moves. It answers false once
+// the count is spent, having dropped the reservation — the task goes back to
+// the board's own list, where an operator can see it is not moving.
+func (l *Loop) attempt(taskID string) bool {
 	l.mu.Lock()
-	defer l.mu.Unlock()
-	for _, held := range l.pending {
-		if held.TaskID == taskID {
-			return
+	for i := range l.pending {
+		if l.pending[i].TaskID != taskID {
+			continue
 		}
+		if l.pending[i].Attempts >= MaxSpawnAttempts {
+			l.pending = append(l.pending[:i:i], l.pending[i+1:]...)
+			l.saveLocked()
+			l.mu.Unlock()
+			l.logf("task %s: %d spawn attempts failed, so its reservation is dropped and the task is left on the board",
+				taskID, MaxSpawnAttempts)
+			return false
+		}
+		l.pending[i].Attempts++
+		l.saveLocked()
+		l.mu.Unlock()
+		return true
 	}
 	l.pending = append(l.pending, store.Reservation{
-		TaskID: taskID, Owner: l.principal(), At: l.now(),
+		TaskID: taskID, Owner: l.principal(), At: l.now(), Attempts: 1,
 	})
 	l.saveLocked()
+	l.mu.Unlock()
+	return true
 }
 
 // unreserve drops a reservation, whether it was spent on a spawn or taken

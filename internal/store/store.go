@@ -43,6 +43,12 @@ type Reservation struct {
 	TaskID string
 	Owner  string
 	At     time.Time
+	// Attempts is how often a tick has tried to turn this reservation into
+	// a worker and failed. It is what bounds a reservation whose spawn
+	// cannot succeed — a profile the config does not name, a checkout git
+	// will not make — which would otherwise be retried every tick forever
+	// while holding a worker slot nothing can ever use.
+	Attempts int
 }
 
 // State is everything the dispatcher remembers across a restart: the
@@ -64,9 +70,10 @@ type document struct {
 
 // reservation is one reservation as it is written.
 type reservation struct {
-	TaskID string `json:"task"`
-	Owner  string `json:"owner"`
-	AtMS   int64  `json:"at_ms"`
+	TaskID   string `json:"task"`
+	Owner    string `json:"owner"`
+	AtMS     int64  `json:"at_ms"`
+	Attempts int    `json:"attempts,omitempty"`
 }
 
 // record is one binding as it is written. Times are Unix milliseconds, the
@@ -142,9 +149,10 @@ func (b *Bindings) Load() (State, error) {
 	held := make([]Reservation, 0, len(doc.Reservations))
 	for _, r := range doc.Reservations {
 		held = append(held, Reservation{
-			TaskID: r.TaskID,
-			Owner:  r.Owner,
-			At:     time.UnixMilli(r.AtMS).UTC(),
+			TaskID:   r.TaskID,
+			Owner:    r.Owner,
+			At:       time.UnixMilli(r.AtMS).UTC(),
+			Attempts: r.Attempts,
 		})
 	}
 	return State{Bindings: out, Reservations: held}, nil
@@ -173,9 +181,10 @@ func (b *Bindings) Save(state State) error {
 	}
 	for _, x := range state.Reservations {
 		doc.Reservations = append(doc.Reservations, reservation{
-			TaskID: x.TaskID,
-			Owner:  x.Owner,
-			AtMS:   x.At.UnixMilli(),
+			TaskID:   x.TaskID,
+			Owner:    x.Owner,
+			AtMS:     x.At.UnixMilli(),
+			Attempts: x.Attempts,
 		})
 	}
 	raw, err := json.Marshal(doc)
