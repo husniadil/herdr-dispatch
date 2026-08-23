@@ -320,3 +320,52 @@ func resolved(t *testing.T, dir string) string {
 	}
 	return out
 }
+
+// Behind is the one fact the operator is missing at merge time: a branch cut
+// from a HEAD the project has since moved past cannot be fast-forwarded.
+// True and false both matter, so this pins both against the same repository.
+func TestBehindIsTrueOnlyOnceTheProjectHeadHasMovedPastTheBranch(t *testing.T) {
+	src := repo(t)
+	m := &Manager{Root: t.TempDir()}
+	ctx := context.Background()
+	if _, _, err := m.Worker(ctx, src, 7); err != nil {
+		t.Fatalf("worker: %v", err)
+	}
+	branch := Branch(7)
+
+	behind, err := m.Behind(ctx, src, branch)
+	if err != nil {
+		t.Fatalf("behind: %v", err)
+	}
+	if behind {
+		t.Fatalf("a branch cut from the project's own HEAD reads as behind")
+	}
+
+	commit(t, src, "two")
+	behind, err = m.Behind(ctx, src, branch)
+	if err != nil {
+		t.Fatalf("behind after the project moved: %v", err)
+	}
+	if !behind {
+		t.Fatalf("the project moved past the branch and nothing said so")
+	}
+}
+
+// A name no branch carries is a failure to report, never a quiet false: the
+// operator would read "not behind" for a branch that does not exist.
+func TestBehindRefusesABranchTheRepositoryDoesNotHave(t *testing.T) {
+	src := repo(t)
+	m := &Manager{Root: t.TempDir()}
+	if _, err := m.Behind(context.Background(), src, "hdis/task-999"); err == nil {
+		t.Fatalf("a branch that does not exist answered instead of failing")
+	}
+}
+
+// commit puts one more empty commit on the repository's checked-out branch.
+func commit(t *testing.T, dir, msg string) {
+	t.Helper()
+	out, err := exec.Command("git", "-C", dir, "commit", "-q", "--allow-empty", "-m", msg).CombinedOutput()
+	if err != nil {
+		t.Fatalf("commit in %s: %v: %s", dir, err, out)
+	}
+}

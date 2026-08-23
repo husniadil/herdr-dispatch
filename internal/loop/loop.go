@@ -39,6 +39,9 @@ type Trees interface {
 	// Verifier checks the given commit out, detached, and returns the
 	// directory. An empty commit is refused rather than read as HEAD.
 	Verifier(ctx context.Context, project string, seq int, commit string) (string, error)
+	// Behind reports whether the project's HEAD has moved past the branch,
+	// which is the state that refuses a fast-forward merge.
+	Behind(ctx context.Context, project, branch string) (bool, error)
 	// Remove takes a checkout and git's record of it.
 	Remove(ctx context.Context, dir string) error
 	// Project is the repository a directory belongs to, with a worktree

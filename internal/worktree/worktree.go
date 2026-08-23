@@ -110,6 +110,42 @@ func (m *Manager) Verifier(ctx context.Context, project string, seq int, commit 
 	return dir, nil
 }
 
+// Behind reports whether the project's HEAD has moved past the branch: true
+// when HEAD is no longer reachable from the branch, which is exactly the
+// state `git merge --ff-only <branch>` refuses.
+//
+// It is measured against the project's CURRENT HEAD rather than the commit
+// the branch was cut from, because HEAD is what the operator merges into and
+// it is the only side of the comparison that moves after a spawn.
+//
+// A branch the repository does not have is an error, never a quiet false: an
+// operator reading "not behind" for a branch that does not exist is worse
+// off than one told the question could not be answered.
+func (m *Manager) Behind(ctx context.Context, project, branch string) (bool, error) {
+	if branch == "" {
+		return false, nil
+	}
+	root, err := m.run(ctx, project, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return false, fmt.Errorf("no base for %s: %w", branch, err)
+	}
+	if _, err := m.run(ctx, root, "rev-parse", "--verify", "--quiet", branch+"^{commit}"); err != nil {
+		return false, fmt.Errorf("no base for %s: the repository has no such branch", branch)
+	}
+	cmd := exec.CommandContext(ctx, m.git(), "-C", root, "merge-base", "--is-ancestor", "HEAD", branch)
+	if err := cmd.Run(); err != nil {
+		var ee *exec.ExitError
+		// git says 1 for "not an ancestor", which is the answer rather than
+		// a failure. Anything else is git itself refusing, and reading that
+		// as "behind" would invent a fact.
+		if errors.As(err, &ee) && ee.ExitCode() == 1 {
+			return true, nil
+		}
+		return false, fmt.Errorf("no base for %s: %w", branch, err)
+	}
+	return false, nil
+}
+
 // prepare finds the project's repository root and makes the empty directory
 // its checkout goes in.
 func (m *Manager) prepare(ctx context.Context, project, prefix string, seq int) (string, string, error) {

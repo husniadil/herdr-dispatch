@@ -133,8 +133,15 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 			if !w.PaneAlive {
 				state = "pane gone"
 			}
-			fmt.Fprintf(out, "#%-4d %-10s %-8s %-10s %-14s prompted %s x%d notified=%t  %s\n",
-				w.Seq, w.Pane, or(w.Tab, "-"), or(state, "unknown"), or(w.Branch, "detached"),
+			branch := or(w.Branch, "detached")
+			if w.Behind {
+				// Said beside the branch because that is where the operator
+				// is already looking for the work, and the merge that will
+				// refuse names the same branch.
+				branch += " (behind)"
+			}
+			fmt.Fprintf(out, "#%-4d %-10s %-8s %-10s %-23s prompted %s x%d notified=%t  %s\n",
+				w.Seq, w.Pane, or(w.Tab, "-"), or(state, "unknown"), branch,
 				w.PromptedAt.Format(time.RFC3339), w.Prompts, w.Notified, w.Title)
 		}
 		for _, id := range st.Pending {

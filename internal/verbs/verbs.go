@@ -78,8 +78,10 @@ var All = []Verb{
 		Name: "status", CLI: []string{"status"},
 		Short: "List what the dispatcher is driving",
 		Long: "One row per binding: the task, the pane its worker lives in, when " +
-			"the goal was delivered, how often, whether review was announced, and " +
-			"the worker's agent_status as herdr reports it.",
+			"the goal was delivered, how often, whether review was announced, " +
+			"the worker's agent_status as herdr reports it, and the branch its " +
+			"commits are on — marked behind when the project's HEAD has moved " +
+			"past that branch, which is what makes a fast-forward merge refuse.",
 	},
 }
 

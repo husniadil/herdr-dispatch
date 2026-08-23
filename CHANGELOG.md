@@ -18,6 +18,18 @@ path. A log that cannot be opened is reported on stdout and the daemon starts
 anyway. `hdis doctor` gained a `log` field naming the file that was opened,
 omitted when none could be.
 
+`hdis status` now says when a worker's branch has gone behind the project. A
+worker's branch is cut from the project's HEAD at spawn time, so a task that
+lands first moves that HEAD on and the next branch can no longer be
+fast-forwarded — a fact the operator used to meet at merge time. The CLI
+prints the branch as `hdis/task-7 (behind)` and the JSON status gained a
+`behind` boolean on every worker row; a verifier, which works detached and has
+no branch, is always `false`. Behind is measured against the project's current
+HEAD with `git merge-base --is-ancestor`, and only when `status` is called,
+never on the tick. A git that cannot answer logs the reason and leaves the row
+unmarked. Nothing here rebases, merges or serialises dispatch: the recovery is
+still the operator's.
+
 A worker now comes up in a TAB of its own rather than as a split of the
 operator's pane, and the tab is created in the workspace of the pane the task
 was FILED from. `herdr tab create --workspace/--cwd/--label/--env --no-focus`

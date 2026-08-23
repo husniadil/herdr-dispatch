@@ -699,6 +699,50 @@ work on the project's own branch. Merging that branch, and deleting it
 afterwards, is a step that did not exist before. `hdis status` names the
 branch beside the pane so it can be found without reading the bindings file.
 
+**A branch can go behind while its worker is still running.** A worker's
+branch is cut from the project's HEAD at SPAWN time, and with several workers
+on one repository the ordinary case is that another task lands first and
+moves that HEAD on. The second branch then refuses a fast-forward, and before
+this the operator found that out at merge time, with the worker long gone and
+the recovery — a scratch checkout, a rebase, a full uncached gate on the
+REBASED commit rather than the reviewed one — theirs to improvise.
+
+So `hdis status` says it. A branch prints as `hdis/task-7 (behind)` when the
+project's HEAD is no longer reachable from it, and the JSON carries the same
+fact as a `behind` boolean on each worker row.
+
+Two decisions are worth naming, because either could reasonably have gone the
+other way:
+
+- **Behind is measured against the project's CURRENT HEAD**, not against the
+  commit the branch was cut from. HEAD is what the operator merges into and it
+  is the only side of the comparison that moves after a spawn, so
+  `git merge-base --is-ancestor HEAD <branch>` failing is exactly the state
+  `git merge --ff-only <branch>` refuses. Nothing here reads a remote: the
+  question is about the local project, which is what a local merge uses.
+- **It is measured when status is asked, not on every tick.** A tick is a
+  per-pane loop and a git call per binding on it would be paid whether or not
+  anyone was looking; status is asked by an operator who is looking. The cost
+  is one `rev-parse` and one `merge-base` per worker branch, on the status
+  call only, taken outside the loop's mutex so a tick never waits behind a
+  process spawn. A git that cannot answer leaves the fact unsaid and logs why,
+  because a report that guesses is a report that is wrong.
+
+`TestStatusSaysABranchIsBehindOnlyOnceTheProjectHeadHasMovedPastIt`,
+`TestTheJSONStatusCarriesBehindAsAField`,
+`TestBehindIsTrueOnlyOnceTheProjectHeadHasMovedPastTheBranch` and
+`TestBehindRefusesABranchTheRepositoryDoesNotHave` pin it, in both
+directions: a check that always reports and a check that never reports each
+fail the first of them.
+
+**hdis still does not rebase.** Saying "behind" is the whole of it. Having a
+worker rebase before it submits is the shape that removes the problem rather
+than showing it, and it needs a decision about when a worker may touch git;
+that boundary is clean and this did not spend it. Nor is dispatch serialised
+per repository. The recovery stays the operator's: rebase the branch on the
+current HEAD, run the FULL gate on the rebased commit — it is not the commit
+that was reviewed — and then fast-forward.
+
 ## Building and testing
 
 ```sh

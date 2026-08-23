@@ -2,6 +2,8 @@ package loop
 
 import (
 	"context"
+	"encoding/json"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -403,5 +405,88 @@ func TestDispatchOfANumberTheBoardIsNotOffering(t *testing.T) {
 	}
 	if got := calls(t, f, "task get"); len(got) != 0 {
 		t.Fatalf("the board was asked for a bare number across projects: %v", got)
+	}
+}
+
+// The merge-time surprise, made visible while the work is still running: a
+// worker's branch was cut from the project's HEAD, and by the time it
+// submits another task may have landed and moved that HEAD on. Status is
+// where the operator would see it, so status is where it is measured. Both
+// directions are pinned here: a check that always reports and a check that
+// never reports each fail one half of this case.
+func TestStatusSaysABranchIsBehindOnlyOnceTheProjectHeadHasMovedPastIt(t *testing.T) {
+	l, f, project := newVerifyLoop(t, false)
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	f.Write(t, "panes.json", paneList("wM:p9", "working"))
+
+	st, err := l.Status(context.Background())
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if len(st.Workers) != 1 {
+		t.Fatalf("workers: %+v", st.Workers)
+	}
+	if st.Workers[0].Behind {
+		t.Fatalf("a branch cut from the project's own HEAD is reported behind")
+	}
+
+	gitIn(t, project, "commit", "-q", "--allow-empty", "-m", "another task landed")
+
+	st, err = l.Status(context.Background())
+	if err != nil {
+		t.Fatalf("status after the project moved: %v", err)
+	}
+	if !st.Workers[0].Behind {
+		t.Fatalf("the project moved past the branch and status did not say so")
+	}
+}
+
+// The operator reads status through a door as often as on a terminal, so the
+// same fact has to survive the socket rather than live only in the CLI's
+// formatting.
+func TestTheJSONStatusCarriesBehindAsAField(t *testing.T) {
+	l, f, project := newVerifyLoop(t, false)
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	f.Write(t, "panes.json", paneList("wM:p9", "working"))
+	gitIn(t, project, "commit", "-q", "--allow-empty", "-m", "another task landed")
+
+	st, err := l.Status(context.Background())
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	doc, err := json.Marshal(st)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var back struct {
+		Workers []struct {
+			Branch string `json:"branch"`
+			Behind bool   `json:"behind"`
+		} `json:"workers"`
+	}
+	if err := json.Unmarshal(doc, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(back.Workers) != 1 {
+		t.Fatalf("workers in %s", doc)
+	}
+	if !back.Workers[0].Behind {
+		t.Fatalf("the JSON status lost the fact: %s", doc)
+	}
+	if back.Workers[0].Branch != worktree.Branch(7) {
+		t.Fatalf("behind is reported against %q: %s", back.Workers[0].Branch, doc)
+	}
+}
+
+// gitIn runs one git command in a repository a case is driving.
+func gitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s in %s: %v: %s", strings.Join(args, " "), dir, err, out)
 	}
 }

@@ -41,6 +41,11 @@ type Worker struct {
 	// Branch is where a worker's commits are, so an operator reading status
 	// can find the work; a verifier works detached and has none.
 	Branch string `json:"branch,omitempty"`
+	// Behind is whether the project's HEAD has moved past that branch since
+	// the worker was spawned, which is what makes `git merge --ff-only`
+	// refuse it. It is read at status time, one git call per branch, so the
+	// per-pane tick loop pays nothing for it.
+	Behind bool `json:"behind"`
 	// Tab is the tab the worker was placed in. A tab carries a label, which
 	// a pane does not, so this is what an operator follows to find the work
 	// on their own screen.
@@ -156,14 +161,17 @@ func (l *Loop) Status(ctx context.Context) (Status, error) {
 	}
 
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	st := Status{
 		BasePane:   l.BasePane,
 		MaxWorkers: l.Policy.MaxWorkers,
 		Workers:    []Worker{},
 		Pending:    pendingIDs(l.pending),
 	}
-	for _, b := range l.bindings {
+	// Held alongside the rows so the git reads below can happen after the
+	// lock is dropped, in the same order as the workers they answer for.
+	bindings := append([]decide.Binding(nil), l.bindings...)
+	projects := make([]string, 0, len(bindings))
+	for _, b := range bindings {
 		row := l.rows[b.TaskID]
 		status, alive := panes[b.Pane]
 		st.Workers = append(st.Workers, Worker{
@@ -181,8 +189,33 @@ func (l *Loop) Status(ctx context.Context) (Status, error) {
 			Prompts:     b.Prompts,
 			Notified:    b.Notified,
 		})
+		projects = append(projects, row.Project)
+	}
+	l.mu.Unlock()
+
+	// Deliberately outside the lock: each of these shells out to git, and a
+	// tick waiting on the mutex behind a process spawn per binding is the
+	// bug this ordering avoids.
+	for i := range st.Workers {
+		st.Workers[i].Behind = l.behind(ctx, projects[i], bindings[i])
 	}
 	return st, nil
+}
+
+// behind asks git whether a worker's branch can still be fast-forwarded into
+// the project. A verifier has no branch and nothing to be behind; a git that
+// cannot answer leaves the fact unsaid rather than asserting either way,
+// because status is a report and a guess here is a wrong one.
+func (l *Loop) behind(ctx context.Context, project string, b decide.Binding) bool {
+	if b.Branch == "" || b.IsVerifier() || project == "" || l.Worktrees == nil {
+		return false
+	}
+	behind, err := l.Worktrees.Behind(ctx, project, b.Branch)
+	if err != nil {
+		l.logf("task %s: cannot tell whether %s is behind: %v", b.TaskID, b.Branch, err)
+		return false
+	}
+	return behind
 }
 
 // kindOf names a binding's lane for a caller. A binding written before the
