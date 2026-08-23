@@ -630,6 +630,13 @@ func TestAPaneWhoseAgentNameHerdrDroppedIsStillAdoptedAndStillRetired(t *testing
 			agentsAre(t, f, "")
 			f.Write(t, "tabs.json", `{"id":"x","result":{"type":"tab_list","tabs":[`+
 				`{"tab_id":"wM:t9","workspace_id":"wM","label":"`+tc.label+`","pane_count":1}]}}`)
+			// The checkout's common dir is the origin repo's, the way a
+			// real worktree's is, so the pane's project resolves to the
+			// board the row below is actually on. Without it the daemon
+			// asks for task 7 on the CHECKOUT's path, and the board
+			// answers NOT_FOUND — which is what the real one does, and
+			// what the fake board now does too.
+			f.Write(t, "common.txt", root+"/.git\n")
 			f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"`+root+
 				`","title":"do the thing","status":"`+tc.status+`","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`)
 			f.Write(t, "ready.json", `{"tasks":[],"count":0}`)

@@ -227,20 +227,32 @@ func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
 	return stdout.Bytes(), nil
 }
 
-// paneNames are the variables htask reads a caller's pane id out of. They
-// travel in the environment rather than in argv, so a child that inherits
-// the daemon's environment arrives claiming to be the daemon's pane no
-// matter what `--as` declares.
-var paneNames = []string{"HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID"}
+// paneNames are the variables the board reads a caller's own position out of.
+// They travel in the environment rather than in argv, so a child that inherits
+// the daemon's environment arrives claiming to be the daemon's pane, on the
+// daemon's board, no matter what argv declares.
+//
+// The first three are the pane. HERDR_PLUGIN_CONTEXT_JSON is the PROJECT:
+// htask resolves its board from that document's focused-pane cwd before it
+// falls back to the working directory (§4.2), and Herdr fills it in for the
+// commands it spawns itself, this plugin's [[startup]] among them. A daemon
+// started that way would scope every board call to whatever the operator was
+// looking at when the plugin started — and a board scoped somewhere else
+// looks exactly like a board with nothing ready, which is the failure that
+// reports itself as nothing at all.
+var paneNames = []string{
+	"HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID", "HERDR_PLUGIN_CONTEXT_JSON",
+}
 
-// envWithoutPane is the daemon's environment minus the pane it runs in.
+// envWithoutPane is the daemon's environment minus where it happens to be
+// running.
 //
 // Every call here declares a plugin principal, and a principal is what it
 // declares INSTEAD of a pane: a call that carries both leaves the board
 // unable to tell the dispatcher from an agent that claimed as plugin:hdis.
 // The daemon keeps reading these names for its own purposes - the base pane
 // it splits workers off - it just stops handing them to a child speaking as
-// a plugin.
+// a plugin, and scopes each call with --project or --all-projects instead.
 func envWithoutPane(env []string) []string {
 	out := make([]string, 0, len(env))
 	for _, kv := range env {

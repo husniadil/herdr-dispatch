@@ -306,10 +306,10 @@ echo '{"version":"0.1.0"}'`)
 			t.Fatalf("%s reached the board call as %q; a plugin principal carries no pane", name, v)
 		}
 	}
-	// The scrub removes three names, not the environment: a child with no
+	// The scrub removes four names, not the environment: a child with no
 	// PATH cannot find the binaries the board itself shells out to.
 	if child["PATH"] == "" {
-		t.Fatalf("the subprocess lost PATH; want the daemon's environment minus the three pane names")
+		t.Fatalf("the subprocess lost PATH; want the daemon's environment minus the four Herdr names")
 	}
 }
 
@@ -379,18 +379,19 @@ func childEnv(t *testing.T, f *fake.Fake) map[string]string {
 	return out
 }
 
-// The scrub removes three names and nothing else.
+// The scrub removes four names and nothing else.
 //
 // A prefix match on HERDR_ would look equivalent and is not: htask dials
 // herdr itself - that is what `herdr_reachable` in its doctor report is - and
 // it finds it through HERDR_SOCKET_PATH and HERDR_BIN_PATH. Stripping those
 // would leave the board unable to reach herdr on every call the dispatcher
 // makes, so the list is exact names rather than a family.
-func TestTheScrubRemovesThreeNamesAndKeepsEveryOther(t *testing.T) {
+func TestTheScrubRemovesFourNamesAndKeepsEveryOther(t *testing.T) {
 	in := []string{
 		"HERDR_PANE_ID=wM:p1",
 		"HERDR_TAB_ID=wM:t1",
 		"HERDR_WORKSPACE_ID=wM",
+		"HERDR_PLUGIN_CONTEXT_JSON={}",
 		"HERDR_SOCKET_PATH=/run/herdr.sock",
 		"HERDR_BIN_PATH=/opt/herdr",
 		"HERDR_ENV=1",
@@ -407,6 +408,33 @@ func TestTheScrubRemovesThreeNamesAndKeepsEveryOther(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("scrubbed environment:\n got %q\nwant %q", got, want)
+	}
+}
+
+// §4.2: htask resolves its project from HERDR_PLUGIN_CONTEXT_JSON before it
+// falls back to the working directory, reading the focused pane's cwd out of
+// it. Herdr fills that variable in for the commands it spawns itself — this
+// plugin's [[startup]] among them — so a daemon started that way hands it to
+// every board call, and every call is silently scoped to whatever project the
+// operator happened to be looking at when Herdr started the plugin.
+//
+// That is worse than the pane names it sits beside. A pane on a board call is
+// a wrong ATTRIBUTION and the call still lands; a context document is a wrong
+// BOARD, and a board with nothing on it looks exactly like a board with
+// nothing ready. The dispatcher scopes its own calls with --project and
+// --all-projects, and neither means anything if the variable underneath has
+// already chosen.
+func TestABoardCallCarriesNoHerdrPluginContext(t *testing.T) {
+	c, f := client(t)
+	t.Setenv("HERDR_PLUGIN_CONTEXT_JSON", `{"focused_pane_cwd":"/src/somewhere-else"}`)
+	f.Bin(t, "htask", `env > "$HDIS_FAKE_DIR/env.txt"
+echo '{"version":"0.1.0"}'`)
+
+	if _, err := c.Doctor(context.Background()); err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+	if v, ok := childEnv(t, f)["HERDR_PLUGIN_CONTEXT_JSON"]; ok {
+		t.Fatalf("HERDR_PLUGIN_CONTEXT_JSON reached the board call as %q; every call would be scoped to whatever pane the operator was focused on", v)
 	}
 }
 

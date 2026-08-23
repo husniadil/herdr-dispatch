@@ -24,13 +24,47 @@ import (
 
 var clock = time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
 
-// The fake board refuses a bare number under --all-projects exactly as the
-// real one does. A fake that answers whatever argv it is handed is why a
-// restart shipped unable to read the row of any pane it had no binding for:
-// every test drove a number through it and got a row back.
-const htaskScript = `case "$1 $2" in
-"task list") cat "$HDIS_FAKE_DIR/ready.json" ;;
+// The fake board answers like the real one or it refuses.
+//
+// It used to switch on "$1 $2" alone and answer `{}` with exit 0 to anything
+// it had not heard of, which made it a machine for passing tests: a verb this
+// binary got wrong read as an empty board, and `task list --ready` and
+// `task list --mine` were the same call, so a restart reading what it holds
+// got the ready queue back. Three things fix that, and each closed a way a
+// green test could mean nothing:
+//
+//   - --ready and --mine are DIFFERENT lists, from different files.
+//   - --project is honoured: a number is looked up on the board named, and a
+//     lookup on any other board is NOT_FOUND, which is what the real one
+//     answers. The board it holds the row on is read off the row itself, so a
+//     case that moves the project moves it in one place. A bare number under
+//     --all-projects is still the refusal the real board makes, because a
+//     number is only unique inside a project.
+//   - A verb the fake does not know exits non-zero with a message naming it,
+//     instead of an empty document that reads as an empty board.
+const htaskScript = `project=$(sed -n 's/.*"project":"\([^"]*\)".*/\1/p' "$HDIS_FAKE_DIR/get.json" 2>/dev/null | head -1)
+asked=""
+want=""
+for a in "$@"; do
+  [ "$want" = 1 ] && { asked=$a; want=""; continue; }
+  [ "$a" = --project ] && want=1
+done
+case "$1 $2" in
+"task list")
+  case " $* " in
+  *" --mine "*) cat "$HDIS_FAKE_DIR/mine.json" ;;
+  *" --ready "*) cat "$HDIS_FAKE_DIR/ready.json" ;;
+  *) echo '{"error":{"code":"USAGE","message":"this fake serves task list --ready and task list --mine"}}' >&2; exit 2 ;;
+  esac ;;
 "task get")
+  if [ -n "$asked" ]; then
+    if [ -n "$project" ] && [ "$asked" != "$project" ]; then
+      echo '{"error":{"code":"NOT_FOUND","message":"no task '"$3"' on '"$asked"'"}}'
+      exit 3
+    fi
+    cat "$HDIS_FAKE_DIR/get.json"
+    exit 0
+  fi
   case " $* " in
   *" --all-projects "*)
     case "$3" in
@@ -40,7 +74,9 @@ const htaskScript = `case "$1 $2" in
   *) cat "$HDIS_FAKE_DIR/get.json" ;;
   esac ;;
 "task goal") cat "$HDIS_FAKE_DIR/goal.txt" ;;
-*) echo '{}' ;;
+"task release") echo '{"released":true}' ;;
+"doctor "*|"doctor") cat "$HDIS_FAKE_DIR/doctor.json" ;;
+*) echo "htask: this fake board does not serve '$1 $2'" >&2; exit 1 ;;
 esac`
 
 // `pane read` answers with the terminal's own text and no JSON, which is what
@@ -102,6 +138,12 @@ func newLoop(t *testing.T) (*Loop, *fake.Fake) {
 	f.Bin(t, "htask", htaskScript)
 	f.Bin(t, "herdr", herdrScript)
 	f.Write(t, "ready.json", readyOne)
+	// --mine is what the board says this daemon is HOLDING, which is a
+	// different question from what is ready. Empty unless a case says
+	// otherwise: a restart that found the ready queue here would re-adopt
+	// work nobody gave it.
+	f.Write(t, "mine.json", `{"tasks":[],"count":0}`)
+	f.Write(t, "doctor.json", `{"version":"0.4.0","contract":"0.10.0","binary":"/bin/htask","socket_live":true,"herdr_reachable":true}`)
 	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"todo"},"ready":false,"dependents":[]}`)
 	f.Write(t, "goal.txt", "do the thing · Done when: it is done")
 	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[]}}`)

@@ -7,6 +7,15 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+**Board calls no longer carry `HERDR_PLUGIN_CONTEXT_JSON`.** htask resolves
+which project it is scoped to from that document before falling back to the
+working directory, and Herdr fills it in for the commands it spawns itself —
+this plugin's `[[startup]]` among them. A daemon started that way handed it to
+every board call, so every call was silently scoped to whatever the operator
+was focused on when Herdr started the plugin, and a board scoped elsewhere
+reads exactly like a board with nothing ready. It is scrubbed alongside the
+three pane names. Nothing a caller passes changes.
+
 **`hdis dump --json` / the `dump` MCP tool** print the whole store in one
 document (§5.8): the bindings, the reservations, and the parked actions
 including the decided ones, with the file they are written to named. It is a
