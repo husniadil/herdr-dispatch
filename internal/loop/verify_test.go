@@ -255,8 +255,8 @@ func TestASubmissionEarnsASelfReviewShotInTheWorkersOwnPane(t *testing.T) {
 	if !strings.Contains(shots[0], "wM:p9") {
 		t.Fatalf("the shot did not go to the worker's own pane: %q", shots[0])
 	}
-	if !strings.Contains(shots[0], spawn.SelfReviewCondition(7)) {
-		t.Fatalf("the shot did not carry the second condition: %q", shots[0])
+	if !strings.Contains(shots[0], spawn.GoalPrefix+spawn.SelfReviewCondition(7)) {
+		t.Fatalf("the shot did not carry the second condition as a /goal: %q", shots[0])
 	}
 	w, _ := bindingFor(l, "wM:p9")
 	if !w.Verified {
@@ -321,8 +321,8 @@ func TestANewSubmissionEarnsAnotherShot(t *testing.T) {
 		t.Fatalf("two submissions earned %d shots: %v", len(shots), shots)
 	}
 	for i, got := range shots {
-		if !strings.Contains(got, spawn.SelfReviewCondition(7)) {
-			t.Fatalf("shot %d is not the second condition: %q", i, got)
+		if !strings.Contains(got, spawn.GoalPrefix+spawn.SelfReviewCondition(7)) {
+			t.Fatalf("shot %d is not the second condition as a /goal: %q", i, got)
 		}
 	}
 	if got := calls(t, f, "notification show"); len(got) != 2 {
@@ -540,5 +540,37 @@ func TestAVanishedPaneTakesItsWorktreeWithIt(t *testing.T) {
 	}
 	if left := worktreesOf(t, project); slices.Contains(left, w.Worktree) {
 		t.Fatalf("git still records the vanished worker's checkout: %v", left)
+	}
+}
+
+// CRITERION 4. Shot two is armed as a /goal and not sent as a plain prompt.
+// A plain prompt fires exactly once, so a shallow pass at the mutations ends
+// the check: nothing asks again. A /goal condition is evaluated after every
+// turn, so the worker's own loop refuses to stop on a half-done pass.
+//
+// The blocker this replaces was never measured. The comment on prompt() said
+// a slash command that long "cannot arrive through a prompt anyway", and
+// TypedLineBudget — the only number nearby — bounds the SPAWN line, which
+// spawn.go says explicitly is not this path. The real ceiling is the
+// operator's measurement, 1024 with 1023 safe, and it lives in
+// spawn.PromptedGoalBudget with the whole delivered text pinned under it.
+//
+// The nudges are NOT goals. A nudge is one instruction for one turn — claim
+// the row, read the rejection, say what is left — and arming any of them as a
+// standing condition would leave a worker re-satisfying it forever.
+func TestOnlyTheSelfReviewShotIsArmedAsAGoal(t *testing.T) {
+	l := &Loop{}
+	for _, reason := range []string{decide.ReasonUnclaimed, decide.ReasonStalled} {
+		if got := l.nudge(decide.Action{TaskID: "t1", Reason: reason}); strings.HasPrefix(got, spawn.GoalPrefix) {
+			t.Errorf("the %q nudge is armed as a standing goal: %q", reason, got)
+		}
+	}
+	got := l.nudge(decide.Action{TaskID: "t1", Reason: decide.ReasonSelfReview})
+	if !strings.HasPrefix(got, spawn.GoalPrefix) {
+		t.Fatalf("the self-review shot is not armed as a goal: %q", got)
+	}
+	if len(got) > spawn.PromptedGoalBudget {
+		t.Fatalf("the self-review shot is %d characters against a budget of %d",
+			len(got), spawn.PromptedGoalBudget)
 	}
 }

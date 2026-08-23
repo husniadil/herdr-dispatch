@@ -872,9 +872,19 @@ func (l *Loop) rearm(taskID string) {
 	l.saveLocked()
 }
 
-// prompt is the backstop, and it carries a nudge rather than the goal: the
-// goal is already armed in the worker, and a slash command that long cannot
-// arrive through a prompt anyway.
+// prompt is the backstop. Most of what it carries is a nudge — one
+// instruction for one turn, against a goal already armed in the worker.
+//
+// The self-review shot is the exception, and it is armed as a /goal of its
+// own. A plain prompt fires exactly once, so a shallow pass at the mutations
+// ends the check: nothing asks again. A /goal is evaluated after every turn,
+// so the worker's own loop is what refuses to stop on a half-done pass.
+//
+// This once said a slash command that long could not arrive through a prompt
+// anyway. Nothing had measured that: TypedLineBudget bounds the SPAWN line,
+// and spawn.go says so explicitly for this very condition. The measured
+// ceiling for a prompted /goal is the operator's, 1024 with 1023 safe, and it
+// lives beside its measurement in spawn.PromptedGoalBudget.
 func (l *Loop) prompt(ctx context.Context, a decide.Action) error {
 	if err := l.Herdr.AgentPrompt(ctx, a.Pane, l.nudge(a)); err != nil {
 		return err
@@ -900,8 +910,9 @@ func (l *Loop) nudge(a decide.Action) string {
 	name := l.taskName(a.TaskID)
 	if a.Reason == decide.ReasonSelfReview {
 		// Not a nudge at all: the worker submitted and is owed a second
-		// condition, composed beside the one it booted with.
-		return spawn.SelfReviewCondition(l.seqFor(a.TaskID))
+		// condition, composed beside the one it booted with — and armed the
+		// same way, so its evaluator loops instead of firing once.
+		return spawn.GoalPrefix + spawn.SelfReviewCondition(l.seqFor(a.TaskID))
 	}
 	if a.Reason == decide.ReasonRejected {
 		// Naming the rejection is the whole point: a worker told only to

@@ -211,6 +211,29 @@ func PointerGoal(seq int) string {
 // names, and read the message before starting the gate. Getting that
 // backwards is what made task 78's first moved head cost anything at all.
 //
+// One pass is not aimed at the report at all, and that is the point of it.
+// Everything above is scoped to what the report CLAIMS, so a defect nobody
+// claimed passes the whole mechanical half structurally. The two findings
+// worth the most on 2026-08-23 both came from outside that scope and both
+// were worker initiative: a mutation that skipped registering two newly
+// published tools failed three tests, probing a claim the report only made
+// implicitly, and reverting a documentation entry to its old reading left
+// everything green, which proved a condition the operator had set was
+// resting on nothing. Neither is reachable from "for every guard your report
+// claims".
+//
+// So the open pass names the DIFF and says it is not the report, because
+// rereading a frame finds what the frame already contains. It reads the diff
+// against a THIRD frame as well, the task's own acceptance criteria, because
+// the report is the worker's frame and the criteria are the operator's and
+// neither contains the other: a report can be internally consistent, survive
+// every mutation above, and still leave a criterion with nothing implementing
+// it. And the pass carries a floor of its own, because an open invitation has
+// none: every observation is either proved with a mutation or a run, or
+// labelled plainly as a suspicion that could not be proved. An unproven
+// suspicion is worth sending — sifting it costs the operator one read. One
+// dressed as a finding costs the round this lane was built to save.
+//
 // Recusal is untouched: this produces no verdict. The task stays in review
 // and the operator still approves or rejects.
 func SelfReviewCondition(seq int) string {
@@ -221,9 +244,28 @@ func SelfReviewCondition(seq int) string {
 		"it is a missing test or bad aim, with the mail MCP send to $"+DispatcherPaneVar+". "+
 		"KEEP FIXING what a mutation proved unpinned, and name the new head in the first line "+
 		"of that message. Fix only a gap a mutation proved or something the operator named; "+
-		"send anything else as a proposal that waits for a verdict. Send everything you have "+
+		"send anything else as a proposal that waits for a verdict. Then read the diff itself, "+
+		"not your report of it, against what the task asked for: a criterion the diff never "+
+		"implements, a gap your report never claimed, a case the code does not handle. Prove "+
+		"each with a mutation or a run, or say plainly that it is a suspicion you could not "+
+		"prove. Send everything you have "+
 		"before your pane closes with the task; nothing waits for later.", seq)
 }
+
+// PromptedGoalBudget bounds a /goal that arrives through `herdr agent
+// prompt` rather than through the spawn line.
+//
+// It is a SECOND ceiling and not TypedLineBudget, which bounds a different
+// path for a different reason: the typed spawn line is typed into a shell by
+// herdr, and it broke at ~1.4k on a live pane. A prompted /goal never reaches
+// a shell; what bounds it is what the client's own prompt box accepts before
+// the slash command stops registering.
+//
+// The number is the operator's measurement, recorded here rather than
+// rederived: 1024 is the ceiling and 1023 is safe. So this is the whole
+// delivered text — GoalPrefix and the condition together — and not the
+// condition alone, because the prefix is on the line the client parses.
+const PromptedGoalBudget = 1023
 
 // TypedLineBudget bounds the whole line herdr types into a worker's pane.
 //

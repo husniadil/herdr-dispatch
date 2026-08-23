@@ -838,6 +838,32 @@ and never `hmail` — a dispatched pane works in a worktree where a plugin
 binary kept in a project's own `bin/` is not on PATH, measured live on
 2026-08-23 with `hmail` answering `command not found` while the door answered.
 
+**And one pass is not aimed at the report at all.** Everything above is scoped
+to what the report CLAIMS, so a defect nobody claimed passes the whole
+mechanical half structurally. So the condition also sends the worker to the
+diff itself, saying in so many words that it is not the report, and reads it
+against a third frame as well — the task's own acceptance criteria. The report
+is the worker's frame and the criteria are the operator's, and neither
+contains the other: a change can be internally consistent, survive every
+mutation above, and still leave a criterion with nothing implementing it. That
+pass keeps a floor of its own, because an open invitation has none: every
+observation is either proved with a mutation or a run, or labelled plainly as
+a suspicion that could not be proved. An unproven suspicion is worth sending;
+one dressed as a finding costs the operator the round this lane was built to
+save.
+
+**The shot is armed as a `/goal`, not sent as a plain prompt.** A plain prompt
+fires once, so a shallow pass at the mutations ends the check — nothing asks
+again. A `/goal` condition is evaluated after every turn, so the worker's own
+loop is what refuses to stop on a half-done pass. What bounds it is the
+client's prompt box rather than the shell `TypedLineBudget` was measured
+against, so it has a second ceiling of its own: `spawn.PromptedGoalBudget`,
+1023, the operator's measurement recorded beside the constant.
+`TestThePromptedSelfReviewGoalFitsItsOwnBudget` pins the whole delivered text
+under it and `TestOnlyTheSelfReviewShotIsArmedAsAGoal` pins that the ordinary
+nudges are not armed this way — a nudge is one instruction for one turn, and a
+standing condition would have a worker re-satisfying it forever.
+
 `TestTheSelfReviewConditionAsksForAMutationPerClaim` pins each of those asks,
 and `TestARereadRequestIsNotASelfReviewCondition` is what makes the pin worth
 having — including a near-miss with every mechanical step intact and no

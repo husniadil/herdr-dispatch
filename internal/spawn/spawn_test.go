@@ -827,8 +827,19 @@ func TestARereadRequestIsNotASelfReviewCondition(t *testing.T) {
 		// Without the line holding it to proven gaps, "keep fixing" reads as
 		// "keep building"; without a route for everything else, a worker with
 		// a second thought has nowhere to put it but the branch.
-		"no boundary on the fix":     "Task 23 is submitted. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to $" + DispatcherPaneVar + ". KEEP FIXING what a mutation proved unpinned, and name the new head in the first line of that message. Send anything else as a proposal that waits for a verdict. Send everything you have before your pane closes with the task; nothing waits for later.",
-		"no route for anything else": "Task 23 is submitted. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to $" + DispatcherPaneVar + ". KEEP FIXING what a mutation proved unpinned, and name the new head in the first line of that message. Fix only a gap a mutation proved or something the operator named. Send everything you have before your pane closes with the task; nothing waits for later.",
+		"no boundary on the fix":     "Task 23 is submitted. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to $" + DispatcherPaneVar + ". KEEP FIXING what a mutation proved unpinned, and name the new head in the first line of that message. Send anything else as a proposal that waits for a verdict. Then read the diff itself, not your report of it, and name what you would attack if it were someone else's: a gap your report never claimed, an inconsistency between two parts of the change, a case the code does not handle. For each, either prove it with a mutation or a run, or say plainly that it is a suspicion you could not prove. An unproven suspicion is worth sending; one dressed as a finding is not. Send everything you have before your pane closes with the task; nothing waits for later.",
+		"no route for anything else": "Task 23 is submitted. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to $" + DispatcherPaneVar + ". KEEP FIXING what a mutation proved unpinned, and name the new head in the first line of that message. Fix only a gap a mutation proved or something the operator named. Then read the diff itself, not your report of it, and name what you would attack if it were someone else's: a gap your report never claimed, an inconsistency between two parts of the change, a case the code does not handle. For each, either prove it with a mutation or a run, or say plainly that it is a suspicion you could not prove. An unproven suspicion is worth sending; one dressed as a finding is not. Send everything you have before your pane closes with the task; nothing waits for later.",
+		// And the open half's three asks, each isolated the same way: every
+		// other ask intact, and exactly one clause of the accepted text
+		// swapped out. Without the proof floor an open invitation returns
+		// plausible-sounding concerns and the sifting lands on the operator;
+		// aimed at the report the pass rereads the worker's own frame and
+		// finds what the frame already contains; without the task's criteria
+		// as a third frame, a change that is internally consistent and fully
+		// mutation-proof still passes with a criterion nothing implements.
+		"open pass with no proof floor":                  "Task 23 is submitted and not yet judged. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to $" + DispatcherPaneVar + ". KEEP FIXING what a mutation proved unpinned, and name the new head in the first line of that message. Fix only a gap a mutation proved or something the operator named; send anything else as a proposal that waits for a verdict. Then read the diff itself, not your report of it, against what the task asked for: a criterion the diff never implements, a gap your report never claimed, a case the code does not handle. Name anything else you noticed. Send everything you have before your pane closes with the task; nothing waits for later.",
+		"open pass aimed at the report":                  "Task 23 is submitted and not yet judged. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to $" + DispatcherPaneVar + ". KEEP FIXING what a mutation proved unpinned, and name the new head in the first line of that message. Fix only a gap a mutation proved or something the operator named; send anything else as a proposal that waits for a verdict. Then read your own report again, against what the task asked for: a criterion the diff never implements, a gap your report never claimed, a case the code does not handle. Prove each with a mutation or a run, or say plainly that it is a suspicion you could not prove. Send everything you have before your pane closes with the task; nothing waits for later.",
+		"open pass that never reads the task's criteria": "Task 23 is submitted and not yet judged. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to $" + DispatcherPaneVar + ". KEEP FIXING what a mutation proved unpinned, and name the new head in the first line of that message. Fix only a gap a mutation proved or something the operator named; send anything else as a proposal that waits for a verdict. Then read the diff itself, not your report of it, with fresh eyes: a gap your report never claimed, a case the code does not handle. Prove each with a mutation or a run, or say plainly that it is a suspicion you could not prove. Send everything you have before your pane closes with the task; nothing waits for later.",
 	} {
 		if missing := mechanicalAsks(text); len(missing) == 0 {
 			t.Errorf("%q passes as a self-review condition: %s", name, text)
@@ -864,6 +875,16 @@ func mechanicalAsks(goal string) []string {
 			"fix only a gap a mutation proved or something the operator named"},
 		"anything else held as a proposal": {"as a proposal that waits"},
 		"nothing deferred past the pane":   {"before your pane closes"},
+		// The open half. The mechanical asks above can only reach claims the
+		// report already made, so a defect nobody claimed passes them
+		// structurally. These two carry the other pass: it is aimed at the
+		// DIFF and says so, and every observation it produces has a proof
+		// floor. They are separate asks because a condition can name the diff
+		// and still invite unproven guesses, and each failure is its own.
+		"the diff read and not the report":         {"not your report of it"},
+		"the task's own criteria as a third frame": {"against what the task asked for"},
+		"each observation proved or named a suspicion": {
+			"prove each with a mutation or a run, or say plainly that it is a suspicion you could not prove"},
 	} {
 		found := false
 		for _, phrase := range phrases {
@@ -1744,5 +1765,30 @@ func TestTheTabOpensInTheWorkspaceOfTheDeskTheReportIsAddressedTo(t *testing.T) 
 	}
 	if got := addressOf(t, h); got != "w15:p1" {
 		t.Fatalf("the report address %q and the workspace came from different answers", got)
+	}
+}
+
+// CRITERION 7. The second condition is delivered as a /goal through `herdr
+// agent prompt`, so what bounds it is the client's prompt box and not the
+// shell TypedLineBudget was measured against. The operator measured that
+// ceiling at 1024, safe at 1023, and the whole delivered text is what has to
+// sit under it: the prefix is on the line the client parses. A five-digit
+// task number is measured rather than a two-digit one, because the seq is
+// the only part of the condition that grows on its own.
+func TestThePromptedSelfReviewGoalFitsItsOwnBudget(t *testing.T) {
+	line := GoalPrefix + SelfReviewCondition(23456)
+	t.Logf("prompted goal: %d of %d budgeted", len(line), PromptedGoalBudget)
+	if len(line) > PromptedGoalBudget {
+		t.Fatalf("the prompted self-review goal is %d characters against a budget of %d: %s",
+			len(line), PromptedGoalBudget, line)
+	}
+}
+
+// And the budget is not TypedLineBudget wearing another name. Collapsing them
+// would make the next reader of either one wrong about the other path.
+func TestThePromptedGoalBudgetIsNotTheTypedLineBudget(t *testing.T) {
+	if PromptedGoalBudget == TypedLineBudget {
+		t.Fatalf("the prompted-goal budget and the typed-line budget are the same number (%d); "+
+			"they bound different paths and must be measured apart", PromptedGoalBudget)
 	}
 }

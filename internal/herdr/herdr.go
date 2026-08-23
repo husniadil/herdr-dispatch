@@ -292,8 +292,10 @@ func (c *Client) Agents(ctx context.Context) ([]Agent, error) {
 	return res.Agents, nil
 }
 
-// AgentPrompt submits a prompt to a worker. It carries a nudge and never a
-// goal: a slash command long enough to be a goal cannot arrive this way.
+// AgentPrompt submits a prompt to a worker. What it carries is the caller's
+// choice: a one-turn nudge, or a /goal whose evaluator then loops. The
+// measured ceiling for the latter is spawn.PromptedGoalBudget, which is not
+// the typed spawn line's budget and is recorded beside its own measurement.
 func (c *Client) AgentPrompt(ctx context.Context, target, text string) error {
 	return c.result(ctx, nil, "agent", "prompt", target, text)
 }
