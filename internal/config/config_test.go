@@ -367,3 +367,41 @@ func TestMaxWorkersLivesInTheConfigAndTheFlagOverridesIt(t *testing.T) {
 		t.Error("a negative max_workers was accepted")
 	}
 }
+
+// layout.min_pane_columns was validated, printed by doctor, and consulted by
+// nothing: the pane count came from the measured constant whatever the
+// document asked for. An operator who raises the floor is asking for wider
+// panes, and the count is the only thing that delivers them.
+func TestRaisingTheColumnFloorLowersThePaneCount(t *testing.T) {
+	wide, err := Parse([]byte(`{"default":"w","profiles":{"w":{"provider":"claude"}},"layout":{"min_pane_columns":120}}`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	want := MaxPanesClearing(120, MeasuredReadableRows)
+	if wide.Layout.MaxPanesPerTab != want {
+		t.Errorf("max_panes_per_tab = %d at a 120-column floor, want %d",
+			wide.Layout.MaxPanesPerTab, want)
+	}
+	if wide.Layout.MaxPanesPerTab >= DefaultMaxPanesPerTab {
+		t.Errorf("a wider floor did not lower the count: %d against the measured default %d",
+			wide.Layout.MaxPanesPerTab, DefaultMaxPanesPerTab)
+	}
+
+	// An unraised floor still lands on the measured default, and an explicit
+	// count is still the operator's own.
+	plain, err := Parse([]byte(`{"default":"w","profiles":{"w":{"provider":"claude"}}}`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if plain.Layout.MaxPanesPerTab != DefaultMaxPanesPerTab {
+		t.Errorf("max_panes_per_tab = %d, want the measured default %d",
+			plain.Layout.MaxPanesPerTab, DefaultMaxPanesPerTab)
+	}
+	named, err := Parse([]byte(`{"default":"w","profiles":{"w":{"provider":"claude"}},"layout":{"min_pane_columns":120,"max_panes_per_tab":3}}`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if named.Layout.MaxPanesPerTab != 3 {
+		t.Errorf("an explicit count was overwritten: %d", named.Layout.MaxPanesPerTab)
+	}
+}

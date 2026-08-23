@@ -390,11 +390,12 @@ type Layout struct {
 	// lowered past what was measured, because below it the dispatcher
 	// cannot trust its own reading of the pane.
 	//
-	// Nothing splits a worker into an existing tab, and this is the whole
+	// A worker is only ever split into a tab THIS dispatcher opened for
+	// THAT task, and never into anyone else's, and this is the whole
 	// reason: Herdr reports no column count for a pane, so the width a
 	// worker will be read at cannot be checked after the fact. It can only
-	// be GUARANTEED beforehand, by giving the worker a tab nothing else is
-	// in.
+	// be GUARANTEED beforehand, by bounding how many panes a tab of this
+	// dispatcher's own may hold — which is what max_panes_per_tab is.
 	MinPaneColumns int `json:"min_pane_columns"`
 	// MaxPanesPerTab is how many panes may share one of this dispatcher's
 	// tabs before the next opens a tab of its own. Zero means
@@ -512,7 +513,12 @@ func Parse(b []byte) (Config, error) {
 		return Config{}, fmt.Errorf("hdis config: max_workers is %d, and a dispatcher that may run no worker at all can never dispatch", c.MaxWorkers)
 	}
 	if c.Layout.MaxPanesPerTab == 0 {
-		c.Layout.MaxPanesPerTab = DefaultMaxPanesPerTab
+		// Derived from the width THIS document asks for, not from the
+		// measured constant. An operator who raises min_pane_columns is
+		// asking for wider panes, and a count still computed from the
+		// measured 40 would have kept placing panes at the old width — the
+		// key was validated, shown in doctor, and consulted by nothing.
+		c.Layout.MaxPanesPerTab = MaxPanesClearing(c.Layout.MinPaneColumns, MeasuredReadableRows)
 	}
 	if c.Layout.MaxPanesPerTab < 1 {
 		return Config{}, fmt.Errorf("hdis config: layout.max_panes_per_tab is %d, and a tab that may hold no worker at all can never be spawned into", c.Layout.MaxPanesPerTab)
