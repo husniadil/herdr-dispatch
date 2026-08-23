@@ -72,6 +72,13 @@ func EnsureStateDir() error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("state dir %s: %w", dir, err)
 	}
+	// MkdirAll leaves a directory that already exists exactly as it found
+	// it, so a dir created before this mode was chosen — or by anything
+	// else — keeps whatever it had. The mode is asserted rather than
+	// requested: the socket in here is a door onto the operator's panes.
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return fmt.Errorf("state dir %s: %w", dir, err)
+	}
 	return nil
 }
 

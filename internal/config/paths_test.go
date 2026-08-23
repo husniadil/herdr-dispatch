@@ -68,6 +68,27 @@ func TestEnsureStateDirMakesItPrivate(t *testing.T) {
 	}
 }
 
+// A state dir that already exists is the ordinary case — an earlier hdis, an
+// XDG base another tool made — and MkdirAll leaves whatever mode it finds. The
+// privacy of the socket in it cannot depend on who created the directory.
+func TestEnsureStateDirClosesAnAlreadyOpenStateDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	t.Setenv("HDIS_STATE_DIR", dir)
+	if err := EnsureStateDir(); err != nil {
+		t.Fatalf("EnsureStateDir: %v", err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat %s: %v", dir, err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Errorf("an existing state dir stayed %04o, want 0700 (§3.5)", got)
+	}
+}
+
 // §5.1 and §10.1: a plugin MUST NOT resolve state_dir or config_dir from
 // HERDR_PLUGIN_STATE_DIR / HERDR_PLUGIN_CONFIG_DIR. Herdr injects those only
 // into what Herdr itself spawns — startup commands, actions, plugin panes —
