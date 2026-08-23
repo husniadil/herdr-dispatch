@@ -1553,3 +1553,210 @@ func TestTheReadableColumnFloorIsDerivedFromTheLongestMarker(t *testing.T) {
 			phrase, longest, inset, want, config.MeasuredReadableColumns)
 	}
 }
+
+// paneList writes a `herdr pane list` answer built from rows of
+// pane id, workspace, tab and cwd, so a case can say exactly which desks are
+// alive and what repository each is sitting in.
+func paneList(t *testing.T, h *harness, rows ...[4]string) {
+	t.Helper()
+	var out []string
+	for _, r := range rows {
+		out = append(out, `{"pane_id":"`+r[0]+`","workspace_id":"`+r[1]+`","tab_id":"`+r[2]+
+			`","cwd":"`+r[3]+`","agent_status":"working"}`)
+	}
+	h.Write(t, "panelist.json", `{"id":"x","result":{"type":"pane_list","panes":[`+strings.Join(out, ",")+`]}}`)
+}
+
+// addressOf is the report address the spawn published, read off the argv
+// herdr was handed.
+func addressOf(t *testing.T, h *harness) string {
+	t.Helper()
+	argv := tabArgv(t, h)
+	for i, a := range argv {
+		if a == "--env" && i+1 < len(argv) && strings.HasPrefix(argv[i+1], DispatcherPaneVar+"=") {
+			return strings.TrimPrefix(argv[i+1], DispatcherPaneVar+"=")
+		}
+	}
+	t.Fatalf("the tab carries no %s pair: %v", DispatcherPaneVar, argv)
+	return ""
+}
+
+// CRITERION 2. The middle rung: with no pane of origin on the board, the
+// report is owed at a LIVE pane whose cwd resolves to the task's project,
+// and only at the daemon's base pane when there is no such desk.
+//
+// Deleting the middle rung fails the first case: the address falls all the
+// way back to wM:p1, the operator who happened to start the daemon.
+func TestTheAddressIsALivePaneInTheTasksProjectBeforeTheDaemonsOwn(t *testing.T) {
+	const project = "/Users/husni/github.com/husniadil/codex-cc-proxy"
+	for _, c := range []struct {
+		name   string
+		origin string
+		rows   [][4]string
+		want   string
+	}{
+		{
+			name: "a live pane in the project is the desk",
+			rows: [][4]string{
+				{"wM:p1", "wM", "wM:t1", "/Users/husni/github.com/husniadil/herdr-dispatch"},
+				{"w15:p1", "w15", "w15:t1", project},
+			},
+			want: "w15:p1",
+		},
+		{
+			name: "a subdirectory of the project is still the project",
+			rows: [][4]string{
+				{"wM:p1", "wM", "wM:t1", "/Users/husni/github.com/husniadil/herdr-dispatch"},
+				{"w15:p1", "w15", "w15:t1", project + "/internal/api"},
+			},
+			want: "w15:p1",
+		},
+		{
+			name: "nothing live in the project falls back to the daemon",
+			rows: [][4]string{
+				{"wM:p1", "wM", "wM:t1", "/Users/husni/github.com/husniadil/herdr-dispatch"},
+				{"w15:p1", "w15", "w15:t1", "/Users/husni/github.com/husniadil/something-else"},
+			},
+			want: "wM:p1",
+		},
+		{
+			// A near-miss neighbour is a different repository. Matching on
+			// the raw string prefix would take it.
+			name: "a sibling whose name merely starts the same is not the project",
+			rows: [][4]string{
+				{"wM:p1", "wM", "wM:t1", "/Users/husni/github.com/husniadil/herdr-dispatch"},
+				{"w15:p1", "w15", "w15:t1", project + "-fork"},
+			},
+			want: "wM:p1",
+		},
+		{
+			// The board naming a pane still outranks the cwd evidence: the
+			// desk that filed the task is the desk that asked for it.
+			name:   "a named pane of origin still wins",
+			origin: "wZ:p2",
+			rows: [][4]string{
+				{"wM:p1", "wM", "wM:t1", "/Users/husni/github.com/husniadil/herdr-dispatch"},
+				{"w15:p1", "w15", "w15:t1", project},
+			},
+			want: "wZ:p2",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t, []string{goalActive}, startRegistered)
+			paneList(t, h, c.rows...)
+			r := req(claudeProfile())
+			r.BasePane = "wM:p1"
+			r.OriginPane = c.origin
+			r.Project = project
+			if _, err := h.pipe.Run(context.Background(), r); err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			if got := addressOf(t, h); got != c.want {
+				t.Fatalf("the report was addressed at %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// CRITERION 3. A pane sitting in one of THIS daemon's own checkouts is never
+// the desk. Task 40 puts every worker in a worktree of its task's own
+// project, so without this bound the first worker for a project becomes the
+// desk and every later report for that project is delivered to a worker
+// rather than to a human.
+//
+// The checkout root is HDIS_STATE_DIR/worktrees, and HDIS_STATE_DIR is the
+// operator's to point anywhere — including inside a project, which is the
+// case this pins. With the default root, outside every project, the project
+// test already excludes our checkouts and the bound is what keeps that true
+// when the root moves.
+func TestAPaneInThisDaemonsOwnCheckoutsIsNeverTheAddress(t *testing.T) {
+	const project = "/Users/husni/github.com/husniadil/codex-cc-proxy"
+	for _, c := range []struct {
+		name  string
+		trees string
+	}{
+		{"a state dir relocated inside the project", project + "/.hdis/worktrees"},
+		{"the default state dir, outside every project", "/Users/husni/.local/state/hdis/worktrees"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t, []string{goalActive}, startRegistered)
+			h.pipe.OwnTrees = c.trees
+			paneList(t, h,
+				[4]string{"wM:p1", "wM", "wM:t1", "/Users/husni/github.com/husniadil/herdr-dispatch"},
+				// A worker this daemon opened for this very project.
+				[4]string{"wM:p4N", "wM", "wM:t4", c.trees + "/hdis-work-22-81789488"},
+			)
+			r := req(claudeProfile())
+			r.BasePane = "wM:p1"
+			r.Project = project
+			if _, err := h.pipe.Run(context.Background(), r); err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			if got := addressOf(t, h); got != "wM:p1" {
+				t.Fatalf("the report was addressed at %q, and a worker of this daemon's own is never the desk", got)
+			}
+		})
+	}
+}
+
+// CRITERION 4. Two live panes in the project is a rule and not a coin toss:
+// the LOWEST pane id wins. It is the one answer that is stable across ticks,
+// so every report for a project lands at the same desk; most recently active
+// is a guess about which human is watching, and iterating a map is no rule at
+// all. The order the panes arrive in does not change the answer.
+func TestTheDeskAmongTwoLivePanesInTheProjectIsTheLowestPaneID(t *testing.T) {
+	const project = "/Users/husni/github.com/husniadil/codex-cc-proxy"
+	for _, c := range []struct {
+		name string
+		rows [][4]string
+	}{
+		{"listed low first", [][4]string{
+			{"w15:p1", "w15", "w15:t1", project},
+			{"w15:p2", "w15", "w15:t2", project},
+		}},
+		{"listed high first", [][4]string{
+			{"w15:p2", "w15", "w15:t2", project},
+			{"w15:p1", "w15", "w15:t1", project},
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t, []string{goalActive}, startRegistered)
+			paneList(t, h, append(c.rows, [4]string{"wM:p1", "wM", "wM:t1", "/elsewhere"})...)
+			r := req(claudeProfile())
+			r.BasePane = "wM:p1"
+			r.Project = project
+			if _, err := h.pipe.Run(context.Background(), r); err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			if got := addressOf(t, h); got != "w15:p1" {
+				t.Fatalf("the desk was %q, want the lowest pane id w15:p1", got)
+			}
+		})
+	}
+}
+
+// ONE RESOLVER. The workspace a worker's tab opens in and the pane its report
+// is owed at are the same question — which desk owns this work — and are
+// answered once. A tab for a task filed at a terminal opens beside the
+// session already working that repository, not beside the daemon.
+func TestTheTabOpensInTheWorkspaceOfTheDeskTheReportIsAddressedTo(t *testing.T) {
+	const project = "/Users/husni/github.com/husniadil/codex-cc-proxy"
+	h := newHarness(t, []string{goalActive}, startRegistered)
+	paneList(t, h,
+		[4]string{"wM:p1", "wM", "wM:t1", "/Users/husni/github.com/husniadil/herdr-dispatch"},
+		[4]string{"w15:p1", "w15", "w15:t1", project},
+	)
+	r := req(claudeProfile())
+	r.BasePane = "wM:p1"
+	r.Project = project
+	if _, err := h.pipe.Run(context.Background(), r); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	argv := tabArgv(t, h)
+	if !hasPair(argv, "--workspace", "w15") {
+		t.Fatalf("the tab did not open in the desk's workspace w15: %v", argv)
+	}
+	if got := addressOf(t, h); got != "w15:p1" {
+		t.Fatalf("the report address %q and the workspace came from different answers", got)
+	}
+}

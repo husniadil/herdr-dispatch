@@ -747,3 +747,35 @@ func TestAWorkerIdleOnADoingRowWithNoFeedbackStillGetsTheStalledPrompt(t *testin
 		}
 	}
 }
+
+// The desk a report is owed at is chosen from the task's PROJECT, and the
+// loop is where the project is known: the board row carries it and the spawn
+// request must name it. Dropping it from the request leaves every spawn-level
+// pin green while every report goes back to the daemon's own operator, so the
+// pin belongs at this call site.
+//
+// One live session sits in the task's project and nothing filed the task from
+// a pane, so the address must be that session and not wM:p1.
+func TestTheSpawnRequestNamesTheTasksProjectSoTheDeskIsFound(t *testing.T) {
+	l, f := newLoop(t)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[`+
+		`{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","cwd":"/src/other","agent_status":"working"},`+
+		`{"pane_id":"w15:p1","workspace_id":"w15","tab_id":"w15:t1","cwd":"/src/p","agent_status":"working"}]}}`)
+
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+
+	var argv string
+	for _, c := range f.Calls(t) {
+		if strings.HasPrefix(c, "tab create") || strings.HasPrefix(c, "pane split") {
+			argv = c
+		}
+	}
+	if argv == "" {
+		t.Fatalf("no pane was opened: %v", f.Calls(t))
+	}
+	if !strings.Contains(argv, spawn.DispatcherPaneVar+"=w15:p1") {
+		t.Fatalf("the worker was not addressed at the session working /src/p: %s", argv)
+	}
+}

@@ -328,9 +328,13 @@ pane in it, and a pane narrow enough word-wraps the very phrase the match is
 looking for, so the match fails while the worker is perfectly fine. That is
 the daemon believing the wrong thing about a worker it is driving.
 
-**The workspace is the filer's.** The tab is created in the workspace of the
-pane the task was FILED from when the board names one AND that pane is still
-alive, and in the daemon's own workspace otherwise. This daemon serves every
+**The workspace is the desk's.** The tab is created in the workspace of the
+pane the report is addressed at, when Herdr is still holding that pane, and in
+the daemon's own workspace otherwise. It is the SAME resolver behind both
+answers — the pane the task was filed from, else a live pane sitting in the
+task's project, else the daemon's own, resolved once per spawn from one read
+of `herdr pane list`: see
+[The dispatcher's address](#the-dispatchers-address). This daemon serves every
 board on the machine, so the operator who started it is routinely not the
 operator who filed the task, and a worker belongs on the screen of whoever
 wanted it. Liveness is checked at the moment of the spawn: an address can fall
@@ -486,19 +490,51 @@ than at a pane id written into their text. An agent that comes up in one of
 these panes may read the variable to find out where to report; the text stays
 valid whatever pane that turns out to be.
 
-The address is the pane the task was CREATED FROM when the board's row names
-one, and the daemon's own base pane only when it does not. A report belongs to
-whoever wanted the work, and this daemon is not scoped to one repository: it
-takes ready tasks off every project's board, so the operator who started it is
-routinely not the operator who filed the task. The verification lane follows
-the same rule. A task an operator filed at a terminal legitimately has no pane
-of origin — nothing with a pane created it — and for those the daemon's own
-pane is the only address there is. The PLACEMENT now follows the same rule, which it did not before: see
+The address is the desk that owns the work, found in three rungs:
+
+1. the pane the task was CREATED FROM, when the board's row names one.
+2. a LIVE pane whose cwd is the task's project, when the row names none.
+3. this daemon's own base pane, when there is no such pane either.
+
+A report belongs to whoever wanted the work, and this daemon is not scoped to
+one repository: it takes ready tasks off every project's board, so the
+operator who started it is routinely not the operator who filed the task. The
+verification lane follows the same rule.
+
+The middle rung exists because a task an operator filed at a terminal has no
+pane of origin — nothing with a pane created it — and the first two rungs
+alone sent every one of those reports to whoever happened to start the daemon.
+The session already sitting in that repository is the desk that owns the work,
+and `herdr pane list` says which one that is, so the evidence is Herdr's
+rather than a field somebody has to remember to set. The last rung stays: a
+machine with nothing live still answers somewhere.
+
+Two rules make the middle rung a rule rather than a coin toss:
+
+- **The lowest pane id wins** when several live panes sit in the project. It
+  is the one answer that is stable across ticks, so reports for a repository
+  do not wander between windows as panes come and go; most recently active
+  would be a guess about which human is watching, and whatever a map iteration
+  hands back first is no rule at all.
+  `TestTheDeskAmongTwoLivePanesInTheProjectIsTheLowestPaneID` pins it from both
+  list orders.
+- **A checkout of this daemon's own is never the desk.** Every worker works in
+  a worktree of its task's project, so without that bound the first worker for
+  a project would become the desk and every later report for it would be
+  delivered to a worker. The bound is `<state_dir>/worktrees`, the same one the
+  reap is drawn at, and
+  `TestAPaneInThisDaemonsOwnCheckoutsIsNeverTheAddress` pins it with the state
+  dir relocated inside a project, where the path test alone would not catch it.
+
+It is ONE resolver, not two. The workspace a worker's tab opens in is the same
+question read the other way — which desk owns this work — so the desk is
+resolved once per spawn, from one read of `herdr pane list`, and the report
+address and the placement are both taken from it: see
 [Where a worker comes up](#where-a-worker-comes-up).
 
 It is an address and nothing more. It says where to answer — normally the pane
-the task was filed from, and the daemon's own pane only when nothing with a
-pane filed it — never who the reader is: the sender stamped on any message the
+the task was filed from, and a desk found in the pane list or the daemon's own
+pane when nothing with a pane filed it — never who the reader is: the sender stamped on any message the
 agent then writes comes from the mail daemon's own reading of `HERDR_PANE_ID`,
 which is Herdr's word about the pane it runs in, and never from this variable.
 Publishing the address is the whole of hdis's part — nothing in this binary

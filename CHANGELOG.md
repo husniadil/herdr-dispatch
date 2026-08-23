@@ -7,6 +7,22 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+The report address gained a middle rung. `HDIS_DISPATCHER_PANE` was the task's
+pane of origin, else the daemon's base pane, and a task an operator filed at a
+terminal names no pane — so every report for one went to whoever started the
+daemon, even while another live session was sitting in that very repository
+and was relayed the report by hand. Between the two rungs the daemon now takes
+a LIVE pane whose cwd is the task's project, read from `herdr pane list`.
+Among several, the lowest pane id wins, because that is the answer that stays
+the same across ticks; a pane sitting under this daemon's own checkout root is
+never chosen, so a worker for that project does not become the address. The
+base pane stays as the last rung, so a machine with nothing live still answers
+somewhere. The workspace a worker's tab opens in comes from the same resolved
+desk rather than a second rule of its own, and the pane list is read once per
+spawn instead of twice. Nothing a caller passes changes: the CLI, the MCP tool
+list, the JSON shapes and the error codes are untouched, and the board stores
+nothing new.
+
 The trust-folder dialog is answered again. `TrustDialogMarkers` held one
 phrase, `"do you trust the files in this folder"`, and claude 2.1.239 reworded
 that dialog, so `answerStartupDialog` matched nothing at any pane width and

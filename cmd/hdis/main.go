@@ -170,7 +170,11 @@ func serve(argv []string) error {
 			// How many workers may share one tab before the next opens its
 			// own, which is the measured readable width turned into a count.
 			MaxPanesPerTab: cfg.Layout.MaxPanesPerTab,
-			Log:            log.Default(),
+			// The bound the reap is drawn at, read the other way round: a
+			// pane sitting under it is a worker of this daemon's own, and
+			// never the desk a report is owed at.
+			OwnTrees: config.WorktreeDir(),
+			Log:      log.Default(),
 		},
 		// A verifier gets a checkout of its own, never the project directory
 		// its worker holds and the operator reviews in.

@@ -312,6 +312,12 @@ type Pipeline struct {
 	MaxPanesPerTab int
 	// Sleep is time.Sleep unless a test replaces it.
 	Sleep func(time.Duration)
+	// OwnTrees is the directory this dispatcher creates its checkouts
+	// under, the same bound the reap is drawn at. A pane sitting under it
+	// is one of this daemon's own workers, never a desk to report to.
+	// Empty leaves nothing excluded, which is right for a daemon that
+	// hands out no checkouts.
+	OwnTrees string
 
 	// settings is the pane each spawn's settings file was written for, and
 	// the only thing keeping the file findable: nothing else in this repo
@@ -340,16 +346,17 @@ type Request struct {
 	// Label is what the worker's tab is called, for an operator to find and
 	// for this dispatcher to recognise. Empty means the request's Name.
 	Label string
-	// OriginPane is the pane the task was created from, and the address the
-	// report is owed at. It is empty for a task nothing with a pane filed,
-	// and then BasePane is the only address there is.
+	// OriginPane is the pane the task was created from, and the first
+	// address the report is owed at. It is empty for a task nothing with a
+	// pane filed, and then the desk is looked for in the pane list.
 	OriginPane string
+	// Project is the task's project directory, as the board records it. It
+	// is what a live pane's cwd is measured against to find the desk that
+	// owns the work; empty means no desk can be found that way. It is NOT
+	// the worker's Cwd, which is a checkout of its own.
+	Project string
 }
 
-// reportPane is where whatever comes up in the pane owes its report: the
-// pane the task came from when the board named one, and the daemon's own
-// pane otherwise. It is never the pane the worker is split off — this
-// daemon has only its own pane to split from, wherever the task came from.
 // label is the tab name this request asks for.
 func (r Request) label() string {
 	if r.Label != "" {
@@ -358,11 +365,69 @@ func (r Request) label() string {
 	return r.Name
 }
 
-func (r Request) reportPane() string {
-	if r.OriginPane != "" {
-		return r.OriginPane
+// desk is the pane that owns a task's work, and the ONE answer behind both
+// questions a placement asks: where the report is owed, and which workspace
+// the worker's tab opens in. Three rungs, in order:
+//
+//  1. the pane the board says the task was filed from. Someone with a pane
+//     asked for this work, and they are the desk.
+//  2. a LIVE pane whose cwd resolves to the task's project. A task filed at a
+//     terminal names no pane, but the session already sitting in that
+//     repository is the desk that owns the work — evidence Herdr keeps,
+//     rather than a field somebody has to remember to set.
+//  3. this daemon's own pane. A machine with nothing live still answers
+//     somewhere, and that is the operator who started the daemon.
+//
+// It is never the pane the worker is split off — this daemon has only its own
+// pane to split from, wherever the task came from.
+func (p *Pipeline) desk(panes []herdr.Agent, req Request) string {
+	if req.OriginPane != "" {
+		return req.OriginPane
 	}
-	return r.BasePane
+	if pane := p.inProject(panes, req.Project); pane != "" {
+		return pane
+	}
+	return req.BasePane
+}
+
+// inProject is the lowest pane id among the live panes sitting in the given
+// project, and empty when none is.
+//
+// The LOWEST id is the rule, and the reason is that it is stable: the same
+// project resolves to the same desk on every tick, so reports for one
+// repository do not wander between windows as panes come and go. Most
+// recently active would be a guess about which human is watching, and
+// whatever a map iteration hands back first is not a rule at all.
+//
+// A checkout of this dispatcher's own is excluded before anything is
+// compared. Task 40 puts every worker in a worktree of its task's project, so
+// without that bound the first worker for a project would become the desk and
+// every later report for it would be delivered to a worker.
+func (p *Pipeline) inProject(panes []herdr.Agent, project string) string {
+	if project == "" {
+		return ""
+	}
+	best := ""
+	for _, pane := range panes {
+		if pane.Cwd == "" || under(pane.Cwd, p.OwnTrees) || !under(pane.Cwd, project) {
+			continue
+		}
+		if best == "" || pane.PaneID < best {
+			best = pane.PaneID
+		}
+	}
+	return best
+}
+
+// under says whether dir is root or sits inside it. The separator is what
+// makes it a directory test rather than a string test: a sibling checkout
+// named after the project with something appended is a different repository.
+func under(dir, root string) bool {
+	if root == "" {
+		return false
+	}
+	root = strings.TrimSuffix(root, string(os.PathSeparator))
+	return dir == root || strings.HasPrefix(dir, root+string(os.PathSeparator))
 }
 
 // Run brings up one worker and returns the pane it lives in. A failure the
@@ -434,15 +499,24 @@ func (p *Pipeline) Run(ctx context.Context, req Request) (string, error) {
 // report address and its cache TTL whether it was the first in a tab or the
 // fifth.
 func (p *Pipeline) place(ctx context.Context, req Request) (string, error) {
+	// One read of the pane list, one desk, and both answers taken from it.
+	panes, err := p.Herdr.PaneList(ctx)
+	if err != nil {
+		// An unreadable pane list costs the evidence, not the worker: the
+		// board's own pane of origin still answers, and the daemon's pane
+		// is behind it.
+		p.logf("the pane list could not be read, so the desk is whatever the board named: %v", err)
+	}
+	desk := p.desk(panes, req)
 	env := []string{
-		DispatcherPaneVar + "=" + req.reportPane(),
+		DispatcherPaneVar + "=" + desk,
 		ShortPromptCacheVar + "=1",
 	}
-	ws := p.workspaceFor(ctx, req)
+	ws := workspaceOf(panes, desk, req.BasePane)
 
-	if tab, panes := p.roomInOwnTab(ctx, ws, req.label()); tab != "" {
-		target, direction := config.GridSplit(len(panes))
-		pane, err := p.Herdr.PaneSplit(ctx, panes[target-1], direction, "0.5", req.Cwd, env...)
+	if tab, held := p.roomInOwnTab(ctx, panes, ws, req.label()); tab != "" {
+		target, direction := config.GridSplit(len(held))
+		pane, err := p.Herdr.PaneSplit(ctx, held[target-1], direction, "0.5", req.Cwd, env...)
 		if err == nil {
 			p.remember(pane, tab)
 			return pane, nil
@@ -470,12 +544,8 @@ func (p *Pipeline) place(ctx context.Context, req Request) (string, error) {
 // operator made is never a candidate, and neither is a tab this dispatcher
 // opened for a DIFFERENT task: the label is the operator's signpost to the
 // work, and a tab holding two tasks names only one of them.
-func (p *Pipeline) roomInOwnTab(ctx context.Context, ws, label string) (tab string, held []string) {
+func (p *Pipeline) roomInOwnTab(ctx context.Context, panes []herdr.Agent, ws, label string) (tab string, held []string) {
 	tabs, err := p.Herdr.Tabs(ctx)
-	if err != nil {
-		return "", nil
-	}
-	panes, err := p.Herdr.PaneList(ctx)
 	if err != nil {
 		return "", nil
 	}
@@ -514,30 +584,25 @@ func (p *Pipeline) logf(format string, args ...any) {
 	}
 }
 
-// workspaceFor is the workspace a worker's tab is opened in: the one the
-// task was FILED from when the board named a pane and that pane is still
-// alive, and this daemon's own otherwise.
+// workspaceOf is the workspace a worker's tab is opened in: the desk's own
+// when Herdr is holding that pane, and this daemon's otherwise.
 //
-// Following the origin pane is what puts a worker where the person who asked
-// for it is looking. It is a preference and never a requirement: a task filed
+// Opening beside the desk is what puts a worker where the person who owns the
+// work is looking. It is a preference and never a requirement: a task filed
 // from a pane that has since gone is an ordinary task, and refusing to spawn
 // for it would strand work on nothing worse than a closed window. Every
-// failure here — an origin pane the board never named, a pane list that
-// cannot be read, a daemon whose own pane Herdr does not list — falls back
-// one step at a time and ends at the empty string, which lets Herdr choose.
-func (p *Pipeline) workspaceFor(ctx context.Context, req Request) string {
-	panes, err := p.Herdr.PaneList(ctx)
-	if err != nil {
-		return ""
-	}
+// failure here — a desk Herdr does not list, a pane list that could not be
+// read, a daemon whose own pane is not listed either — falls back one step at
+// a time and ends at the empty string, which lets Herdr choose.
+func workspaceOf(panes []herdr.Agent, desk, base string) string {
 	at := make(map[string]string, len(panes))
 	for _, pane := range panes {
 		at[pane.PaneID] = pane.WorkspaceID
 	}
-	if ws := at[req.OriginPane]; req.OriginPane != "" && ws != "" {
+	if ws := at[desk]; ws != "" {
 		return ws
 	}
-	return at[req.BasePane]
+	return at[base]
 }
 
 // TabOf is the tab a spawn placed a pane in, for the dispatcher to record on
