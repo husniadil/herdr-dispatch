@@ -13,14 +13,17 @@ func TestEveryVerbIsWholeOnBothDoors(t *testing.T) {
 		if len(v.CLI) == 0 {
 			t.Errorf("verb %q has no CLI subcommand", v.Name)
 		}
-		if strings.ContainsAny(v.Name, "_ ") {
-			t.Errorf("verb %q is not a bare word, and the MCP tool name is the verb", v.Name)
+		// The MCP tool name IS the verb, and the CLI path is the same verb
+		// written as words. Reading one off the other is what keeps
+		// `parked list` and `parked_list` the same thing on both doors.
+		if want := strings.Join(v.CLI, "_"); v.Name != want {
+			t.Errorf("verb %q is served over CLI as %q, which is the tool name %q", v.Name, strings.Join(v.CLI, " "), want)
 		}
 		for _, a := range v.Args {
 			if a.Name == "" || a.Desc == "" {
 				t.Errorf("verb %q has an unnamed or undescribed argument", v.Name)
 			}
-			if a.Type != String {
+			if a.Type != String && a.Type != Bool {
 				t.Errorf("verb %q argument %q has type %q, which no door can render", v.Name, a.Name, a.Type)
 			}
 		}
@@ -60,16 +63,53 @@ func TestByCLIMatchesTheSubcommandPath(t *testing.T) {
 	}
 }
 
-// The table is pinned so a verb is added on purpose. It moved once, from
-// three to four: stop joined it because a daemon a door autostarted has no
-// terminal to answer SIGINT from and could only be killed by pid. stop is
-// CLI-only, so the MCP tool list stayed at three.
-func TestTheTableIsTheFourVerbsAndNoMore(t *testing.T) {
+// The table is pinned so a verb is added on purpose. It has moved twice: stop
+// joined it because a daemon a door autostarted has no terminal to answer
+// SIGINT from and could only be killed by pid, and the two parked verbs
+// joined it with the §9 policy gate, which has nowhere to put a deferral an
+// operator cannot then read and resolve.
+// §9.1 with §9.2: a verb that changes the world passes the gate, and one that
+// changes the world without passing it says why. Neither half is inferable
+// from the code — a verb added with Mutates false is simply never checked, and
+// that reads exactly like a verb nobody has gated yet.
+func TestEveryWritingVerbEitherPassesTheGateOrSaysWhyNot(t *testing.T) {
+	for _, v := range All {
+		switch {
+		case !v.Mutates && (v.Gated != "" || v.Ungated != ""):
+			t.Errorf("verb %q reads only and still answers to the policy gate", v.Name)
+		case v.Mutates && v.Gated == "" && v.Ungated == "":
+			t.Errorf("verb %q changes the world, passes no name to the policy gate, and says nothing about why (§9.1)", v.Name)
+		case v.Mutates && v.Gated != "" && v.Ungated != "":
+			t.Errorf("verb %q is gated as %q and also excuses itself; one or the other", v.Name, v.Gated)
+		}
+		// §9.4 fixes the shape of the name a policy plugin matches on.
+		if v.Gated != "" && v.Gated != "dispatch."+v.Name {
+			t.Errorf("verb %q is gated as %q; §9.4 names it dispatch.%s", v.Name, v.Gated, v.Name)
+		}
+	}
+}
+
+// §9.4: the gated set is a list a future policy plugin names, so it moves on
+// purpose and not as a side effect of a verb gaining Mutates.
+func TestTheGatedSetIsTheTwoWorldChangingVerbs(t *testing.T) {
+	got := GatedVerbs()
+	want := []string{"dispatch.dispatch", "dispatch.stop"}
+	if len(got) != len(want) {
+		t.Fatalf("gated verbs = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("gated verbs = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestTheTableIsTheSixVerbsAndNoMore(t *testing.T) {
 	var got []string
 	for _, v := range All {
 		got = append(got, v.Name)
 	}
-	want := []string{"doctor", "dispatch", "stop", "status"}
+	want := []string{"doctor", "dispatch", "stop", "status", "parked_list", "parked_resolve"}
 	if len(got) != len(want) {
 		t.Fatalf("verbs = %v, want %v", got, want)
 	}

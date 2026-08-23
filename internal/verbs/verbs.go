@@ -5,9 +5,13 @@
 // something an operator discovers.
 package verbs
 
-// String is the only kind of argument the first slice has. A second kind
-// arrives with the first verb that needs one, and not before.
-const String = "string"
+// String and Bool are the kinds of argument a verb takes. Bool arrived with
+// `parked resolve --reject`, which is a switch and not a value: rendering it
+// as a string would have every door asking a caller to write the word "true".
+const (
+	String = "string"
+	Bool   = "bool"
+)
 
 // Arg is one parameter of a verb. A positional arg is a CLI positional and an
 // ordinary named field over MCP and the socket.
@@ -37,6 +41,31 @@ type Verb struct {
 	// NoAutostart sends the verb to whatever daemon is already listening
 	// and refuses when none is, instead of starting one.
 	NoAutostart bool
+	// Mutates says the verb changes the world, which is what §9.1 puts
+	// behind the policy gate. A verb that only reads is neither gated nor
+	// asked to explain itself.
+	Mutates bool
+	// Gated is the §9.4 verb name handed to the policy gate, `<short
+	// name>.<verb>` with the short name §13.2 fixes. Empty means this verb
+	// passes no name, which a Mutates verb must justify in Ungated.
+	Gated string
+	// Ungated is why a verb that writes passes no name to the policy gate.
+	// Required exactly when Mutates is true and Gated is empty, so the
+	// decision is written down beside the verb rather than inferred from
+	// its absence.
+	Ungated string
+}
+
+// GatedVerbs is the §9.4 list a policy plugin names, in registry order. The
+// README carries the same list, and a test reads one against the other.
+func GatedVerbs() []string {
+	out := []string{}
+	for _, v := range All {
+		if v.Gated != "" {
+			out = append(out, v.Gated)
+		}
+	}
+	return out
 }
 
 // All is the registry. Order is the order the CLI lists them in.
@@ -63,6 +92,8 @@ var All = []Verb{
 		Args: []Arg{
 			{Name: "task", Type: String, Desc: "The task id or its number on the board", Required: true, Positional: true},
 		},
+		Mutates: true,
+		Gated:   "dispatch.dispatch",
 	},
 	{
 		Name: "stop", CLI: []string{"stop"},
@@ -78,6 +109,8 @@ var All = []Verb{
 			"it, the same way you would before any act whose blast radius is " +
 			"everyone else's work.",
 		NoAutostart: true,
+		Mutates:     true,
+		Gated:       "dispatch.stop",
 	},
 	{
 		Name: "status", CLI: []string{"status"},
@@ -87,6 +120,40 @@ var All = []Verb{
 			"the worker's agent_status as herdr reports it, and the branch its " +
 			"commits are on — marked behind when the project's HEAD has moved " +
 			"past that branch, which is what makes a fast-forward merge refuse.",
+	},
+	{
+		Name: "parked_list", CLI: []string{"parked", "list"},
+		Short: "List the actions the policy gate deferred to the operator",
+		Long: "A gate that answers defer parks the call instead of performing " +
+			"it (§9.3) and refuses with DENIED carrying the parked_id. This is " +
+			"where those rows are read: who asked, which gated verb, what " +
+			"target, the reason the gate gave, and whether the action is still " +
+			"waiting or was resolved and then failed. A failed row is not " +
+			"finished business — the operator decided and the verb did not run.",
+	},
+	{
+		Name: "parked_resolve", CLI: []string{"parked", "resolve"},
+		Short: "Let a parked action through, or reject it",
+		Long: "Re-runs the parked verb under the subject the gate stopped, never " +
+			"the resolver's (§9.3), and skips the gate, because the resolution " +
+			"IS the decision the gate deferred. The row records who resolved " +
+			"it. With --refuse the verb never runs and the row is closed. This " +
+			"is the operator's authority and therefore advice rather than a " +
+			"refusal this door makes (§3.7): confirm with the user before " +
+			"resolving one on their behalf.",
+		Args: []Arg{
+			{Name: "id", Type: String, Desc: "The parked action id, as DENIED reported it", Required: true, Positional: true},
+			// Spelled `refuse`, where the sibling plugins spell the same
+			// switch with the board's review word. That word as a Go
+			// argument is exactly what
+			// TestNoSourceFilePassesAReviewVerbAsAnArgument forbids: this
+			// binary never rules on a board submission, and a guard that
+			// reads the word literally is worth more than matching a
+			// sibling's spelling for a switch nothing shares.
+			{Name: "refuse", Type: Bool, Desc: "Close the action without running the verb"},
+		},
+		Mutates: true,
+		Ungated: "resolving a deferral is the answer to a gate that already spoke; gating it would let a gate park its own resolution and strand every deferred action",
 	},
 }
 

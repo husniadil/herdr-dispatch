@@ -444,6 +444,11 @@ type Config struct {
 	// not started inside one and was given no -pane. Without it, and
 	// without either of those, nothing can be spawned at all.
 	Pane string `json:"pane"`
+	// Gate is the §9.2 policy gate command, argv-style. Absent or empty is
+	// the unconfigured gate, which allows; anything else is a command that
+	// reads {subject, verb, target} on stdin and prints a decision, and any
+	// failure to get a well-formed one denies.
+	Gate []string `json:"gate"`
 }
 
 // Parse reads a config document and refuses one it could not resolve later.
@@ -505,6 +510,14 @@ func Parse(b []byte) (Config, error) {
 	if c.Layout.MinPaneColumns < MeasuredReadableColumns {
 		return Config{}, fmt.Errorf("hdis config: layout.min_pane_columns is %d, and %d is the narrowest pane the detection text was measured to read correctly at; below it the dispatcher cannot trust what it reads off a worker",
 			c.Layout.MinPaneColumns, MeasuredReadableColumns)
+	}
+	// A gate configured to the empty string is not an unconfigured gate: it
+	// is a command nobody can run, and §9.2 makes that deny every time. An
+	// operator who meant to turn the gate off deletes the key.
+	for i, word := range c.Gate {
+		if strings.TrimSpace(word) == "" {
+			return Config{}, fmt.Errorf("hdis config: gate word %d is empty; remove the gate key to leave the policy gate unconfigured, which allows (§9.2)", i)
+		}
 	}
 	if c.MaxWorkers == 0 {
 		c.MaxWorkers = DefaultMaxWorkers

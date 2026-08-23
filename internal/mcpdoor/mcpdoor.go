@@ -16,6 +16,7 @@ import (
 
 	"github.com/husniadil/herdr-dispatch/internal/client"
 	"github.com/husniadil/herdr-dispatch/internal/codes"
+	"github.com/husniadil/herdr-dispatch/internal/daemon"
 	"github.com/husniadil/herdr-dispatch/internal/protocol"
 	"github.com/husniadil/herdr-dispatch/internal/verbs"
 )
@@ -75,7 +76,11 @@ func tool(v verbs.Verb) *mcp.Tool {
 	props := map[string]any{}
 	var required []string
 	for _, a := range v.Args {
-		props[a.Name] = map[string]any{"type": "string", "description": a.Desc}
+		kind := "string"
+		if a.Type == verbs.Bool {
+			kind = "boolean"
+		}
+		props[a.Name] = map[string]any{"type": kind, "description": a.Desc}
 		if a.Required {
 			required = append(required, a.Name)
 		}
@@ -148,12 +153,8 @@ func check(v verbs.Verb, args map[string]any) error {
 			}
 			continue
 		}
-		s, ok := raw.(string)
-		if !ok {
-			return codes.Refusef(codes.Invalid, "%s wants %s as a string", v.Name, a.Name)
-		}
-		if a.Required && s == "" {
-			return codes.Refusef(codes.Invalid, "%s needs %s", v.Name, a.Name)
+		if err := daemon.CheckArg(v, a, raw); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -168,9 +169,13 @@ func failure(err error) *mcp.CallToolResult {
 	if errors.As(err, &named) {
 		message = named.Message
 	}
-	body, _ := json.Marshal(map[string]any{
-		"error": map[string]string{"code": string(code), "message": message},
-	})
+	envelope := map[string]string{"code": string(code), "message": message}
+	// §9.3: a DENIED the gate deferred names the row the operator resolves.
+	// A caller told only that it was denied has nothing to point at.
+	if id := codes.ParkedOf(err); id != "" {
+		envelope["parked_id"] = id
+	}
+	body, _ := json.Marshal(map[string]any{"error": envelope})
 	return &mcp.CallToolResult{
 		IsError: true,
 		Content: []mcp.Content{&mcp.TextContent{Text: string(body)}},

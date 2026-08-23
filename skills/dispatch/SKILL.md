@@ -111,7 +111,8 @@ first — a refusal is usually one of those four.
 ## Through MCP instead of the CLI
 
 Every verb this binary has is one of the `herdr-dispatch` server's MCP tools,
-named by the verb alone — four of them: `doctor`, `dispatch`, `status`, `stop`.
+named by the verb alone — six of them: `doctor`, `dispatch`, `status`, `stop`,
+`parked_list`, `parked_resolve`.
 Your client shows them under the server's own label, which is what tells you
 whose `dispatch` you are calling. Nothing is reachable by shell alone, so a
 harness with no terminal loses no verb.
@@ -121,13 +122,35 @@ driving keeps running in its pane, and no new one comes up until a daemon is
 started again — so confirm with the operator before calling it, the same way
 you would before any act whose blast radius is everyone else's work.
 
+## When the policy gate answers
+
+`dispatch` and `stop` are the two verbs that change the world here, so both
+pass the operator's policy gate before anything happens. Most fleets configure
+none, and an unconfigured gate allows everything — you will never see it.
+
+When one is configured it can answer three ways. Allow is silent. **Deny** is
+`DENIED`, and the message carries the gate's own reason; that is final, so
+read the reason and do not retry. **Defer** is also `DENIED`, and the envelope
+carries a `parked_id`: your call was recorded rather than performed, and it is
+waiting for the operator.
+
+```sh
+hdis parked list                     hdis parked resolve <id>
+hdis parked list --json              hdis parked resolve <id> --refuse
+```
+
+A parked call is **the operator's to decide**, not yours. Tell them the id and
+what you were trying to do; resolve one yourself only when they have said to.
+Resolving re-runs the verb as whoever the gate stopped, never as you, and the
+row records that you were the one who let it through.
+
 ## Everything else
 
 ```sh
 hdis status --json                   hdis --help
 ```
 
-`hdis --help` lists the same four verbs the door serves, for a caller with a
+`hdis --help` lists the same six verbs the door serves, for a caller with a
 shell. Add `--json` to
 any verb for one machine-readable document, and those bytes are the same
 document the MCP tool hands its caller.

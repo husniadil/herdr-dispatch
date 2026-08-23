@@ -7,6 +7,29 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+**There is a §9 policy gate, and two new verbs came with it.** `dispatch` and
+`stop` now pass one `gate()` before doing anything, named to a policy as
+`dispatch.dispatch` and `dispatch.stop`. With no `gate` key in the config the
+gate allows everything and nothing a caller does changes — which is every
+fleet that has not configured one. Where one IS configured, a gated call can
+come back `DENIED` with the gate's reason, or `DENIED` with a `parked_id`
+naming a row the operator resolves; `parked_id` is a new optional field in the
+`--json` failure envelope and on the MCP tool error, and a caller that ignores
+it reads the envelope exactly as before. The gate fails closed: unreachable,
+non-zero, malformed, oversized or slow is `deny`.
+
+`hdis parked list` / `parked_list` and `hdis parked resolve <id>` /
+`parked_resolve` are the two new verbs, on both doors, and `hdis doctor` gains
+a `gate` object saying whether one is configured, which verbs pass it, and how
+many calls are waiting on the operator. The bindings document gains an
+optional `parked` array; a document written by a binary without the gate still
+reads, and one written with it stays readable to a binary that predates it.
+
+The refuse switch is `hdis parked resolve <id> --refuse`, where the sibling
+plugins spell the same switch `--reject`. This binary never rules on a board
+submission and a guard here fails on the board's review words appearing as
+arguments in its own source.
+
 `hdis version` prints the plugin name and the contract revision beside the
 version, and takes `--json` for the same three facts, which is the shape both
 siblings already had. A caller parsing the bare line gets more on it than

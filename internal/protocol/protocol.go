@@ -28,10 +28,13 @@ type Response struct {
 	Error  *Failure        `json:"error,omitempty"`
 }
 
-// Failure is a refusal with a name on it.
+// Failure is a refusal with a name on it. ParkedID is the §9.3 addition a
+// DENIED carries when the policy gate deferred the call rather than refusing
+// it: the row the operator resolves, and the only handle the caller has on it.
 type Failure struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code     string `json:"code"`
+	Message  string `json:"message"`
+	ParkedID string `json:"parked_id,omitempty"`
 }
 
 // Caller names who asked, for the daemon's log. It is a record, never a

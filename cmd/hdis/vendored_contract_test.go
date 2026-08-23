@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/husniadil/herdr-dispatch/internal/verbs"
 	"github.com/husniadil/herdr-dispatch/internal/version"
 )
 
@@ -255,4 +256,33 @@ func gapRecorded(t *testing.T, declared, vendored string) bool {
 		}
 	}
 	return false
+}
+
+// §9.4: "A plugin lists its gated verbs in its README so a future policy
+// plugin can name them." A list written by hand is a list that stops being
+// true the first time a verb is gated without the page being touched — and
+// the reader it is written for is a policy author who has no other way to
+// learn the names.
+func TestTheREADMEListsTheGatedVerbs(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	readme := string(raw)
+	gated := verbs.GatedVerbs()
+	if len(gated) == 0 {
+		t.Fatal("no verb passes the policy gate, and §9.1 names dispatch as one that must")
+	}
+	for _, name := range gated {
+		if !strings.Contains(readme, "`"+name+"`") {
+			t.Errorf("the README does not name %s, which §9.4 makes it list", name)
+		}
+	}
+	// The other direction: a name the README claims is gated and the
+	// registry does not gate is a policy that will never be asked.
+	for _, m := range regexp.MustCompile("`(dispatch\\.[a-z_]+)`").FindAllStringSubmatch(readme, -1) {
+		if !contains(gated, m[1]) {
+			t.Errorf("the README names %s as a gated verb and the registry does not gate it", m[1])
+		}
+	}
 }

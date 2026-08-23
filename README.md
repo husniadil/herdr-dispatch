@@ -142,6 +142,8 @@ unreachable to a harness that has no shell.
 | `hdis dispatch <task>`| `dispatch`       | Reserve one ready task for the next tick         |
 | `hdis stop`           | `stop`           | Ask the running daemon to shut down              |
 | `hdis status`         | `status`         | What the dispatcher is driving now               |
+| `hdis parked list`    | `parked_list`    | Calls the policy gate deferred to the operator   |
+| `hdis parked resolve <id>` | `parked_resolve` | Let one through, or close it unrun          |
 
 `stop` is the one verb whose blast radius is not one task, and its description
 on both doors says so. Every worker the dispatcher is driving keeps running in
@@ -203,6 +205,78 @@ ran in, or `unknown` for a caller on another harness, and grants nothing for
 it. Every caller here is the operator's own tooling reaching a socket only
 the operator can open, and the board only ever hears from this binary as
 `plugin:hdis` whoever asked.
+
+## The policy gate
+
+Every verb that changes the world passes one gate before anything happens
+(§9.1). Here that is two verbs, and they are named to a policy in the form
+§9.4 fixes:
+
+| Gated verb          | The call it is asked about                       |
+| ------------------- | ------------------------------------------------ |
+| `dispatch.dispatch` | Reserving a ready task and bringing a worker up  |
+| `dispatch.stop`     | Shutting the whole dispatcher down               |
+
+The other verbs are not gated, and each says why rather than leaving it to be
+inferred: `doctor` and `status` only read, and `parked resolve` is the answer
+to a gate that has already spoken — gating it would let a gate park its own
+resolution and strand every deferred call.
+
+The gate is **configured, not built in** (§9.2). With no `gate` key the gate
+allows everything, which is what most fleets want and what `hdis doctor` says
+on its `gate` line. Set it to a command and every gated call runs it:
+
+```json
+{ "gate": ["/usr/local/bin/fleet-policy", "check"] }
+```
+
+The command reads one JSON document on stdin — `{"subject","verb","target"}`,
+where the subject is the pane the caller ran in (`agent:wM:p3`) or `unknown`,
+and the target is the task the call named — and prints one back:
+
+```json
+{ "decision": "allow" }
+{ "decision": "deny",  "reason": "not during a release freeze" }
+{ "decision": "defer", "reason": "a human should look at this one" }
+```
+
+**The gate fails closed.** Unreachable, non-zero, malformed, oversized,
+unknown decision, no answer within five seconds: every one of them is `deny`,
+and the refusal carries which. A gate that cannot answer has not allowed
+anything.
+
+`defer` means park it (§9.3). The call is recorded and not performed, and the
+caller is refused with `DENIED` whose envelope carries a `parked_id`:
+
+```json
+{ "error": { "code": "DENIED", "message": "the policy gate parked dispatch.dispatch for the operator: a human should look at this one", "parked_id": "pk-1774310400000-3f9a12c7" } }
+```
+
+The row waits in the same document the bindings live in, so it survives a
+restart — an operator decides at their own pace, and a deferral that vanished
+would be a call its caller was answered for and nobody can find.
+
+```sh
+hdis parked list                     # what is waiting, and why
+hdis parked resolve pk-…             # let it through
+hdis parked resolve pk-… --refuse    # close it, the verb never runs
+```
+
+Resolving **re-runs the verb under the subject the gate stopped**, never the
+resolver's, and does not consult the gate again — the resolution is the
+decision the gate deferred, and a second ask would park it forever. The row
+records who resolved it, because otherwise the only trail names the caller
+that was stopped and nobody who decided it could proceed. Only one resolve
+wins; the second meets a row that has already been decided rather than a
+dispatch that has already happened twice. And a row the operator let through
+whose verb then errored is marked `failed` and stays in front of them, because
+a call that did not happen must not read like one that did.
+
+The switch is spelled `--refuse` where the sibling plugins spell it `--reject`.
+This binary never rules on a board submission, and a guard here fails on the
+board's review words appearing as arguments in its own source; keeping that
+guard sharp is worth more than matching a sibling's spelling for a switch
+nothing shares.
 
 ## Configuration
 

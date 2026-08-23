@@ -58,6 +58,10 @@ type Reservation struct {
 type State struct {
 	Bindings     []decide.Binding
 	Reservations []Reservation
+	// Parked is the actions the policy gate deferred (§9.3). They outlive
+	// the process because the operator resolves them at their own pace, and
+	// they are in this document because it is the only one there is.
+	Parked []Parked
 }
 
 type document struct {
@@ -66,6 +70,9 @@ type document struct {
 	// Reservations is omitted when there are none, so a document this
 	// binary writes stays readable to one that predates them.
 	Reservations []reservation `json:"reservations,omitempty"`
+	// Parked is omitted when there are none, so a document written by a
+	// binary with a policy gate stays readable to one without.
+	Parked []Parked `json:"parked,omitempty"`
 }
 
 // reservation is one reservation as it is written.
@@ -155,7 +162,7 @@ func (b *Bindings) Load() (State, error) {
 			Attempts: r.Attempts,
 		})
 	}
-	return State{Bindings: out, Reservations: held}, nil
+	return State{Bindings: out, Reservations: held, Parked: doc.Parked}, nil
 }
 
 // Save writes the whole set, atomically: a temp file in the same directory,
@@ -187,6 +194,7 @@ func (b *Bindings) Save(state State) error {
 			Attempts: x.Attempts,
 		})
 	}
+	doc.Parked = state.Parked
 	raw, err := json.Marshal(doc)
 	if err != nil {
 		return fmt.Errorf("encode the bindings: %w", err)

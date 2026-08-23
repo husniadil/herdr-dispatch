@@ -16,15 +16,18 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/husniadil/herdr-dispatch/internal/codes"
 	"github.com/husniadil/herdr-dispatch/internal/config"
+	"github.com/husniadil/herdr-dispatch/internal/gate"
 	"github.com/husniadil/herdr-dispatch/internal/htask"
 	"github.com/husniadil/herdr-dispatch/internal/loop"
 	"github.com/husniadil/herdr-dispatch/internal/protocol"
+	"github.com/husniadil/herdr-dispatch/internal/store"
 	"github.com/husniadil/herdr-dispatch/internal/verbs"
 	"github.com/husniadil/herdr-dispatch/internal/version"
 )
@@ -218,7 +221,7 @@ func (d *Daemon) answer(ctx context.Context, conn net.Conn) {
 	result, err := d.Handle(ctx, req)
 	if err != nil {
 		d.write(conn, protocol.Response{Error: &protocol.Failure{
-			Code: string(codes.Of(err)), Message: message(err)}})
+			Code: string(codes.Of(err)), Message: message(err), ParkedID: codes.ParkedOf(err)}})
 		return
 	}
 	d.write(conn, protocol.Response{Result: result})
@@ -243,7 +246,17 @@ func (d *Daemon) Handle(ctx context.Context, req protocol.Request) (json.RawMess
 	if err := check(v, req.Args); err != nil {
 		return nil, err
 	}
+	if err := d.pass(v, req); err != nil {
+		return nil, err
+	}
+	return d.serve(ctx, v, req)
+}
 
+// serve runs one verb that has already been checked and passed the gate. It
+// is separate from Handle because §9.3 re-runs a resolved verb here and MUST
+// NOT put it through the gate again: the resolution is the decision the gate
+// deferred, and a second ask would park it forever.
+func (d *Daemon) serve(ctx context.Context, v verbs.Verb, req protocol.Request) (json.RawMessage, error) {
 	switch v.Name {
 	case "doctor":
 		return encode(d.doctor(ctx))
@@ -260,6 +273,11 @@ func (d *Daemon) Handle(ctx context.Context, req protocol.Request) (json.RawMess
 	case "status":
 		st, err := d.Loop.Status(ctx)
 		return encode(st, err)
+	case "parked_list":
+		held := d.Loop.Parked()
+		return encode(ParkedReport{Parked: held, Count: len(held)}, nil)
+	case "parked_resolve":
+		return encode(d.resolveParked(ctx, req))
 	case "stop":
 		if d.halt == nil {
 			return nil, codes.Refusef(codes.NotRunning, "this daemon is not serving")
@@ -330,6 +348,11 @@ type DoctorReport struct {
 	// Verify is the verification lane: whether a submission earns a
 	// self-review shot in the pane that produced it.
 	Verify VerifyHealth `json:"verify"`
+	// Gate is the §9 policy gate: whether one is configured, what it is,
+	// which verbs pass through it, and how many calls it has parked and
+	// nobody has decided. An operator whose dispatch came back DENIED reads
+	// here first.
+	Gate GateHealth `json:"gate"`
 	// MinPaneColumns is the width a worker's pane must be readable at, and
 	// the reason every worker gets a tab of its own. Herdr reports no column
 	// count for a pane, so this is the one place an operator can see the
@@ -347,6 +370,21 @@ type DoctorReport struct {
 // already up.
 type VerifyHealth struct {
 	Enabled bool `json:"enabled"`
+}
+
+// GateHealth is the §9 policy gate as doctor reports it. §9.2 makes an
+// unconfigured gate allow, which is indistinguishable at the call site from a
+// configured one that allows — so whether one is configured at all is a fact
+// only doctor can give.
+type GateHealth struct {
+	Configured bool     `json:"configured"`
+	Command    []string `json:"command,omitempty"`
+	// Verbs is the §9.4 list, so an operator writing a policy reads the
+	// names it will be asked about off the running daemon.
+	Verbs []string `json:"verbs"`
+	// Parked is how many deferrals are waiting on the operator, or were
+	// resolved and then failed. Both want a human.
+	Parked int `json:"parked"`
 }
 
 // BoardHealth is the board's own report of itself, or why it gave none.
@@ -378,6 +416,12 @@ func (d *Daemon) doctor(ctx context.Context) (DoctorReport, error) {
 		Log:            d.LogPath,
 		Readopted:      d.Loop.Readopted(),
 		Verify:         VerifyHealth{Enabled: d.Loop.Config.Verify.Enabled},
+		Gate: GateHealth{
+			Configured: d.Policy().Configured(),
+			Command:    d.Policy().Command(),
+			Verbs:      verbs.GatedVerbs(),
+			Parked:     len(d.Loop.Parked()),
+		},
 		MinPaneColumns: d.Loop.Config.Layout.MinPaneColumns,
 		MaxPanesPerTab: d.Loop.Config.Layout.MaxPanesPerTab,
 	}
@@ -420,6 +464,25 @@ func check(v verbs.Verb, args map[string]any) error {
 			}
 			continue
 		}
+		if err := CheckArg(v, a, raw); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkArg holds one argument to the type the registry declares for it. Both
+// doors walk the same table, so it is one function rather than the same
+// switch written twice.
+// CheckArg is checkArg, exported for the MCP door, which publishes the schema
+// this checks against and so must check the same way.
+func CheckArg(v verbs.Verb, a verbs.Arg, raw any) error {
+	switch a.Type {
+	case verbs.Bool:
+		if _, ok := raw.(bool); !ok {
+			return codes.Refusef(codes.Invalid, "%s wants %s as true or false", v.Name, a.Name)
+		}
+	default:
 		s, ok := raw.(string)
 		if !ok {
 			return codes.Refusef(codes.Invalid, "%s wants %s as a string", v.Name, a.Name)
@@ -464,4 +527,129 @@ func (d *Daemon) logf(format string, args ...any) {
 		return
 	}
 	log.Printf(format, args...)
+}
+
+// Policy is the §9 gate as this daemon is configured for it. It is built per
+// call from the config the loop holds: the gate is a command name and a
+// timeout, so there is nothing to keep alive between calls, and reading it
+// here means a reloaded config takes effect without a second copy to keep in
+// step.
+func (d *Daemon) Policy() *gate.Gate {
+	if d.Loop == nil {
+		return gate.New(nil)
+	}
+	return gate.New(d.Loop.Config.Gate)
+}
+
+// pass is §9.1: every verb that changes the world goes through one gate
+// before doing anything. A verb with no §9.4 name passes nothing, and the
+// registry makes that a decision written down beside the verb rather than an
+// omission.
+//
+// The subject is the caller as the daemon records it — the pane a door runs
+// in, or `unknown` for a caller outside one. This binary derives no principal
+// and grants nothing for a pane (§3.4), so what the gate is told is what the
+// daemon knows, and never more.
+func (d *Daemon) pass(v verbs.Verb, req protocol.Request) error {
+	if v.Gated == "" {
+		return nil
+	}
+	target, _ := req.Args["task"].(string)
+	res := d.Policy().Check(gate.Request{Subject: req.Caller(), Verb: v.Gated, Target: target})
+	switch res.Decision {
+	case gate.Deny:
+		d.logf("the policy gate refused %s for %s: %s", v.Gated, req.Caller(), res.Reason)
+		return codes.Errorf(codes.Denied, "the policy gate refused %s: %s", v.Gated, res.Reason)
+	case gate.Defer:
+		// §9.3: park it. The call is recorded, not performed, and the
+		// caller is told DENIED with the row to name.
+		id, err := d.Loop.Park(store.Parked{
+			Subject: req.Caller(),
+			Verb:    v.Gated,
+			Target:  target,
+			Payload: req.Args,
+			Reason:  res.Reason,
+		})
+		if err != nil {
+			return err
+		}
+		d.logf("the policy gate parked %s for %s as %s: %s", v.Gated, req.Caller(), id, res.Reason)
+		return codes.Parked(id, "the policy gate parked %s for the operator: %s", v.Gated, res.Reason)
+	}
+	return nil
+}
+
+// ParkedReport is what parked_list answers with.
+type ParkedReport struct {
+	Parked []store.Parked `json:"parked"`
+	Count  int            `json:"count"`
+}
+
+// ParkedResolution says what became of one parked action.
+type ParkedResolution struct {
+	ID    string `json:"id"`
+	State string `json:"state"`
+	// Result is what the re-run verb answered, absent when the action was
+	// refused or the verb failed.
+	Result json.RawMessage `json:"result,omitempty"`
+}
+
+// resolveParked is the operator overruling the gate. §3.7 makes that advice an
+// agent confirms rather than a refusal this door makes, so any caller reaches
+// it — and the row records WHO, because §9.3 re-runs the verb under the
+// ORIGINAL subject and the trail would otherwise name only the caller the gate
+// stopped and no one who decided it could proceed.
+func (d *Daemon) resolveParked(ctx context.Context, req protocol.Request) (ParkedResolution, error) {
+	id, _ := req.Args["id"].(string)
+	refuse, _ := req.Args["refuse"].(bool)
+	state := store.ParkedResolved
+	if refuse {
+		state = store.ParkedRefused
+	}
+	// The move is the one-winner check and it happens BEFORE the verb runs:
+	// putting it after left a window in which two resolves both read the row
+	// as waiting and both ran the verb, with the side effect really happening
+	// twice and the loser told CONFLICT for work that had already committed.
+	was, err := d.Loop.ClaimParked(id, state, req.Caller())
+	if err != nil {
+		return ParkedResolution{}, err
+	}
+	if refuse {
+		d.logf("%s refused the parked %s (%s)", req.Caller(), was.Verb, id)
+		return ParkedResolution{ID: id, State: state}, nil
+	}
+	verb, ok := verbFromGated(was.Verb)
+	if !ok {
+		return ParkedResolution{}, codes.Refusef(codes.Invalid,
+			"parked verb %q is not a verb of this plugin", was.Verb)
+	}
+	// §9.3: the verb re-runs under the subject the gate stopped, never the
+	// resolver's. The gate is not consulted again — the resolution IS the
+	// decision it deferred, and asking a second time would park it forever.
+	rerun := protocol.Request{Verb: verb.Name, Args: was.Payload, Door: req.Door}
+	if pane, found := strings.CutPrefix(was.Subject, "agent:"); found {
+		rerun.Pane = pane
+	}
+	if rerun.Args == nil {
+		rerun.Args = map[string]any{}
+	}
+	d.logf("%s resolved the parked %s (%s), re-running it as %s", req.Caller(), was.Verb, id, was.Subject)
+	out, err := d.serve(ctx, verb, rerun)
+	if err != nil {
+		// The decision stands; the verb did not run. Say why, in the verb's
+		// own words, and leave the row saying so.
+		d.Loop.FailParked(id, message(err))
+		return ParkedResolution{}, err
+	}
+	return ParkedResolution{ID: id, State: state, Result: out}, nil
+}
+
+// verbFromGated maps a §9.4 gate name back to the verb it belongs to.
+func verbFromGated(gated string) (verbs.Verb, bool) {
+	for _, v := range verbs.All {
+		if v.Gated != "" && v.Gated == gated {
+			return v, true
+		}
+	}
+	return verbs.Verb{}, false
 }

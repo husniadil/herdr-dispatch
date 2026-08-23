@@ -31,15 +31,13 @@ import (
 // pinnedTools is the tool list this door publishes. Adding, renaming or
 // removing one is a deliberate change to a surface other harnesses call:
 // it moves this list in the same commit, and it is a breaking change.
-//
-// stop is a verb and is not here, on purpose: see
-// TestStopIsServedOnTheCLIDoorOnly for why the operator's brake stays off a
-// door every agent session holds one of.
 var pinnedTools = []string{
 	"doctor",
 	"dispatch",
 	"status",
 	"stop",
+	"parked_list",
+	"parked_resolve",
 }
 
 // inProcessDaemon is a real daemon over a fake board and a fake herdr. No

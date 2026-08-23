@@ -58,7 +58,7 @@ is written down.
 | §7.5 | Same reason, and the contract has a gap here rather than this plugin: §7.5 rests its declaration on "`<name> doctor` (§10.3) already prints the calling principal", which §10.3 does not require and this door has no principal to print. |
 | §5.2 | No SQLite store, so no schema and no migrations. §5.1's store choice is a recorded divergence in the README. |
 | §6.6 | No review semantics. The board's review gate is htask's, and this binary stops at review. |
-| §8.3, §9.3, §9.5 | No event hook and no policy gate. |
+| §8.3 | No event hook. |
 | §11.5 | Lease liveness and the sweep are htask's; a second writer racing them is the bug. |
 | §11.6 | The manifest declares no `[[panes]]`. |
 | §16.1 | Acceptance criteria are a board concept. |
@@ -73,7 +73,6 @@ reason it stands.
 |---|---|---|
 | §5.8 | `<name> dump --json` prints the whole store | No `dump` verb. The whole store is one JSON document at `<state_dir>/hdis-bindings.json`, already readable without this binary, which is the guarantee §5.8 exists for. A verb that only `cat`s it is on the list. |
 | §8.1, §8.2 | Events for every state change, and an `events` verb | No events and no `_events` table. Every state change here is a binding moving, and a binding is derivable from the board plus Herdr the moment a worker claims; the durable trail of what was dispatched is the board's own. Adding an event stream means adding the store §5.5 shapes it around. |
-| §9.1, §9.2, §9.4 | Every world-changing verb passes a `gate()`, configured and failing closed, and the gated verbs are listed in the README | No policy gate. `dispatch` is named in §9.1 as a verb that MUST pass one, so this is a divergence and not an exemption: the daemon is the operator's own, reached over a socket only the operator can open, and no principal here is anyone in particular (§3.4 above). The gate arrives with the first caller this daemon does not already trust. |
 | §10.1 | Config is TOML at `<config_dir>/<name>.toml` | Config is JSON at `<config_dir>/hdis.json`. JSON because the document is nested profiles and the standard library parses it; the dependency budget is what a TOML parser would have to earn its way past. The directory and the `HDIS_` env prefix are the BINARY's name and not the short name `dispatch` (§10.1 with §13.2): `hdis` is what a developer types and what the other two plugins' dirs are named after, and one plugin resolving `~/.config/dispatch` while its binary is `hdis` is a seam nobody would find. |
 | §11.2 | Feature-detect at daemon start with `herdr api schema --json` | Never read. Every Herdr verb this binary uses — `pane list`, `pane split`, `tab create`, `agent start`, `agent prompt`, `agent list` — has been in Herdr since before this plugin, and a missing one fails loud at the call with Herdr's own words. No request is gated on a capability, so there is nothing yet for the schema read to decide. |
 | §11.1 | Reach Herdr through `HERDR_BIN_PATH`, or the socket at `HERDR_SOCKET_PATH` | The binary path is now read (`TestTheHerdrBinaryComesFromTheVariableTheContractNames`). `HERDR_SOCKET_PATH` is not, and is a non-divergence in substance: this binary shells out to the CLI and opens no socket of its own, so it hard-codes no socket path — the CLI resolves that variable itself. |
@@ -95,6 +94,11 @@ reason it stands.
 | §10.1 | `config_dir` never from `HERDR_PLUGIN_CONFIG_DIR` | `TestTheHerdrPluginDirsAreNotRead` |
 | §11.4 | One-line slash command in `agent start` argv | `TestTheTypedSpawnLineStaysUnderItsBudgetWithACodexProfile`, `TestThePromptedSelfReviewGoalFitsItsOwnBudget` |
 | §11.4 | A successful `agent prompt` is not delivery | `TestASelfReviewShotHerdrAcceptedIsNotTreatedAsDelivered` |
+| §9.1 | Every world-changing verb passes one `gate()` before doing anything | `TestAGateThatDeniesRefusesTheDispatchWithItsReason`, `TestAGateThatDeniesStopLeavesTheDaemonServing`, `TestEveryWritingVerbEitherPassesTheGateOrSaysWhyNot` |
+| §9.2 | The gate is configured, not built in, and any failure to get a well-formed answer denies | `TestAnUnconfiguredGateLetsEveryVerbThrough`, `TestAGateThatCannotAnswerDeniesTheDispatch`, `TestEveryFailureIsDeny` |
+| §9.3 | `defer` parks the action and returns DENIED with `parked_id`, and resolving re-runs the verb under the ORIGINAL subject, recording who resolved it | `TestADeferredDispatchIsParkedAndTheDeniedNamesTheRow`, `TestResolvingRunsTheVerbWithoutAskingTheGateAgain`, `TestAParkedActionResolvesOnlyOnce`, `TestAResolvedActionWhoseVerbFailedStaysInFrontOfTheOperator` |
+| §9.4 | Gate verb names are `<short name>.<verb>`, and the README lists them | `TestTheGatedSetIsTheTwoWorldChangingVerbs`, `TestTheREADMEListsTheGatedVerbs` |
+| §9.5 | The gate is where a verb is withheld, and no door withholds one | `TestTheServedToolListIsPinned`, `TestNoDocumentSaysAServedVerbIsWithheld` |
 | §6.2 | With `--json`, a failure is one `{"error":{code,message}}` document on stdout | `TestAFailureWithJSONIsTheContractEnvelope`, `TestAFailureExitsWithTheStatusTheContractFixes` |
 | §6.3 | The code is one of the nine, the exit status is the one fixed for it, and a finer name is a sub-reason inside `message` | `TestEverySubReasonAnswersUnderAContractCode`, `TestTheSubReasonsMapOntoTheCodesTheContractFixes`, `TestExitIsTheStatusTheContractFixes`, `TestAFailureExitsWithTheStatusTheContractFixes` |
 | §10.3 | `doctor` prints the state dir and the config dir | `TestDoctorNamesTheDirectoriesItResolved` |

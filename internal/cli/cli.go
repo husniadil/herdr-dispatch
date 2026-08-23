@@ -39,6 +39,15 @@ func Request(v verbs.Verb, argv []string) (protocol.Request, bool, error) {
 
 	fs := flag.NewFlagSet("hdis "+strings.Join(v.CLI, " "), flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	// A switch is a flag on this door and a boolean field on the other. It
+	// is registered from the same table the MCP schema is rendered from, so
+	// the two doors cannot drift over what a verb takes.
+	switches := map[string]*bool{}
+	for _, a := range v.Args {
+		if a.Type == verbs.Bool {
+			switches[a.Name] = fs.Bool(a.Name, false, a.Desc)
+		}
+	}
 	if err := fs.Parse(argv); err != nil {
 		return protocol.Request{}, false, codes.Refusef(codes.Invalid, "%s: %v", strings.Join(v.CLI, " "), err)
 	}
@@ -51,6 +60,14 @@ func Request(v verbs.Verb, argv []string) (protocol.Request, bool, error) {
 		Pane: os.Getenv("HERDR_PANE_ID"),
 		Door: Door,
 	}
+	// Only a switch the caller actually wrote is sent. A false the caller
+	// never typed is an argument the daemon would then have to tell apart
+	// from one they did.
+	fs.Visit(func(f *flag.Flag) {
+		if on, ok := switches[f.Name]; ok {
+			req.Args[f.Name] = *on
+		}
+	})
 	rest := fs.Args()
 	for _, a := range v.Args {
 		if !a.Positional {
@@ -116,9 +133,12 @@ func withoutJSON(argv []string) []string {
 // because a human reads the sentence on stderr instead. It is the same
 // document the MCP door builds for the same failure.
 func WriteError(err error, out io.Writer) error {
-	body, merr := json.Marshal(map[string]any{
-		"error": map[string]string{"code": string(codes.Of(err)), "message": message(err)},
-	})
+	envelope := map[string]string{"code": string(codes.Of(err)), "message": message(err)}
+	// §9.3: a DENIED the gate deferred names the row the operator resolves.
+	if id := codes.ParkedOf(err); id != "" {
+		envelope["parked_id"] = id
+	}
+	body, merr := json.Marshal(map[string]any{"error": envelope})
 	if merr != nil {
 		return merr
 	}
@@ -175,6 +195,7 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 			or(rep.Bindings, "in memory only"), rep.Readopted)
 		fmt.Fprintf(out, "  log         %s\n", or(rep.Log, "stdout only: no file could be opened"))
 		fmt.Fprintf(out, "  verify      %s\n", verifyLane(rep.Verify))
+		fmt.Fprintf(out, "  gate        %s\n", gateLane(rep.Gate))
 		fmt.Fprintf(out, "  layout      min_pane_columns %d, max_panes_per_tab %d per task\n",
 			rep.MinPaneColumns, rep.MaxPanesPerTab)
 		if rep.Board.Error != "" {
@@ -227,6 +248,33 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 		}
 		for _, id := range st.Pending {
 			fmt.Fprintf(out, "%-5s %-10s reserved, not yet spawned\n", "", id)
+		}
+	case "parked_list":
+		var rep daemon.ParkedReport
+		if err := json.Unmarshal(result, &rep); err != nil {
+			return err
+		}
+		if rep.Count == 0 {
+			fmt.Fprintln(out, "the policy gate has parked nothing")
+			return nil
+		}
+		for _, p := range rep.Parked {
+			fmt.Fprintf(out, "%s  %-18s %-10s %-8s %s\n",
+				p.ID, p.Verb, or(p.Target, "-"), p.State, or(p.Reason, "no reason given"))
+			if p.Error != "" {
+				// A resolved action whose verb failed is not a finished
+				// one, and the operator has to see which it was.
+				fmt.Fprintf(out, "%s  and the verb did not run: %s\n", strings.Repeat(" ", len(p.ID)), p.Error)
+			}
+		}
+	case "parked_resolve":
+		var res daemon.ParkedResolution
+		if err := json.Unmarshal(result, &res); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s %s\n", res.ID, res.State)
+		if len(res.Result) > 0 {
+			fmt.Fprintln(out, string(res.Result))
 		}
 	default:
 		_, err := fmt.Fprintln(out, string(result))
@@ -282,6 +330,21 @@ func verifyLane(v daemon.VerifyHealth) string {
 		return "off: a submission earns no self-review shot"
 	}
 	return "on: a submission earns one self-review shot in the worker's own pane"
+}
+
+// gateLane is the §9 policy gate in one line: whether one is configured, and
+// what an operator has waiting because of it. An unconfigured gate allows
+// every verb, which is what the line has to say rather than leave blank.
+func gateLane(g daemon.GateHealth) string {
+	line := "not configured: every verb is allowed (§9.2)"
+	if g.Configured {
+		line = strings.Join(g.Command, " ")
+	}
+	line += ", gating " + strings.Join(g.Verbs, " ")
+	if g.Parked > 0 {
+		line += fmt.Sprintf(", %d parked for you (hdis parked list)", g.Parked)
+	}
+	return line
 }
 
 func or(s, fallback string) string {

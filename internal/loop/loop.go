@@ -91,6 +91,11 @@ type Loop struct {
 	// dispatch verb from both taking the same task, and it carries the
 	// daemon that made it so a restart can tell its own from a peer's.
 	pending []store.Reservation
+	// parked is the actions the policy gate deferred and no operator has
+	// decided (§9.3). They are held here rather than in the daemon because
+	// this is the one writer of the store, and they share the document with
+	// the bindings for the same reason the reservations do.
+	parked []store.Parked
 	// readopted is how many persisted bindings the last Adopt kept, for
 	// doctor to report.
 	readopted int
@@ -222,6 +227,10 @@ func (l *Loop) Adopt(ctx context.Context) (int, error) {
 	l.bindings = kept
 	l.rows = rows
 	l.pending = mine
+	// A parked action is neither a pane nor a board row, so there is
+	// nothing to reconcile it against: it is carried forward exactly as it
+	// was written, and only an operator ever closes one.
+	l.parked = held.Parked
 	l.readopted = len(kept)
 	// Cleared before the save, because the save is what a failed Adopt
 	// suppresses and this reconciliation is the one that earned it.
@@ -707,8 +716,86 @@ func (l *Loop) saveLocked() {
 	if l.unadopted {
 		return
 	}
-	if err := l.Store.Save(store.State{Bindings: l.bindings, Reservations: l.pending}); err != nil {
+	if err := l.Store.Save(store.State{Bindings: l.bindings, Reservations: l.pending, Parked: l.parked}); err != nil {
 		l.logf("the bindings could not be written: %v", err)
+	}
+}
+
+// Park records an action the policy gate deferred and returns its id, which
+// the caller hands back in the DENIED envelope as parked_id (§9.3).
+//
+// It refuses rather than records when this daemon has not reconciled: while
+// unadopted the in-memory set is one nothing earned and saveLocked suppresses
+// the write, so a parked row would be accepted, answered for, and then not be
+// there. A gate deferral nobody can find is worse than a refusal that says so.
+func (l *Loop) Park(p store.Parked) (string, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.unadopted {
+		return "", codes.Errorf(codes.Unavailable,
+			"the policy gate deferred this call and the dispatcher has not reconciled with herdr, "+
+				"so the deferral cannot be recorded where the operator would find it")
+	}
+	p.ID = store.NewParkedID(l.now())
+	p.State = store.ParkedWaiting
+	p.AtMS = l.now().UnixMilli()
+	l.parked = append(l.parked, p)
+	l.saveLocked()
+	return p.ID, nil
+}
+
+// Parked is every deferral that still wants the operator's attention: the
+// ones waiting, and the ones they resolved whose verb then failed.
+func (l *Loop) Parked() []store.Parked {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := []store.Parked{}
+	for _, p := range l.parked {
+		if p.Waiting() {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// ClaimParked moves one waiting action to state and records who decided it.
+// The move is the one-winner check: two resolves cannot both read `parked`
+// and both run the verb, because the loser meets a row that has already left
+// that state. It returns the row as it was, which is what the caller re-runs.
+func (l *Loop) ClaimParked(id, state, by string) (store.Parked, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i := range l.parked {
+		if l.parked[i].ID != id {
+			continue
+		}
+		if l.parked[i].State != store.ParkedWaiting {
+			return store.Parked{}, codes.Errorf(codes.Conflict,
+				"parked action %s is %s, not waiting", id, l.parked[i].State)
+		}
+		was := l.parked[i]
+		l.parked[i].State = state
+		l.parked[i].ResolvedBy = by
+		l.parked[i].ResolvedMS = l.now().UnixMilli()
+		l.saveLocked()
+		return was, nil
+	}
+	return store.Parked{}, codes.Errorf(codes.NotFound, "no parked action %s", id)
+}
+
+// FailParked records that a verb the operator let through did not run. The
+// row stays decided rather than going back to waiting: an action that errored
+// is not proof it had no effect, and re-opening it reopens the window the
+// one-winner move exists to close.
+func (l *Loop) FailParked(id, message string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i := range l.parked {
+		if l.parked[i].ID == id {
+			l.parked[i].State, l.parked[i].Error = store.ParkedFailed, message
+			l.saveLocked()
+			return
+		}
 	}
 }
 

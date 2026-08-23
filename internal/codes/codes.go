@@ -107,6 +107,25 @@ var carries = map[Reason]Code{
 type Error struct {
 	Code    Code
 	Message string
+	// ParkedID names the row a DENIED left behind when the policy gate
+	// deferred the call rather than refusing it (§9.3). It is empty on
+	// every other failure, and on a DENIED the gate meant.
+	ParkedID string
+}
+
+// Parked is a DENIED that names the action the policy gate deferred (§9.3).
+// A caller told only that it was denied has nothing to resolve.
+func Parked(id, format string, a ...any) *Error {
+	return &Error{Code: Denied, Message: fmt.Sprintf(format, a...), ParkedID: id}
+}
+
+// ParkedOf reports the parked row err names, or empty when it names none.
+func ParkedOf(err error) string {
+	var named *Error
+	if errors.As(err, &named) {
+		return named.ParkedID
+	}
+	return ""
 }
 
 func (e *Error) Error() string { return string(e.Code) + ": " + e.Message }
