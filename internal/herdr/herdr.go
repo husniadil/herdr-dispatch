@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -22,6 +23,16 @@ type Client struct {
 	// Bin is the binary to run; empty means `herdr` off PATH.
 	Bin string
 }
+
+// New is the client a daemon drives Herdr with: §11.1 says call Herdr through
+// HERDR_BIN_PATH, falling back to `herdr` on PATH.
+//
+// The variable is read HERE, once, at construction, and never inside bin():
+// a test puts a fake `herdr` on PATH, and a variable the operator's own shell
+// exported would send every one of those calls to the operator's live Herdr
+// instead. A test that wants the override sets it and builds a client, which
+// is the same thing the daemon does.
+func New() *Client { return &Client{Bin: os.Getenv("HERDR_BIN_PATH")} }
 
 func (c *Client) bin() string {
 	if c.Bin != "" {

@@ -271,6 +271,32 @@ func TestDoctorDeclaresTheContractThisPluginSatisfies(t *testing.T) {
 	}
 }
 
+// §10.3: doctor prints the state dir and the config dir. It printed neither,
+// so an operator whose override was not taking effect — a daemon started from
+// a shell that exported a different HDIS_STATE_DIR, a config edited in the
+// wrong one — had no way to ask the running daemon which pair it resolved.
+func TestDoctorNamesTheDirectoriesItResolved(t *testing.T) {
+	state := stateDir(t)
+	cfg := t.TempDir()
+	t.Setenv(config.EnvPrefix+"CONFIG_DIR", cfg)
+	d, _ := newDaemon(t)
+
+	raw, err := call(t, d, protocol.Request{Verb: "doctor"})
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+	var rep DoctorReport
+	if err := json.Unmarshal(raw, &rep); err != nil {
+		t.Fatalf("doctor json: %v", err)
+	}
+	if rep.StateDir != state {
+		t.Errorf("doctor names state dir %q, want %q", rep.StateDir, state)
+	}
+	if rep.ConfigDir != cfg {
+		t.Errorf("doctor names config dir %q, want %q", rep.ConfigDir, cfg)
+	}
+}
+
 func TestDispatchOverTheSocketAnswersWithAReservation(t *testing.T) {
 	stateDir(t)
 	d, f := newDaemon(t)

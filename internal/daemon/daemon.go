@@ -299,8 +299,15 @@ type DoctorReport struct {
 	Version string `json:"version"`
 	// Contract is the plugin contract THIS binary satisfies, which is not
 	// the board's: Board.Contract below is htask's own, relayed.
-	Contract   string `json:"contract"`
-	Socket     string `json:"socket"`
+	Contract string `json:"contract"`
+	Socket   string `json:"socket"`
+	// StateDir and ConfigDir are the two directories §10.3 makes doctor
+	// print. An operator reading a stale binding or an override that is not
+	// taking effect needs to know WHICH pair of directories this daemon
+	// resolved, and the environment that decides them is the daemon's, not
+	// the caller's.
+	StateDir   string `json:"state_dir"`
+	ConfigDir  string `json:"config_dir"`
 	BasePane   string `json:"base_pane"`
 	MaxWorkers int    `json:"max_workers"`
 	Interval   string `json:"interval"`
@@ -359,6 +366,8 @@ func (d *Daemon) doctor(ctx context.Context) (DoctorReport, error) {
 		Version:        d.Version,
 		Contract:       version.Contract,
 		Socket:         config.SocketPath(),
+		StateDir:       config.StateDir(),
+		ConfigDir:      config.ConfigDir(),
 		BasePane:       d.Loop.BasePane,
 		MaxWorkers:     d.Loop.Policy.MaxWorkers,
 		Interval:       d.Interval.String(),

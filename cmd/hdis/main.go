@@ -151,7 +151,7 @@ func serve(argv []string) error {
 	// is holding names the daemon that reserved it and a restart can tell
 	// its own stale hold from a live peer's.
 	board := &htask.Client{Principal: htask.PrincipalFor(pane)}
-	pens := &herdr.Client{}
+	pens := herdr.New()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

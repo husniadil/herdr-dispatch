@@ -265,3 +265,25 @@ func TestAgentsListEveryRegisteredWorkerWithItsName(t *testing.T) {
 		t.Fatalf("argv: got %q, want %q", got, want)
 	}
 }
+
+// §11.1: Herdr is called through HERDR_BIN_PATH, falling back to `herdr` on
+// PATH. Nothing here read the variable at all, so a host that installs Herdr
+// somewhere PATH does not carry — which is exactly what the variable is for —
+// had every call fail on a binary that was not missing.
+func TestTheHerdrBinaryComesFromTheVariableTheContractNames(t *testing.T) {
+	t.Setenv("HERDR_BIN_PATH", "/opt/herdr/bin/herdr")
+	if got := New().bin(); got != "/opt/herdr/bin/herdr" {
+		t.Errorf("bin() = %q, want the path HERDR_BIN_PATH names", got)
+	}
+	t.Setenv("HERDR_BIN_PATH", "")
+	if got := New().bin(); got != "herdr" {
+		t.Errorf("bin() = %q, want the PATH fallback", got)
+	}
+	// The variable is read at construction and never inside bin(): a test's
+	// fake on PATH must not be bypassed by the operator's own environment.
+	c := &Client{}
+	t.Setenv("HERDR_BIN_PATH", "/opt/herdr/bin/herdr")
+	if got := c.bin(); got != "herdr" {
+		t.Errorf("a client built without the override read it anyway: %q", got)
+	}
+}
