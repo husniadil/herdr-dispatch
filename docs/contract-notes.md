@@ -42,6 +42,21 @@ is written down.
 | §11.6 | The manifest declares no `[[panes]]`. |
 | §16.1 | Acceptance criteria are a board concept. |
 
+## Where this plugin diverges, and why
+
+A divergence is a rule that DOES reach this plugin and is not implemented. It
+is written here rather than left to be discovered, and each carries the one
+reason it stands.
+
+| Section | The rule | Where this plugin stands |
+|---|---|---|
+| §5.8 | `<name> dump --json` prints the whole store | No `dump` verb. The whole store is one JSON document at `<state_dir>/hdis-bindings.json`, already readable without this binary, which is the guarantee §5.8 exists for. A verb that only `cat`s it is on the list. |
+| §8.1, §8.2 | Events for every state change, and an `events` verb | No events and no `_events` table. Every state change here is a binding moving, and a binding is derivable from the board plus Herdr the moment a worker claims; the durable trail of what was dispatched is the board's own. Adding an event stream means adding the store §5.5 shapes it around. |
+| §9.1, §9.2, §9.4 | Every world-changing verb passes a `gate()`, configured and failing closed, and the gated verbs are listed in the README | No policy gate. `dispatch` is named in §9.1 as a verb that MUST pass one, so this is a divergence and not an exemption: the daemon is the operator's own, reached over a socket only the operator can open, and no principal here is anyone in particular (§3.4 above). The gate arrives with the first caller this daemon does not already trust. |
+| §10.1 | Config is TOML at `<config_dir>/<name>.toml` | Config is JSON at `<config_dir>/hdis.json`. JSON because the document is nested profiles and the standard library parses it; the dependency budget is what a TOML parser would have to earn its way past. The directory and the `HDIS_` env prefix are the BINARY's name and not the short name `dispatch` (§10.1 with §13.2): `hdis` is what a developer types and what the other two plugins' dirs are named after, and one plugin resolving `~/.config/dispatch` while its binary is `hdis` is a seam nobody would find. |
+| §11.2 | Feature-detect at daemon start with `herdr api schema --json` | Never read. Every Herdr verb this binary uses — `pane list`, `pane split`, `tab create`, `agent start`, `agent prompt`, `agent list` — has been in Herdr since before this plugin, and a missing one fails loud at the call with Herdr's own words. No request is gated on a capability, so there is nothing yet for the schema read to decide. |
+| §11.1 | Reach Herdr through `HERDR_BIN_PATH`, or the socket at `HERDR_SOCKET_PATH` | The binary path is now read (`TestTheHerdrBinaryComesFromTheVariableTheContractNames`). `HERDR_SOCKET_PATH` is not, and is a non-divergence in substance: this binary shells out to the CLI and opens no socket of its own, so it hard-codes no socket path — the CLI resolves that variable itself. |
+
 ## The MUSTs that do apply
 
 | Section | The MUST | The test that fails without it |
@@ -64,7 +79,7 @@ is written down.
 | §10.3 | `doctor` prints the state dir and the config dir | `TestDoctorNamesTheDirectoriesItResolved` |
 | §11.1 | Herdr is reached through `HERDR_BIN_PATH` | `TestTheHerdrBinaryComesFromTheVariableTheContractNames` |
 | §12.2 | A test cites the section it enforces | `TestEveryTestThisDocumentNamesExists` |
-| §13.4 | The short name is `dispatch` | `TestTheManifestNamesThisPluginAtThisVersion` |
+| §13.2 | The short name is `dispatch` | `TestTheManifestNamesThisPluginAtThisVersion` |
 
 ## What the sweep found
 
