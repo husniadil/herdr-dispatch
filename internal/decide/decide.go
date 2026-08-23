@@ -95,9 +95,11 @@ type Binding struct {
 	// It outlives the checkout, so it is what tells the operator where the
 	// work is.
 	Branch string
-	// Verified is set on a binding when the submission it is currently
-	// holding has had its self-review shot. It is what makes one submission
-	// earn exactly one, and Rearm clears it when the task leaves review.
+	// Verified says a self-review shot has been SENT for the submission the
+	// binding is currently holding. Sent, not received: §11.4 forbids reading
+	// a successful `agent prompt` as delivery, so this alone does not close
+	// the shot — see selfReviewDue. Rearm clears it when the task leaves
+	// review.
 	Verified bool
 }
 
@@ -166,7 +168,7 @@ func Decide(s Snapshot, p Policy) []Action {
 			}
 			// The shot goes to the pane that did the work, so it costs no
 			// slot and lands on a prefix still warm from the submission.
-			if p.Verify && !b.Verified {
+			if p.Verify && selfReviewDue(b, status, s.Now, p) {
 				out = append(out, Action{Kind: Prompt, TaskID: b.TaskID, Pane: b.Pane, Reason: ReasonSelfReview})
 			}
 			continue
@@ -238,6 +240,30 @@ func shareOut(readyIDs []string, tasks map[string]Task) []string {
 		}
 	}
 	return out
+}
+
+// selfReviewDue reports whether the submission in hand still owes its
+// self-review shot.
+//
+// A shot never sent is due. A shot that WAS sent is due again only while herdr
+// still calls the worker idle, and that clause is §11.4's: a plugin MUST NOT
+// treat a successful `agent prompt` as delivery, and idle is the one thing on
+// this pane that says the text reached nothing. A worker that got the
+// condition is working, so it is never asked twice; a worker whose prompt
+// herdr accepted and nothing ever saw is asked again instead of losing the
+// shot in silence with the board still green.
+//
+// The wait and the bound are the ones the unclaimed nudge already uses, for
+// the same reason: a pane idle for reasons of its own must not be prompted
+// forever, and a worker mid-turn must not be interrupted by a second copy.
+func selfReviewDue(b Binding, status string, now time.Time, p Policy) bool {
+	if !b.Verified {
+		return true
+	}
+	if status != "idle" || b.Prompts >= p.MaxPrompts {
+		return false
+	}
+	return now.Sub(b.PromptedAt) >= p.ClaimTimeout
 }
 
 // Terminal is a board status the dispatcher has nothing left to do about.

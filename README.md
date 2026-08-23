@@ -88,9 +88,33 @@ copy is a second version of the truth from the next commit onwards. The MCP
 door carries the same facts in its instructions, but only for a client that
 has the door wired in; the skill is what a harness without it ever reads.
 
-This plugin satisfies **version 0.6.0** of the Herdr plugin contract.
+This plugin satisfies **version 0.10.0** of the Herdr plugin contract, swept
+section by section in [`docs/contract-notes.md`](docs/contract-notes.md).
 `hdis doctor` says so in both its shapes, as its own top-level `contract`
 field, distinct from the `board.contract` it relays from `htask`.
+
+### Where the contract is written for a plugin this one is not
+
+§3.4, §3.7 and §7.5 are one rule seen three times: who a call is attributed
+to, and how the trail says so. **This plugin attributes nothing.** It holds no
+ledger, records no actor, and has no verb whose authority is anyone's in
+particular — the daemon's own README says it above: the caller's identity buys
+nothing, because every caller here is the operator's own tooling reaching a
+socket only the operator can open.
+
+So §7.5's `--operator` is not implemented, and that is a gap in the contract
+rather than one here. The flag exists so a door's principal is settled before
+a call arrives, and §7.5 names what makes that visible: "`<name> doctor`
+(§10.3) already prints the calling principal". §10.3 requires no such thing,
+and this door has no principal for it to print. A flag read by nothing and
+recorded nowhere would be conformance theatre — it would change no
+attribution, because there is none to change.
+
+The line to watch is the one place identity DOES matter: the board principal
+this daemon writes with, `plugin:hdis@<its own pane>`, which is declared to
+htask through `--as` and scrubbed of `HERDR_PANE_ID` first so the board can
+tell a plugin from an agent. That is htask's rule, tested here, and it is the
+whole of this plugin's stake in §3.
 
 ## The two doors
 
@@ -200,7 +224,8 @@ not started inside a Herdr pane and was given no `-pane`, and `"verify"` is
 the verification lane.
 
 The lane is off unless the document turns it on. On, every task a worker of
-this daemon's submits earns one self-review shot in that worker's OWN pane:
+this daemon's submits earns one self-review shot in that worker's OWN pane —
+one shot the worker RECEIVES, which is not the same as one call made:
 
 ```json
 {
@@ -806,6 +831,15 @@ The verification lane does not move that line, it works up against it. With
 `"verify"` on, a task one of this dispatcher's own workers submitted earns one
 SELF-REVIEW SHOT: a second condition prompted into the worker's own pane. No
 pane is opened for it and no agent launches, so it costs a prompt.
+
+One shot means one the worker receives. §11.4 forbids reading a successful
+`agent prompt` as delivery — Herdr accepting the text says it was accepted and
+nothing more, an agent TUI can collapse a paste, and a pane can exit between
+the call and the agent's next turn. So the shot is sent again while Herdr
+still calls that worker idle, bounded by the same `max_prompts` and claim
+timeout the unclaimed nudge uses. A worker that got the condition is working
+and never meets a second copy; one whose prompt reached nothing is asked again
+instead of losing its only check in silence with the board still green.
 
 The shot lands on a warm prefix. Task 33 put every worker on
 `FORCE_PROMPT_CACHING_5M=1`, so a worker's cache TTL is five minutes, and the

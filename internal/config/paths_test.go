@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -39,14 +40,82 @@ func TestConfigPathKeepsTheDocumentWhereItAlreadyLives(t *testing.T) {
 	}
 }
 
+// §3.5: the trust boundary is the local user account, and a plugin MUST create
+// its state dir 0700. The socket in it is a door onto the operator's own panes,
+// so a mode anyone can traverse hands that door to every account on the box.
+//
+// The mode is what this asserts. It called EnsureStateDir twice and checked
+// only that neither returned an error, which is idempotence — a true thing,
+// and not the one the name claims.
 func TestEnsureStateDirMakesItPrivate(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "state")
 	t.Setenv("HDIS_STATE_DIR", dir)
 	if err := EnsureStateDir(); err != nil {
 		t.Fatalf("EnsureStateDir: %v", err)
 	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat %s: %v", dir, err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Errorf("state dir %s is %04o, want 0700 (§3.5)", dir, got)
+	}
 	if err := EnsureStateDir(); err != nil {
 		t.Fatalf("EnsureStateDir twice: %v", err)
+	}
+	if got, _ := os.Stat(dir); got.Mode().Perm() != 0o700 {
+		t.Errorf("the second call left the state dir %04o", got.Mode().Perm())
+	}
+}
+
+// §5.1 and §10.1: a plugin MUST NOT resolve state_dir or config_dir from
+// HERDR_PLUGIN_STATE_DIR / HERDR_PLUGIN_CONFIG_DIR. Herdr injects those only
+// into what Herdr itself spawns — startup commands, actions, plugin panes —
+// and into no managed pane, so honouring them would give one plugin two state
+// dirs that never see each other's bindings, and a dispatcher that forgot half
+// its workers on restart.
+//
+// Both names are set to somewhere that would be obvious in the answer, and the
+// answer must not be either of them.
+func TestTheHerdrPluginDirsAreNotRead(t *testing.T) {
+	for _, tc := range []struct {
+		env  string
+		dir  func() string
+		what string
+	}{
+		{"HERDR_PLUGIN_STATE_DIR", StateDir, "state dir (§5.1)"},
+		{"HERDR_PLUGIN_CONFIG_DIR", ConfigDir, "config dir (§10.1)"},
+	} {
+		t.Run(tc.env, func(t *testing.T) {
+			injected := filepath.Join(t.TempDir(), "herdr-injected")
+			own := filepath.Join(t.TempDir(), "own")
+			t.Setenv(tc.env, injected)
+			t.Setenv("HDIS_STATE_DIR", own)
+			t.Setenv("HDIS_CONFIG_DIR", own)
+			if got := tc.dir(); got == injected {
+				t.Fatalf("the %s resolved to %s, which Herdr injected: §5.1 and §10.1 forbid reading %s",
+					tc.what, got, tc.env)
+			}
+		})
+	}
+	// And with nothing of this plugin's own set either, so the injected value
+	// cannot win by being the only candidate left.
+	for _, tc := range []struct {
+		env string
+		dir func() string
+	}{
+		{"HERDR_PLUGIN_STATE_DIR", StateDir},
+		{"HERDR_PLUGIN_CONFIG_DIR", ConfigDir},
+	} {
+		injected := filepath.Join(t.TempDir(), "herdr-injected")
+		t.Setenv(tc.env, injected)
+		t.Setenv("HDIS_STATE_DIR", "")
+		t.Setenv("HDIS_CONFIG_DIR", "")
+		t.Setenv("XDG_STATE_HOME", "")
+		t.Setenv("XDG_CONFIG_HOME", "")
+		if got := tc.dir(); got == injected {
+			t.Errorf("with nothing else set, %s answered %s", tc.env, got)
+		}
 	}
 }
 

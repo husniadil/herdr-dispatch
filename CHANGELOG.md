@@ -7,6 +7,33 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+**The declared contract revision is now 0.10.0**, up from 0.6.0. It is the
+value `hdis doctor` reports as its own top-level `contract`, distinct from the
+`board.contract` it relays from htask, and a caller reads it to decide which
+contract's rules this daemon answers to. Nothing a caller passes or parses
+moves with it.
+
+The number moved because the sweep behind it was run rather than because the
+code changed under it: `docs/contract-notes.md` now names, for every MUST that
+reaches this plugin, the test that fails when the behaviour is removed — each
+verified by removing it. It also records the sections that do NOT reach a
+plugin holding no ledger and attributing no call, §3.4, §3.7 and §7.5 among
+them, so an absence there is a decision rather than an oversight.
+
+A self-review shot is no longer spent by the call that sent it. §11.4 forbids
+reading a successful `agent prompt` as delivery, and the lane was doing exactly
+that: the binding was marked the moment Herdr accepted the text, and only a
+task LEAVING review cleared the mark — so a prompt that was accepted and seen
+by nobody burned the submission's one check with the board still green and
+nothing anywhere saying so. The shot is now re-sent while Herdr still calls
+that worker idle, bounded by the same `max_prompts` and claim timeout the
+unclaimed nudge already uses. A worker that received the condition is working
+and never meets a second copy.
+
+Nothing a caller reads changes: no verb, no argument, no `--json` field and no
+error code. What moves is how many times a worker that never saw its condition
+is asked for it.
+
 The verification lane is now a self-review shot in the worker's OWN pane. A
 task reaching review no longer earns a VERIFIER: no second pane, no second
 agent, no throwaway checkout. It earns one prompt into the pane that produced

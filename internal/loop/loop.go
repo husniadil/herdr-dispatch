@@ -895,8 +895,10 @@ func (l *Loop) prompt(ctx context.Context, a decide.Action) error {
 		if l.bindings[i].TaskID == a.TaskID {
 			l.bindings[i].Prompts++
 			l.bindings[i].PromptedAt = l.now()
-			// The binding is where "this submission has had its shot" is
-			// remembered, and Rearm is what clears it.
+			// The binding is where "a shot has been SENT for this
+			// submission" is remembered. It is not a receipt — §11.4 forbids
+			// reading this call's success as delivery — so decide.selfReviewDue
+			// asks again while herdr still calls the worker idle.
 			if a.Reason == decide.ReasonSelfReview {
 				l.bindings[i].Verified = true
 			}

@@ -135,3 +135,63 @@ func TestASelfReviewShotHoldsNoExtraWorkerSlot(t *testing.T) {
 		t.Fatalf("the free slot was held by the review: %v", actionKinds(got))
 	}
 }
+
+// §11.4: a plugin MUST NOT treat a successful `agent prompt` as delivery.
+// Herdr accepting the text says it was accepted and nothing more — the agent
+// TUI can collapse a paste, and a pane can exit between the call and the
+// agent's next turn.
+//
+// Marking the shot spent on the strength of that call is what made the lane
+// fail silently: Rearm only clears the mark when the task LEAVES review, so a
+// submission whose shot was accepted and seen by nobody had its one check
+// burned with the board still green and nothing anywhere saying so.
+//
+// So idle is what re-opens it. A worker that got the condition is working and
+// is never asked twice; one that never saw it is asked again.
+func TestASelfReviewShotHerdrAcceptedIsNotTreatedAsDelivered(t *testing.T) {
+	now := time.Unix(2000, 0)
+	p := Policy{MaxWorkers: 4, MaxPrompts: 3, ClaimTimeout: 30 * time.Second, Verify: true}
+	base := Binding{TaskID: "t1", Pane: "wM:p9", Verified: true, Prompts: 1,
+		PromptedAt: now.Add(-time.Minute)}
+	snap := func(b Binding, status string) Snapshot {
+		return Snapshot{
+			Tasks:    map[string]Task{"t1": {ID: "t1", Status: "review", ClaimedBy: "wM:p9"}},
+			Agents:   map[string]string{"wM:p9": status},
+			Bindings: []Binding{b},
+			Now:      now,
+		}
+	}
+	shots := func(acts []Action) int {
+		n := 0
+		for _, a := range acts {
+			if a.Kind == Prompt && a.Reason == ReasonSelfReview {
+				n++
+			}
+		}
+		return n
+	}
+
+	if got := shots(Decide(snap(base, "idle"), p)); got != 1 {
+		t.Errorf("a worker herdr still calls idle got %d further shots, want 1: the accepted "+
+			"prompt reached nothing and the submission's only check is gone", got)
+	}
+	if got := shots(Decide(snap(base, "working"), p)); got != 0 {
+		t.Errorf("a worker that is working got %d further shots, want 0: it has the condition", got)
+	}
+	spent := base
+	spent.Prompts = p.MaxPrompts
+	if got := shots(Decide(snap(spent, "idle"), p)); got != 0 {
+		t.Errorf("a pane idle for its own reasons got %d shots past MaxPrompts, want 0", got)
+	}
+	fresh := base
+	fresh.PromptedAt = now
+	if got := shots(Decide(snap(fresh, "idle"), p)); got != 0 {
+		t.Errorf("a shot sent this instant was repeated %d times, want 0: a worker mid-turn "+
+			"must not meet a second copy", got)
+	}
+	first := base
+	first.Verified = false
+	if got := shots(Decide(snap(first, "working"), p)); got != 1 {
+		t.Errorf("a submission with no shot sent yet got %d, want 1", got)
+	}
+}

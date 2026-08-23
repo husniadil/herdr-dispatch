@@ -3,16 +3,18 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/husniadil/herdr-dispatch/internal/verbs"
+	"github.com/husniadil/herdr-dispatch/internal/version"
 )
 
 // §7.3: both doors are first-class and carry the same verbs, and the skill is
-// what teaches an agent which they are. The skill is prose, so most of it is free to be rewritten — but a few
-// of its claims are load-bearing, and an agent that believes a stale one acts
-// wrongly. Those are pinned here, along with the tool list, which is the verb
+// what teaches an agent which they are. The skill is prose, so most of it is
+// free to be rewritten — but a few of its claims are load-bearing, and an
+// agent that believes a stale one acts wrongly. Those are pinned here, along with the tool list, which is the verb
 // registry's own.
 //
 // Each pin is the PHRASE that carries the claim rather than a keyword the
@@ -196,4 +198,78 @@ func TestNoDocumentSaysAServedVerbIsWithheld(t *testing.T) {
 			t.Errorf("%s says %q about %q, and the door serves every verb", name, claim, subject)
 		}
 	}
+}
+
+// §12.2 with the preamble: this plugin's conformance record is a list of test
+// names, and a list of names is worth exactly what it costs to check. Five of
+// the names in the first draft of docs/contract-notes.md were invented — the
+// behaviour was real and the test had a different name, or no test existed at
+// all — and a document naming a test nobody can run says a MUST is pinned when
+// it is not.
+//
+// So every backticked Test... name in that document has to be a function this
+// repository actually declares.
+func TestEveryTestThisDocumentNamesExists(t *testing.T) {
+	notes, err := os.ReadFile(filepath.Join("..", "..", "docs", "contract-notes.md"))
+	if err != nil {
+		t.Fatalf("read contract-notes.md: %v", err)
+	}
+	named := regexp.MustCompile("`(Test[A-Za-z0-9_]+)`").FindAllStringSubmatch(string(notes), -1)
+	if len(named) < 10 {
+		t.Fatalf("the notes name %d tests; the pattern is reading the wrong thing", len(named))
+	}
+	declared := map[string]bool{}
+	root := filepath.Join("..", "..")
+	decl := regexp.MustCompile(`(?m)^func (Test[A-Za-z0-9_]+)\(`)
+	if err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(path, "_test.go") {
+			return err
+		}
+		b, rerr := os.ReadFile(path)
+		if rerr != nil {
+			return rerr
+		}
+		for _, m := range decl.FindAllStringSubmatch(string(b), -1) {
+			declared[m[1]] = true
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	for _, m := range named {
+		if !declared[m[1]] {
+			t.Errorf("docs/contract-notes.md names %s as the test that fails without a MUST, and no such test is declared", m[1])
+		}
+	}
+}
+
+// §13.3 with §13.4: the declared contract revision is a value a caller reads
+// to decide which contract's rules this daemon answers to, so it does not move
+// without an entry saying so. Both siblings carry this guard; this plugin's
+// 0.6.0 sat unexamined until a sweep asked what backed it.
+//
+// The clause is anchored rather than the bare number: the same entry names the
+// revision it moved FROM, and a changelog announcing 0.10.0-draft beside a
+// binary declaring 0.10.0 names a different revision, so the version has to
+// END where the clause ends.
+func TestTheChangelogHasALineForTheDeclaredContractRevision(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "CHANGELOG.md"))
+	if err != nil {
+		t.Fatalf("read CHANGELOG.md: %v", err)
+	}
+	clause := "the declared contract revision is now " + version.Contract
+	flat := strings.ToLower(strings.Join(strings.Fields(string(body)), " "))
+	for i := 0; ; {
+		at := strings.Index(flat[i:], clause)
+		if at < 0 {
+			break
+		}
+		i += at + len(clause)
+		if i == len(flat) || !strings.ContainsRune("0123456789.-", rune(flat[i])) {
+			return
+		}
+	}
+	t.Errorf("CHANGELOG.md has no entry saying %q, and this binary declares contract revision %s "+
+		"in `hdis doctor`. §13.3 makes a change a consumer can pin on legal between minors only "+
+		"with an entry here", clause, version.Contract)
 }

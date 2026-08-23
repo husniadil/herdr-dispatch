@@ -907,3 +907,40 @@ func TestNoTestStartsAServeItNeverWaitsFor(t *testing.T) {
 		t.Fatal("no Serve call found in this package's tests; the check proves nothing")
 	}
 }
+
+// §3.5: the boundary is the local user account — whoever can open the socket
+// is trusted as the user — so a plugin MUST create its socket 0600. Here that
+// door reaches `pane split`, `agent start` and `agent prompt` on the
+// operator's own Herdr, so a mode another account can open is that account
+// holding the operator's panes.
+//
+// Listen chmods after net.Listen because the umask applies to the bind, so the
+// constant alone proves nothing: this asserts the mode on disk.
+func TestTheSocketIsCreatedPrivateToTheUser(t *testing.T) {
+	// A short path on purpose: a unix socket is bounded by sun_path, and
+	// t.TempDir() names itself after the test.
+	dir, err := os.MkdirTemp("", "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	t.Setenv("HDIS_STATE_DIR", dir)
+	ln, err := Listen()
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	defer ln.Close()
+	info, err := os.Stat(config.SocketPath())
+	if err != nil {
+		t.Fatalf("stat socket: %v", err)
+	}
+	// The literal, not the constant. Comparing the file against SocketMode
+	// moves both sides of the check together: a mutation that opened the
+	// constant to 0666 opened the socket to 0666 and stayed green.
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("the socket is %04o, want 0600 (§3.5): it is a door onto the operator's panes", got)
+	}
+	if SocketMode != 0o600 {
+		t.Errorf("SocketMode is %04o; §3.5 fixes it at 0600", SocketMode)
+	}
+}
