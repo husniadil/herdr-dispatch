@@ -860,7 +860,9 @@ client's prompt box rather than the shell `TypedLineBudget` was measured
 against, so it has a second ceiling of its own: `spawn.PromptedGoalBudget`,
 1023, the operator's measurement recorded beside the constant.
 `TestThePromptedSelfReviewGoalFitsItsOwnBudget` pins the whole delivered text
-under it and `TestOnlyTheSelfReviewShotIsArmedAsAGoal` pins that the ordinary
+under it, `TestThePromptedGoalBudgetIsTheOperatorsMeasurement` pins the number
+itself so a condition that overruns is trimmed rather than the ceiling raised,
+and `TestOnlyTheSelfReviewShotIsArmedAsAGoal` pins that the ordinary
 nudges are not armed this way — a nudge is one instruction for one turn, and a
 standing condition would have a worker re-satisfying it forever.
 

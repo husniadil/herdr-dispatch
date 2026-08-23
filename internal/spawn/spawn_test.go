@@ -1792,3 +1792,22 @@ func TestThePromptedGoalBudgetIsNotTheTypedLineBudget(t *testing.T) {
 			"they bound different paths and must be measured apart", PromptedGoalBudget)
 	}
 }
+
+// And the budget above only bounds the condition while the NUMBER holds. A
+// worker whose condition overran it can pass that test by raising the
+// constant instead of trimming the wording, and nothing above notices: a
+// budget mutated upward leaves every package green. This one was found by
+// mutating the constant rather than the condition.
+//
+// A test cannot rederive the number — it is the operator's measurement of
+// what a client's prompt box accepts, and nothing in this repo can measure a
+// live pane. So what is pinned is the measurement itself, and changing it
+// means changing this test, which is where the next reader is told that 1024
+// is the ceiling and 1023 is the safe value under it.
+func TestThePromptedGoalBudgetIsTheOperatorsMeasurement(t *testing.T) {
+	if PromptedGoalBudget != 1023 {
+		t.Fatalf("the prompted-goal budget is %d; the operator measured the ceiling at 1024 and "+
+			"1023 as the safe value under it. Trim the condition rather than raising this number, "+
+			"or record a new measurement here", PromptedGoalBudget)
+	}
+}
