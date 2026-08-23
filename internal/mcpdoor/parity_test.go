@@ -39,6 +39,7 @@ var pinnedTools = []string{
 	"doctor",
 	"dispatch",
 	"status",
+	"stop",
 }
 
 // inProcessDaemon is a real daemon over a fake board and a fake herdr. No
@@ -146,14 +147,6 @@ func TestNeitherDoorCarriesAVerbTheOtherLacks(t *testing.T) {
 		if _, ok := verbs.ByCLI(v.CLI); !ok {
 			t.Errorf("verb %q has no CLI subcommand", v.Name)
 		}
-		// A CLI-only verb is the one asymmetry the table may declare, and
-		// declaring it is what keeps it from being an accident.
-		if v.CLIOnly {
-			if _, ok := served[v.Name]; ok {
-				t.Errorf("verb %q is declared CLI-only and served over MCP", v.Name)
-			}
-			continue
-		}
 		tl, ok := served[v.Name]
 		if !ok {
 			t.Errorf("verb %q is a CLI subcommand and no MCP tool", v.Name)
@@ -184,9 +177,6 @@ func TestTheSchemaDeclaresExactlyWhatTheCLITakes(t *testing.T) {
 		byName[tl.Name] = tl
 	}
 	for _, v := range verbs.All {
-		if v.CLIOnly {
-			continue
-		}
 		raw, err := json.Marshal(byName[v.Name].InputSchema)
 		if err != nil {
 			t.Fatalf("schema for %q: %v", v.Name, err)
@@ -394,21 +384,28 @@ func TestTheDoorKeepsNoStateOfItsOwn(t *testing.T) {
 	}
 }
 
-// Stop is deliberately CLI-only, and the parity guard above knows it. The
-// reason: every other verb is about one task, and an MCP door is spawned once
-// per client session — any agent holding one could take the dispatcher away
-// from every other worker it is driving. Stopping the dispatcher is the
-// operator's act, at the terminal they started it from.
-func TestStopIsServedOnTheCLIDoorOnly(t *testing.T) {
+// Stop is on the door like every other verb, and this is the case that reads
+// like an exception and is not one.
+//
+// The reason it was withheld was that an MCP door is spawned once per client
+// session, so any agent holding one could take the dispatcher away from every
+// other worker it is driving — stopping it being the operator's act, at the
+// terminal they started it from. §7.3 answers that directly: withholding a
+// verb from a principal is the §9 gate's job and never a door's, and the
+// reason "this authority is the operator's" no longer stands on its own.
+//
+// It also protected nothing measurable. `hdis stop` is a CLI subcommand, so
+// any agent with a shell could already run it; what the asymmetry actually
+// cost was a harness with no shell. The blast radius is real and it belongs
+// where a caller reads it, which is the verb's own Long — checked here, so a
+// later edit cannot quietly drop the warning while keeping the tool.
+func TestStopIsServedWithItsBlastRadiusStated(t *testing.T) {
 	_, call := inProcessDaemon(t)
 	sess := session(t, call)
 
 	v, ok := verbs.ByName("stop")
 	if !ok {
 		t.Fatal("no stop verb")
-	}
-	if !v.CLIOnly {
-		t.Fatal("stop is not marked CLI-only")
 	}
 	if _, ok := verbs.ByCLI([]string{"stop"}); !ok {
 		t.Error("stop has no CLI subcommand")
@@ -417,13 +414,22 @@ func TestStopIsServedOnTheCLIDoorOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
+	served := false
 	for _, tl := range tools.Tools {
 		if tl.Name == v.Name {
-			t.Fatalf("stop is served over MCP as %q", tl.Name)
+			served = true
 		}
 	}
-	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{Name: v.Name})
-	if err == nil && !res.IsError {
-		t.Fatal("the MCP door answered a stop call")
+	if !served {
+		t.Fatal("stop is not served over MCP; §7.3 leaves no verb on one door only")
+	}
+	for what, want := range map[string]string{
+		"that it is not scoped to one task": "WHOLE dispatcher",
+		"what happens to the live workers":  "keeps running in its pane",
+		"what the caller owes first":        "Confirm with the operator",
+	} {
+		if !strings.Contains(v.Long, want) {
+			t.Errorf("stop's description does not say %s (looked for %q)", what, want)
+		}
 	}
 }

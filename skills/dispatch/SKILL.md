@@ -90,13 +90,16 @@ earning one self-review shot in the worker's own pane. Run it first — a refusa
 
 ## Through MCP instead of the CLI
 
-The same verbs are MCP tools on the `herdr-dispatch` server, named by the verb
-alone — three of them: `doctor`, `dispatch`, `status`. Your client shows them
-under the server's own label, which is what tells you whose `dispatch` you are
-calling.
+Every verb this binary has is one of the `herdr-dispatch` server's MCP tools,
+named by the verb alone — four of them: `doctor`, `dispatch`, `status`, `stop`.
+Your client shows them under the server's own label, which is what tells you
+whose `dispatch` you are calling. Nothing is reachable by shell alone, so a
+harness with no terminal loses no verb.
 
-`stop` is deliberately not a tool. It takes the dispatcher away from every
-worker it is driving, so it stays the operator's act at a terminal.
+`stop` is a brake on the WHOLE dispatcher, not on one task. Every worker it is
+driving keeps running in its pane, and no new one comes up until a daemon is
+started again — so confirm with the operator before calling it, the same way
+you would before any act whose blast radius is everyone else's work.
 
 ## Everything else
 
@@ -104,6 +107,6 @@ worker it is driving, so it stays the operator's act at a terminal.
 hdis status --json                   hdis --help
 ```
 
-`hdis --help` lists every verb — the CLI carries all of them. Add `--json` to
+`hdis --help` lists the same four verbs the door serves. Add `--json` to
 any verb for one machine-readable document, and those bytes are the same
 document the MCP tool hands its caller.

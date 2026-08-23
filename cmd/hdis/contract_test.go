@@ -2,14 +2,15 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/husniadil/herdr-dispatch/internal/verbs"
 )
 
-// §7.3: the CLI is the primary agent surface, and the skill is what teaches
-// it. The skill is prose, so most of it is free to be rewritten — but a few
+// §7.3: both doors are first-class and carry the same verbs, and the skill is
+// what teaches an agent which they are. The skill is prose, so most of it is free to be rewritten — but a few
 // of its claims are load-bearing, and an agent that believes a stale one acts
 // wrongly. Those are pinned here, along with the tool list, which is the verb
 // registry's own.
@@ -57,11 +58,7 @@ func TestTheSkillTeachesWhatTheRegistrySays(t *testing.T) {
 		t.Fatal("the skill has no sentence naming the MCP tools")
 	}
 	for _, v := range verbs.All {
-		named := strings.Contains(list, "`"+v.Name+"`")
-		if v.CLIOnly && named {
-			t.Errorf("the skill lists %q among the MCP tools; the door withholds it", v.Name)
-		}
-		if !v.CLIOnly && !named {
+		if !strings.Contains(list, "`"+v.Name+"`") {
 			t.Errorf("the skill does not name the MCP tool %q", v.Name)
 		}
 	}
@@ -151,6 +148,52 @@ func TestTheMaxWorkersReadingIsWrittenDownInTheConfigAndTheREADME(t *testing.T) 
 		prose := strings.ReplaceAll(string(raw), "//", " ")
 		if !strings.Contains(flatten(prose), flatten(sentence)) {
 			t.Errorf("%s does not say which of the two things max_workers bounds (looked for %q)", path, sentence)
+		}
+	}
+}
+
+// A tool list that names every served verb is not enough on its own. The
+// commit that put `stop` on the door moved the list, the pinned set and the
+// README table, and left a paragraph two lines below the list still saying
+// "`stop` is deliberately not a tool" — every name was present, so a guard
+// that only asks "is each verb named" stayed green over a document arguing
+// with itself.
+//
+// So the docs are also read for a claim that a served verb is withheld. The
+// phrases are the ones this repository actually used, and a document that
+// wants to say something like it about a verb the door does not serve has no
+// such verb to say it about: there are none.
+func TestNoDocumentSaysAServedVerbIsWithheld(t *testing.T) {
+	claims := []string{
+		"is deliberately not a tool",
+		"is not a tool",
+		"is the one cli-only verb",
+		"none, on purpose",
+	}
+	for _, name := range []string{
+		filepath.Join("..", "..", "README.md"),
+		filepath.Join("..", "..", "skills", "dispatch", "SKILL.md"),
+	} {
+		raw, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		flat := flatten(string(raw))
+		for _, claim := range claims {
+			at := strings.Index(flat, claim)
+			if at < 0 {
+				continue
+			}
+			// Which verb is it about: the last one named before the claim.
+			subject := ""
+			for _, v := range verbs.All {
+				if i := strings.LastIndex(flat[:at], v.Name); i >= 0 {
+					if j := strings.LastIndex(flat[:at], subject); subject == "" || i > j {
+						subject = v.Name
+					}
+				}
+			}
+			t.Errorf("%s says %q about %q, and the door serves every verb", name, claim, subject)
 		}
 	}
 }

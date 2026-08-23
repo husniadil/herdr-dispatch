@@ -34,11 +34,6 @@ type Verb struct {
 	Long string
 	// Args is the parameter list, in CLI positional order.
 	Args []Arg
-	// CLIOnly keeps a verb off the MCP door. It is the one asymmetry the
-	// table may declare, and declaring it here is what keeps it from being
-	// an accident: the parity guard reads this field rather than a list of
-	// exceptions kept beside it.
-	CLIOnly bool
 	// NoAutostart sends the verb to whatever daemon is already listening
 	// and refuses when none is, instead of starting one.
 	NoAutostart bool
@@ -71,8 +66,13 @@ var All = []Verb{
 			"exits; it writes nothing to the board on the way out, and the tasks " +
 			"it was driving keep their claims and their leases, which are the " +
 			"board's to time out. Answers NOT_RUNNING when no daemon is " +
-			"listening: nothing is started just to be stopped.",
-		CLIOnly: true, NoAutostart: true,
+			"listening: nothing is started just to be stopped. It is a brake on " +
+			"the WHOLE dispatcher and not on one task: every worker it is " +
+			"driving keeps running in its pane, and no new one comes up until a " +
+			"daemon is started again. Confirm with the operator before calling " +
+			"it, the same way you would before any act whose blast radius is " +
+			"everyone else's work.",
+		NoAutostart: true,
 	},
 	{
 		Name: "status", CLI: []string{"status"},

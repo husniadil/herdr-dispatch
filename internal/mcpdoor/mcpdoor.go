@@ -58,13 +58,6 @@ func New(version string, call Caller) *mcp.Server {
 		Description: "Dispatch ready tasks from the htask board to worker agents in Herdr panes",
 	}, &mcp.ServerOptions{Instructions: Instructions})
 	for _, v := range verbs.All {
-		// A CLI-only verb has no tool here. See the door's parity test for
-		// why stop is one: an MCP door is spawned per client session, and a
-		// brake on the whole dispatcher does not belong in every session's
-		// hands.
-		if v.CLIOnly {
-			continue
-		}
 		s.AddTool(tool(v), handlerFor(v, call))
 	}
 	return s
