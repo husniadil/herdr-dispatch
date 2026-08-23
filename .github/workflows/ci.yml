@@ -53,4 +53,4 @@ jobs:
       - name: go.mod is tidy
         run: |
           go mod tidy
-          git diff --exit-code go.mod go.sum 2>/dev/null || git diff --exit-code go.mod
+          git diff --exit-code go.mod go.sum
