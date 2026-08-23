@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -667,5 +668,82 @@ func TestAWorkerIsNotSpawnedAtAllWhenItCanBeGivenNoWorktree(t *testing.T) {
 	}
 	if len(l.bindings) != 0 {
 		t.Fatalf("a binding was written for a worker that never came up: %+v", l.bindings)
+	}
+}
+
+// doingRow is the fake board answering with a claimed, in-progress row for
+// the worker pane every test in this file spawns, carrying whatever review
+// feedback the case is about.
+func doingRow(feedback string) string {
+	fb := ""
+	if feedback != "" {
+		fb = `,"feedback":` + strconv.Quote(feedback)
+	}
+	return `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"doing","claimed_by":"agent:wM:p9"` + fb + `},"ready":false,"dependents":[]}`
+}
+
+// idlePane makes the spawned worker's pane read idle, which is what the
+// stalled rule and the rejected rule are both decided from.
+func idlePane(t *testing.T, f *fake.Fake) {
+	t.Helper()
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
+}
+
+// nudgeAfterFirstTick spawns a worker, then puts the board and the pane in
+// the state the case is about and ticks again, returning the one prompt the
+// worker was sent.
+func nudgeAfterFirstTick(t *testing.T, feedback string) string {
+	t.Helper()
+	l, f := newLoop(t)
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	f.Write(t, "get.json", doingRow(feedback))
+	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
+	idlePane(t, f)
+	l.Now = func() time.Time { return clock.Add(10 * time.Minute) }
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	prompts := calls(t, f, "agent prompt")
+	if len(prompts) != 1 {
+		t.Fatalf("prompted %d times: %v", len(prompts), prompts)
+	}
+	return prompts[0]
+}
+
+// A worker whose submission was rejected is idle on a doing row, exactly like
+// a worker that stopped without submitting. The board's feedback is what
+// tells them apart, and what it is told must name the rejection and where the
+// feedback is — never the went-idle wording, which is false here and sends a
+// worker back to work it believes finished.
+func TestARejectedWorkerIsToldItsSubmissionCameBackAndWhereToReadWhy(t *testing.T) {
+	got := nudgeAfterFirstTick(t, "criterion 1 cites no test")
+	t.Logf("the rejected worker's prompt: %q", got)
+	if strings.Contains(got, "went idle") {
+		t.Fatalf("a rejected worker is told it went idle: %q", got)
+	}
+	for _, want := range []string{"review", "7"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("the prompt does not name %q: %q", want, got)
+		}
+	}
+	if !strings.Contains(got, "htask task get 7") {
+		t.Fatalf("the prompt does not say where to read the feedback: %q", got)
+	}
+}
+
+// The same pane, the same doing row, no feedback: the stalled prompt, so the
+// two cases stay distinguishable in both directions.
+func TestAWorkerIdleOnADoingRowWithNoFeedbackStillGetsTheStalledPrompt(t *testing.T) {
+	got := nudgeAfterFirstTick(t, "")
+	t.Logf("the stalled worker's prompt: %q", got)
+	if strings.Contains(got, "came back") || strings.Contains(got, "rejected") {
+		t.Fatalf("a worker with nothing back from review is told its submission returned: %q", got)
+	}
+	for _, want := range []string{"idle", "7"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("the prompt does not name %q: %q", want, got)
+		}
 	}
 }

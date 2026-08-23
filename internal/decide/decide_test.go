@@ -1,6 +1,7 @@
 package decide
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -218,5 +219,60 @@ func TestARetiredSlotIsReusedInTheSameTick(t *testing.T) {
 	a := one(t, as, Spawn)
 	if a.TaskID != "12" {
 		t.Fatalf("got %+v", a)
+	}
+}
+
+// A rejected submission and an abandoned one look the same from the pane:
+// the row is doing and the worker is idle. Feedback on the row is what tells
+// them apart, and a rejection carries its own reason so the stalled one keeps
+// its meaning.
+func TestARejectedWorkerIsPromptedWithARejectionReasonOfItsOwn(t *testing.T) {
+	s := Snapshot{
+		Tasks:    map[string]Task{"9": {ID: "9", Status: "doing", ClaimedBy: "wA:p7", Feedback: "criterion 1 cites no test"}},
+		Agents:   map[string]string{"wA:p7": "idle"},
+		Bindings: []Binding{{TaskID: "9", Pane: "wA:p7", PromptedAt: t0, Prompts: 1}},
+		Now:      t0.Add(time.Minute),
+	}
+	a := one(t, Decide(s, pol()), Prompt)
+	if a.TaskID != "9" || a.Pane != "wA:p7" || a.Reason != ReasonRejected {
+		t.Fatalf("got %+v", a)
+	}
+	if ReasonRejected == ReasonStalled {
+		t.Fatal("a rejection and a stall carry the same reason, so nothing downstream can tell them apart")
+	}
+}
+
+// The same row without feedback is the stalled case, unchanged: the two stay
+// distinguishable in both directions.
+func TestAnIdleWorkerOnADoingTaskWithNoFeedbackKeepsTheStalledReason(t *testing.T) {
+	s := Snapshot{
+		Tasks:    map[string]Task{"9": {ID: "9", Status: "doing", ClaimedBy: "wA:p7"}},
+		Agents:   map[string]string{"wA:p7": "idle"},
+		Bindings: []Binding{{TaskID: "9", Pane: "wA:p7", PromptedAt: t0, Prompts: 1}},
+		Now:      t0.Add(time.Minute),
+	}
+	a := one(t, Decide(s, pol()), Prompt)
+	if a.Reason != ReasonStalled {
+		t.Fatalf("got %+v", a)
+	}
+}
+
+// A reason is written into the operator's log as the dispatcher's account of
+// what happened. ReasonStalled used to read "worker went idle without
+// submitting", which is a cause the two facts behind it cannot establish:
+// a rejected worker is idle too. What a reason may state is what was seen.
+func TestTheReasonConstantsStateWhatWasObservedAndNotACauseTheCodeCannotSee(t *testing.T) {
+	for _, claim := range []string{"without submitting", "never submitted", "abandoned", "gave up"} {
+		if strings.Contains(ReasonStalled, claim) {
+			t.Fatalf("ReasonStalled %q asserts %q, which an idle pane on a doing row does not establish", ReasonStalled, claim)
+		}
+	}
+	for _, seen := range []string{"doing", "idle"} {
+		if !strings.Contains(ReasonStalled, seen) {
+			t.Fatalf("ReasonStalled %q does not name %q, one of the two facts it is decided from", ReasonStalled, seen)
+		}
+	}
+	if !strings.Contains(ReasonRejected, "feedback") {
+		t.Fatalf("ReasonRejected %q does not name the feedback that is the fact it is decided from", ReasonRejected)
 	}
 }

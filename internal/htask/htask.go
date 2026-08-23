@@ -64,6 +64,13 @@ type Task struct {
 	// with a pane created it. A task an operator files at a terminal has
 	// none, and that is the ordinary case rather than a missing field.
 	PaneID string `json:"pane_id"`
+	// Feedback is what the review gate said when it sent the task back, and
+	// it is on the row only between a rejection and the next submission: the
+	// board clears it when the task is submitted again. A `doing` row that
+	// carries it is a worker waiting on a rejection rather than a worker
+	// that stopped without submitting, and nothing else here can tell those
+	// two apart.
+	Feedback string `json:"feedback"`
 }
 
 // Pane returns the pane the claiming principal runs in, or empty while the

@@ -49,7 +49,8 @@ const (
 // Reasons carried on Prompt and Retire actions, for the operator's log.
 const (
 	ReasonUnclaimed = "goal delivered but never claimed"
-	ReasonStalled   = "worker went idle without submitting"
+	ReasonStalled   = "the board still has the task in doing and the pane is idle"
+	ReasonRejected  = "the task is back in doing and the board's row carries review feedback"
 	ReasonTakenOver = "task was claimed by another pane"
 	ReasonTerminal  = "task is terminal"
 	ReasonVerified  = "verifier went idle, its findings are sent or they are not coming"
@@ -62,6 +63,11 @@ type Task struct {
 	ID        string
 	Status    string
 	ClaimedBy string
+	// Feedback is the review gate's words on the row, present only between a
+	// rejection and the next submission. It is the one fact that separates a
+	// worker waiting on a rejection from one that stopped without
+	// submitting: both sit idle on a doing row.
+	Feedback string
 }
 
 // Binding is the dispatcher's one piece of own state: which pane it prompted
@@ -216,7 +222,11 @@ func Decide(s Snapshot, p Policy) []Action {
 			continue
 		}
 		if known && t.Status == "doing" && status == "idle" {
-			out = append(out, Action{Kind: Prompt, TaskID: b.TaskID, Pane: b.Pane, Reason: ReasonStalled})
+			reason := ReasonStalled
+			if t.Feedback != "" {
+				reason = ReasonRejected
+			}
+			out = append(out, Action{Kind: Prompt, TaskID: b.TaskID, Pane: b.Pane, Reason: reason})
 		}
 	}
 
