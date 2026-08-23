@@ -7,6 +7,37 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+**Breaking: the config, the directories and the environment prefix moved to
+the plugin's short name, and the config is TOML.** §10.1 puts a plugin's
+config at `<config_dir>/<name>.toml` under its SHORT NAME, which §13.2 fixes
+at `dispatch`; `hdis` is the binary abbreviation and names the executable
+alone. There is no migration shim, because the only consumer is the operator,
+and a shim that silently read the old file would keep the seam it exists to
+close. Move your file:
+
+| Was                                      | Is now                                             |
+| ---------------------------------------- | -------------------------------------------------- |
+| `~/.config/hdis/hdis.json`               | `~/.config/dispatch/dispatch.toml`                  |
+| `~/.local/state/hdis/`                   | `~/.local/state/dispatch/`                          |
+| `~/.local/state/hdis/hdis.sock`          | `~/.local/state/dispatch/dispatch.sock`             |
+| `~/.local/state/hdis/hdis.lock`          | `~/.local/state/dispatch/dispatch.lock`             |
+| `~/.local/state/hdis/hdis.log`           | `~/.local/state/dispatch/dispatch.log`              |
+| `~/.local/state/hdis/hdis-bindings.json` | `~/.local/state/dispatch/dispatch-bindings.json`    |
+| `HDIS_CONFIG_DIR`, `HDIS_STATE_DIR`      | `DISPATCH_CONFIG_DIR`, `DISPATCH_STATE_DIR`         |
+
+The document itself is now TOML, read by a hand-written subset rather than a
+new dependency: top-level `key = value`, `[table]` and `[table.sub]` headers,
+and values that are quoted strings, whole numbers, `true`/`false`, or one-line
+arrays of quoted strings. Every field name, default and refusal is the one the
+JSON document already had — only the syntax moved. Anything outside the subset
+is refused by line number rather than ignored. The README carries the whole
+document in its new form.
+
+`HDIS_DISPATCHER_PANE` does **not** move. It is the variable a worker receives
+in its own environment naming the pane it owes its report at — part of the
+worker protocol, not this plugin's config prefix — and renaming it would break
+every worker already running and every skill that names it.
+
 **There is a §9 policy gate, and two new verbs came with it.** `dispatch` and
 `stop` now pass one `gate()` before doing anything, named to a policy as
 `dispatch.dispatch` and `dispatch.stop`. With no `gate` key in the config the

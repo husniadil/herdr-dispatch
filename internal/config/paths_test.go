@@ -7,7 +7,7 @@ import (
 )
 
 func TestStateDirPrefersThePluginsOwnOverride(t *testing.T) {
-	t.Setenv("HDIS_STATE_DIR", "/tmp/somewhere")
+	t.Setenv("DISPATCH_STATE_DIR", "/tmp/somewhere")
 	t.Setenv("XDG_STATE_HOME", "/tmp/xdg")
 	if got, want := StateDir(), "/tmp/somewhere"; got != want {
 		t.Errorf("StateDir() = %q, want %q", got, want)
@@ -15,7 +15,7 @@ func TestStateDirPrefersThePluginsOwnOverride(t *testing.T) {
 }
 
 func TestStateDirFallsBackToTheXdgBase(t *testing.T) {
-	t.Setenv("HDIS_STATE_DIR", "")
+	t.Setenv("DISPATCH_STATE_DIR", "")
 	t.Setenv("XDG_STATE_HOME", "/tmp/xdg")
 	if got, want := StateDir(), filepath.Join("/tmp/xdg", Name); got != want {
 		t.Errorf("StateDir() = %q, want %q", got, want)
@@ -23,20 +23,32 @@ func TestStateDirFallsBackToTheXdgBase(t *testing.T) {
 }
 
 func TestSocketAndLockSitInTheStateDir(t *testing.T) {
-	t.Setenv("HDIS_STATE_DIR", "/tmp/state")
-	if got, want := SocketPath(), "/tmp/state/hdis.sock"; got != want {
+	t.Setenv("DISPATCH_STATE_DIR", "/tmp/state")
+	if got, want := SocketPath(), "/tmp/state/dispatch.sock"; got != want {
 		t.Errorf("SocketPath() = %q, want %q", got, want)
 	}
-	if got, want := LockPath(), "/tmp/state/hdis.lock"; got != want {
+	if got, want := LockPath(), "/tmp/state/dispatch.lock"; got != want {
 		t.Errorf("LockPath() = %q, want %q", got, want)
 	}
 }
 
-func TestConfigPathKeepsTheDocumentWhereItAlreadyLives(t *testing.T) {
-	t.Setenv("HDIS_CONFIG_DIR", "")
+// §10.1 with §13.2: the config is TOML at <config_dir>/<name>.toml, where
+// <name> is the plugin's SHORT NAME. `hdis` is the binary abbreviation §13.2
+// leaves to each plugin, and it never names a directory: a policy author
+// gating `dispatch.dispatch` and an operator opening
+// ~/.config/dispatch/dispatch.toml are looking at the same plugin under the
+// same word.
+func TestTheConfigIsTomlUnderTheShortName(t *testing.T) {
+	t.Setenv("DISPATCH_CONFIG_DIR", "")
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/cfg")
-	if got, want := ConfigPath(), "/tmp/cfg/hdis/hdis.json"; got != want {
+	if got, want := ConfigPath(), "/tmp/cfg/dispatch/dispatch.toml"; got != want {
 		t.Errorf("ConfigPath() = %q, want %q", got, want)
+	}
+	if Name != "dispatch" {
+		t.Errorf("the short name is %q, and §13.2 fixes it at \"dispatch\"", Name)
+	}
+	if EnvPrefix != "DISPATCH_" {
+		t.Errorf("the env prefix is %q, and §10.1 makes it the uppercase short name", EnvPrefix)
 	}
 }
 
@@ -49,7 +61,7 @@ func TestConfigPathKeepsTheDocumentWhereItAlreadyLives(t *testing.T) {
 // and not the one the name claims.
 func TestEnsureStateDirMakesItPrivate(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "state")
-	t.Setenv("HDIS_STATE_DIR", dir)
+	t.Setenv("DISPATCH_STATE_DIR", dir)
 	if err := EnsureStateDir(); err != nil {
 		t.Fatalf("EnsureStateDir: %v", err)
 	}
@@ -76,7 +88,7 @@ func TestEnsureStateDirClosesAnAlreadyOpenStateDir(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	t.Setenv("HDIS_STATE_DIR", dir)
+	t.Setenv("DISPATCH_STATE_DIR", dir)
 	if err := EnsureStateDir(); err != nil {
 		t.Fatalf("EnsureStateDir: %v", err)
 	}
@@ -111,8 +123,8 @@ func TestTheHerdrPluginDirsAreNotRead(t *testing.T) {
 			injected := filepath.Join(t.TempDir(), "herdr-injected")
 			own := filepath.Join(t.TempDir(), "own")
 			t.Setenv(tc.env, injected)
-			t.Setenv("HDIS_STATE_DIR", own)
-			t.Setenv("HDIS_CONFIG_DIR", own)
+			t.Setenv("DISPATCH_STATE_DIR", own)
+			t.Setenv("DISPATCH_CONFIG_DIR", own)
 			if got := tc.dir(); got == injected {
 				t.Fatalf("the %s resolved to %s, which Herdr injected: §5.1 and §10.1 forbid reading %s",
 					tc.what, got, tc.env)
@@ -130,8 +142,8 @@ func TestTheHerdrPluginDirsAreNotRead(t *testing.T) {
 	} {
 		injected := filepath.Join(t.TempDir(), "herdr-injected")
 		t.Setenv(tc.env, injected)
-		t.Setenv("HDIS_STATE_DIR", "")
-		t.Setenv("HDIS_CONFIG_DIR", "")
+		t.Setenv("DISPATCH_STATE_DIR", "")
+		t.Setenv("DISPATCH_CONFIG_DIR", "")
 		t.Setenv("XDG_STATE_HOME", "")
 		t.Setenv("XDG_CONFIG_HOME", "")
 		if got := tc.dir(); got == injected {
@@ -141,7 +153,11 @@ func TestTheHerdrPluginDirsAreNotRead(t *testing.T) {
 }
 
 func TestTheConfigCanNameTheBasePaneADaemonCannotInherit(t *testing.T) {
-	c, err := Parse([]byte(`{"default":"worker","pane":"wM:p1","profiles":{"worker":{"provider":"claude"}}}`))
+	c, err := Parse([]byte(`default = "worker"
+pane = "wM:p1"
+[profiles.worker]
+provider = "claude"
+`))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -154,7 +170,10 @@ func TestTheConfigCanNameTheBasePaneADaemonCannotInherit(t *testing.T) {
 }
 
 func TestWithoutAConfiguredPaneThereIsNone(t *testing.T) {
-	c, err := Parse([]byte(`{"default":"worker","profiles":{"worker":{"provider":"claude"}}}`))
+	c, err := Parse([]byte(`default = "worker"
+[profiles.worker]
+provider = "claude"
+`))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}

@@ -1671,7 +1671,7 @@ func TestTheAddressIsALivePaneInTheTasksProjectBeforeTheDaemonsOwn(t *testing.T)
 // desk and every later report for that project is delivered to a worker
 // rather than to a human.
 //
-// The checkout root is HDIS_STATE_DIR/worktrees, and HDIS_STATE_DIR is the
+// The checkout root is DISPATCH_STATE_DIR/worktrees, and DISPATCH_STATE_DIR is the
 // operator's to point anywhere — including inside a project, which is the
 // case this pins. With the default root, outside every project, the project
 // test already excludes our checkouts and the bound is what keeps that true

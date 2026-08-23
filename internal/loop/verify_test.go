@@ -159,9 +159,17 @@ func newVerifyLoopIn(t *testing.T, enabled bool, project string) (*Loop, *fake.F
 	f.Write(t, "screen.txt", "⎿  Goal set: do the thing\n  ◎ /goal active\n")
 	f.Write(t, "agentget.json", `{"id":"x","result":{"type":"agent_info","agent":{"pane_id":"wM:p9","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}}}`)
 
-	doc := `{"default":"worker","profiles":{"worker":{"provider":"claude"}}}`
+	doc := `default = "worker"
+[profiles.worker]
+provider = "claude"
+`
 	if enabled {
-		doc = `{"default":"worker","profiles":{"worker":{"provider":"claude"}},"verify":{"enabled":true}}`
+		doc = `default = "worker"
+[profiles.worker]
+provider = "claude"
+[verify]
+enabled = true
+`
 	}
 	cfg, err := config.Parse([]byte(doc))
 	if err != nil {
@@ -178,7 +186,7 @@ func newVerifyLoopIn(t *testing.T, enabled bool, project string) (*Loop, *fake.F
 			Poll: time.Second, Sleep: func(time.Duration) {},
 		},
 		Worktrees: &worktree.Manager{Root: realPath(t, t.TempDir())},
-		Store:     &store.Bindings{Path: filepath.Join(t.TempDir(), "hdis-bindings.json")},
+		Store:     &store.Bindings{Path: filepath.Join(t.TempDir(), "dispatch-bindings.json")},
 		BasePane:  "wM:p1",
 		Now:       func() time.Time { return clock },
 		Log:       log.New(io.Discard, "", 0),

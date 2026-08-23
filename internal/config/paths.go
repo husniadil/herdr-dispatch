@@ -6,15 +6,22 @@ import (
 	"path/filepath"
 )
 
-// Name is the binary's short name. It names the state dir, the socket, the
-// lock and the config document.
-const Name = "hdis"
+// Name is this plugin's SHORT NAME (§13.2), which is what the contract names
+// the directories, the socket, the lock and the config document after — not
+// the binary abbreviation `hdis`, which §13.2 leaves to each plugin and which
+// only ever names the executable. The two are different words here on
+// purpose: a policy that gates `dispatch.dispatch` and a config at
+// `~/.config/dispatch/dispatch.toml` are the same plugin under the same name,
+// and a sibling reading the contract can find both without knowing what this
+// binary happens to be called.
+const Name = "dispatch"
 
-// EnvPrefix is this binary's own override prefix, and how a test isolates
-// its daemon from the operator's.
-const EnvPrefix = "HDIS_"
+// EnvPrefix is this plugin's own override prefix (§10.1: the uppercase short
+// name), and how a test isolates its daemon from the operator's.
+const EnvPrefix = "DISPATCH_"
 
-// StateDir is HDIS_STATE_DIR, else ${XDG_STATE_HOME:-~/.local/state}/hdis.
+// StateDir is DISPATCH_STATE_DIR, else
+// ${XDG_STATE_HOME:-~/.local/state}/dispatch (§5.1).
 // The socket, the lock, the log and the bindings live there. No board fact
 // does: the bindings are the dispatcher's only state, and they are the one
 // thing about them that is not derivable from the board or from Herdr.
@@ -22,24 +29,25 @@ func StateDir() string {
 	return dirFrom(EnvPrefix+"STATE_DIR", "XDG_STATE_HOME", filepath.Join(".local", "state"))
 }
 
-// ConfigDir is HDIS_CONFIG_DIR, else ${XDG_CONFIG_HOME:-~/.config}/hdis.
+// ConfigDir is DISPATCH_CONFIG_DIR, else
+// ${XDG_CONFIG_HOME:-~/.config}/dispatch (§10.1).
 func ConfigDir() string {
 	return dirFrom(EnvPrefix+"CONFIG_DIR", "XDG_CONFIG_HOME", ".config")
 }
 
-// SocketPath is <state_dir>/hdis.sock: the private door every client of the
-// daemon dials.
+// SocketPath is <state_dir>/dispatch.sock (§2.2): the private door every
+// client of the daemon dials.
 func SocketPath() string { return filepath.Join(StateDir(), Name+".sock") }
 
-// LockPath is <state_dir>/hdis.lock, the file whose flock elects the one
+// LockPath is <state_dir>/dispatch.lock, the file whose flock elects the one
 // daemon. It is held for the daemon's lifetime and released by the kernel
 // when the process ends, so a crash leaves nothing to clean up.
 func LockPath() string { return filepath.Join(StateDir(), Name+".lock") }
 
-// ConfigPath is <config_dir>/hdis.json, where the profiles already live.
-func ConfigPath() string { return filepath.Join(ConfigDir(), Name+".json") }
+// ConfigPath is <config_dir>/dispatch.toml (§10.1), where the profiles live.
+func ConfigPath() string { return filepath.Join(ConfigDir(), Name+".toml") }
 
-// BindingsPath is <state_dir>/hdis-bindings.json, the pane-to-task mapping
+// BindingsPath is <state_dir>/dispatch-bindings.json, the pane-to-task mapping
 // the dispatcher re-adopts at start. It is the plugin's own state dir, per
 // §5.1, and a JSON document rather than the section's SQLite file for the
 // reason the README records.
@@ -50,7 +58,7 @@ func BindingsPath() string { return filepath.Join(StateDir(), Name+"-bindings.js
 // must not be one the operator or another worker is holding.
 func WorktreeDir() string { return filepath.Join(StateDir(), "worktrees") }
 
-// LogPath is <state_dir>/hdis.log, where a daemon started by a door writes:
+// LogPath is <state_dir>/dispatch.log, where a daemon started by a door writes:
 // it has no terminal, and a dispatcher nobody can hear is worse than none.
 func LogPath() string { return filepath.Join(StateDir(), Name+".log") }
 

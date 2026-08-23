@@ -51,8 +51,11 @@ doctor) echo '{"version":"0.4.0","contract":"0.3","binary":"/bin/htask","socket_
 *) echo '{"tasks":[],"count":0}' ;;
 esac`)
 	f.Bin(t, "herdr", `echo '{"id":"x","result":{"type":"pane_list","panes":[]}}'`)
-	if err := os.WriteFile(filepath.Join(state, "hdis.json"),
-		[]byte(`{"default":"worker","profiles":{"worker":{"provider":"claude"}}}`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(state, "dispatch.toml"),
+		[]byte(`default = "worker"
+[profiles.worker]
+provider = "claude"
+`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }

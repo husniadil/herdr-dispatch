@@ -41,7 +41,7 @@ func TestStatusSaysAWorkerIsHoldingItsSlotWhileAwaitingReview(t *testing.T) {
 }
 
 func TestDoctorSaysHowManySlotsAreHeldByPanesAwaitingReview(t *testing.T) {
-	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/hdis.sock","base_pane":"wM:p1","max_workers":4,"workers":4,"awaiting_review":2,"pending":0,"interval":"15s","board":{"reachable":true}}`)
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","base_pane":"wM:p1","max_workers":4,"workers":4,"awaiting_review":2,"pending":0,"interval":"15s","board":{"reachable":true}}`)
 	var out strings.Builder
 	if err := Write("doctor", raw, false, &out); err != nil {
 		t.Fatalf("write: %v", err)
@@ -55,7 +55,7 @@ func TestDoctorSaysHowManySlotsAreHeldByPanesAwaitingReview(t *testing.T) {
 }
 
 func TestDoctorSaysNothingAboutHeldSlotsWhenNoneAre(t *testing.T) {
-	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/hdis.sock","base_pane":"wM:p1","max_workers":4,"workers":2,"awaiting_review":0,"pending":0,"interval":"15s","board":{"reachable":true}}`)
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","base_pane":"wM:p1","max_workers":4,"workers":2,"awaiting_review":0,"pending":0,"interval":"15s","board":{"reachable":true}}`)
 	var out strings.Builder
 	if err := Write("doctor", raw, false, &out); err != nil {
 		t.Fatalf("write: %v", err)

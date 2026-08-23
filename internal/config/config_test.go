@@ -11,20 +11,22 @@ import (
 // A config carrying a global default and a per-project override resolves the
 // right profile for each project, and fills in the two documented defaults.
 func TestProfileResolvesGlobalDefaultAndProjectOverride(t *testing.T) {
-	const doc = `{
-	  "default": "worker",
-	  "profiles": {
-	    "worker": {"provider": "claude"},
-	    "routed": {
-	      "provider": "codex",
-	      "agent": "implementer",
-	      "model": "sonnet",
-	      "effort": "high",
-	      "args": ["--verbose"]
-	    }
-	  },
-	  "projects": {"/src/herdr-dispatch": "routed"}
-	}`
+	const doc = `
+default = "worker"
+
+[profiles.worker]
+provider = "claude"
+
+[profiles.routed]
+provider = "codex"
+agent = "implementer"
+model = "sonnet"
+effort = "high"
+args = ["--verbose"]
+
+[projects]
+"/src/herdr-dispatch" = "routed"
+`
 
 	c, err := Parse([]byte(doc))
 	if err != nil {
@@ -92,12 +94,26 @@ func TestHasSettingsArgSeesBothSpellings(t *testing.T) {
 // Every way a config can be wrong is refused at parse time, named.
 func TestParseRefusesAConfigItCannotResolve(t *testing.T) {
 	cases := map[string]string{
-		"unknown provider":     `{"default":"a","profiles":{"a":{"provider":"gemini"}}}`,
-		"missing provider":     `{"default":"a","profiles":{"a":{}}}`,
-		"default names no one": `{"default":"b","profiles":{"a":{"provider":"claude"}}}`,
-		"project names no one": `{"default":"a","profiles":{"a":{"provider":"claude"}},"projects":{"/p":"b"}}`,
-		"no default":           `{"profiles":{"a":{"provider":"claude"}}}`,
-		"no profiles":          `{"default":"a"}`,
+		"unknown provider": `default = "a"
+[profiles.a]
+provider = "gemini"
+`,
+		"missing provider": `default = "a"
+[profiles.a]
+`,
+		"default names no one": `default = "b"
+[profiles.a]
+provider = "claude"
+`,
+		"project names no one": `default = "a"
+[profiles.a]
+provider = "claude"
+[projects]
+"/p" = "b"
+`,
+		"no default": `{"profiles":{"a":{"provider":"claude"}}}`,
+		"no profiles": `default = "a"
+`,
 	}
 	for name, doc := range cases {
 		if _, err := Parse([]byte(doc)); err == nil {
@@ -109,8 +125,11 @@ func TestParseRefusesAConfigItCannotResolve(t *testing.T) {
 // Load reads the same document off disk and says which file it could not read.
 func TestLoadReportsThePathItFailedOn(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "hdis.json")
-	const doc = `{"default":"a","profiles":{"a":{"provider":"claude"}}}`
+	path := filepath.Join(dir, "dispatch.toml")
+	const doc = `default = "a"
+[profiles.a]
+provider = "claude"
+`
 	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +155,10 @@ func TestTheProxyLauncherDefaultsToProxenosAndCanBeOverridden(t *testing.T) {
 		t.Fatalf("the default launcher is %q", DefaultProxy)
 	}
 
-	c, err := Parse([]byte(`{"default":"a","profiles":{"a":{"provider":"codex"}}}`))
+	c, err := Parse([]byte(`default = "a"
+[profiles.a]
+provider = "codex"
+`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +166,11 @@ func TestTheProxyLauncherDefaultsToProxenosAndCanBeOverridden(t *testing.T) {
 		t.Fatalf("a config that names no launcher must resolve to %q, got %q", DefaultProxy, got)
 	}
 
-	c, err = Parse([]byte(`{"default":"a","proxy":"/opt/bin/proxenos-next","profiles":{"a":{"provider":"codex"}}}`))
+	c, err = Parse([]byte(`default = "a"
+proxy = "/opt/bin/proxenos-next"
+[profiles.a]
+provider = "codex"
+`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +181,10 @@ func TestTheProxyLauncherDefaultsToProxenosAndCanBeOverridden(t *testing.T) {
 
 // The verification lane is off in a document that says nothing about it.
 func TestTheVerificationLaneIsOffUnlessTheDocumentTurnsItOn(t *testing.T) {
-	c, err := Parse([]byte(`{"default":"w","profiles":{"w":{"provider":"claude"}}}`))
+	c, err := Parse([]byte(`default = "w"
+[profiles.w]
+provider = "claude"
+`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +197,12 @@ func TestTheVerificationLaneIsOffUnlessTheDocumentTurnsItOn(t *testing.T) {
 // which was launched from the worker's own profile, so there is no second
 // launch for a document to configure.
 func TestTheVerificationLaneNeedsNoProfileOfItsOwn(t *testing.T) {
-	c, err := Parse([]byte(`{"default":"w","profiles":{"w":{"provider":"claude"}},"verify":{"enabled":true}}`))
+	c, err := Parse([]byte(`default = "w"
+[profiles.w]
+provider = "claude"
+[verify]
+enabled = true
+`))
 	if err != nil {
 		t.Fatalf("a lane with nothing to configure was refused: %v", err)
 	}
@@ -183,9 +217,26 @@ func TestTheVerificationLaneNeedsNoProfileOfItsOwn(t *testing.T) {
 // an operator who set it believes a verifier is running.
 func TestAConfigStillNamingTheOldVerifierProfileIsRefusedByField(t *testing.T) {
 	for _, doc := range []string{
-		`{"default":"w","profiles":{"w":{"provider":"claude"}},"verify":{"enabled":true,"profile":"v"}}`,
-		`{"default":"w","profiles":{"w":{"provider":"claude"}},"verify":{"enabled":false,"profile":"v"}}`,
-		`{"default":"w","profiles":{"w":{"provider":"claude"}},"verify":{"profile":""}}`,
+		`default = "w"
+[profiles.w]
+provider = "claude"
+[verify]
+enabled = true
+profile = "v"
+`,
+		`default = "w"
+[profiles.w]
+provider = "claude"
+[verify]
+enabled = false
+profile = "v"
+`,
+		`default = "w"
+[profiles.w]
+provider = "claude"
+[verify]
+profile = ""
+`,
 	} {
 		_, err := Parse([]byte(doc))
 		if err == nil {
@@ -205,10 +256,10 @@ func TestAConfigStillNamingTheOldVerifierProfileIsRefusedByField(t *testing.T) {
 // what it reads off a worker's screen, and every judgement it makes about a
 // worker comes from reading that screen.
 func TestTheMeasuredPaneWidthCapIsInTheConfigAndCannotBeLowered(t *testing.T) {
-	const profiles = `"default":"w","profiles":{"w":{"provider":"claude"}}`
+	const profiles = "default = \"w\"\n[profiles.w]\nprovider = \"claude\"\n"
 
 	t.Run("a document that says nothing takes the measured numbers", func(t *testing.T) {
-		c, err := Parse([]byte(`{` + profiles + `}`))
+		c, err := Parse([]byte(profiles))
 		if err != nil {
 			t.Fatalf("parse: %v", err)
 		}
@@ -223,7 +274,7 @@ func TestTheMeasuredPaneWidthCapIsInTheConfigAndCannotBeLowered(t *testing.T) {
 	})
 
 	t.Run("an operator may ask for wider", func(t *testing.T) {
-		c, err := Parse([]byte(`{` + profiles + `,"layout":{"min_pane_columns":80}}`))
+		c, err := Parse([]byte(profiles + "[layout]\nmin_pane_columns = 80\n"))
 		if err != nil {
 			t.Fatalf("parse: %v", err)
 		}
@@ -233,7 +284,7 @@ func TestTheMeasuredPaneWidthCapIsInTheConfigAndCannotBeLowered(t *testing.T) {
 	})
 
 	t.Run("narrower than what was measured is refused", func(t *testing.T) {
-		_, err := Parse([]byte(`{` + profiles + `,"layout":{"min_pane_columns":20}}`))
+		_, err := Parse([]byte(profiles + "[layout]\nmin_pane_columns = 20\n"))
 		if err == nil {
 			t.Fatal("a pane narrower than the measured floor was accepted, and the dispatcher cannot read one")
 		}
@@ -243,7 +294,7 @@ func TestTheMeasuredPaneWidthCapIsInTheConfigAndCannotBeLowered(t *testing.T) {
 	})
 
 	t.Run("a tab that may hold no worker is refused", func(t *testing.T) {
-		if _, err := Parse([]byte(`{` + profiles + `,"layout":{"max_panes_per_tab":-1}}`)); err == nil {
+		if _, err := Parse([]byte(profiles + "[layout]\nmax_panes_per_tab = -1\n")); err == nil {
 			t.Fatal("a tab that can never be spawned into was accepted")
 		}
 	})
@@ -342,7 +393,11 @@ func TestShortestRowsFollowsTheGridRuleAndTheMeasuredSplitCost(t *testing.T) {
 // max-workers is the operator's number and it survives a restart: the config
 // carries it, and the daemon flag wins only when it is passed.
 func TestMaxWorkersLivesInTheConfigAndTheFlagOverridesIt(t *testing.T) {
-	c, err := Parse([]byte(`{"default":"w","profiles":{"w":{"provider":"claude"}},"max_workers":4}`))
+	c, err := Parse([]byte(`default = "w"
+max_workers = 4
+[profiles.w]
+provider = "claude"
+`))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -356,14 +411,21 @@ func TestMaxWorkersLivesInTheConfigAndTheFlagOverridesIt(t *testing.T) {
 		t.Errorf("the flag did not win: got %d, want 7", got)
 	}
 
-	d, err := Parse([]byte(`{"default":"w","profiles":{"w":{"provider":"claude"}}}`))
+	d, err := Parse([]byte(`default = "w"
+[profiles.w]
+provider = "claude"
+`))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
 	if d.MaxWorkers != DefaultMaxWorkers {
 		t.Errorf("an absent max_workers defaulted to %d, want %d", d.MaxWorkers, DefaultMaxWorkers)
 	}
-	if _, err := Parse([]byte(`{"default":"w","profiles":{"w":{"provider":"claude"}},"max_workers":-1}`)); err == nil {
+	if _, err := Parse([]byte(`default = "w"
+max_workers = -1
+[profiles.w]
+provider = "claude"
+`)); err == nil {
 		t.Error("a negative max_workers was accepted")
 	}
 }
@@ -373,7 +435,12 @@ func TestMaxWorkersLivesInTheConfigAndTheFlagOverridesIt(t *testing.T) {
 // document asked for. An operator who raises the floor is asking for wider
 // panes, and the count is the only thing that delivers them.
 func TestRaisingTheColumnFloorLowersThePaneCount(t *testing.T) {
-	wide, err := Parse([]byte(`{"default":"w","profiles":{"w":{"provider":"claude"}},"layout":{"min_pane_columns":120}}`))
+	wide, err := Parse([]byte(`default = "w"
+[profiles.w]
+provider = "claude"
+[layout]
+min_pane_columns = 120
+`))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -389,7 +456,10 @@ func TestRaisingTheColumnFloorLowersThePaneCount(t *testing.T) {
 
 	// An unraised floor still lands on the measured default, and an explicit
 	// count is still the operator's own.
-	plain, err := Parse([]byte(`{"default":"w","profiles":{"w":{"provider":"claude"}}}`))
+	plain, err := Parse([]byte(`default = "w"
+[profiles.w]
+provider = "claude"
+`))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -397,7 +467,13 @@ func TestRaisingTheColumnFloorLowersThePaneCount(t *testing.T) {
 		t.Errorf("max_panes_per_tab = %d, want the measured default %d",
 			plain.Layout.MaxPanesPerTab, DefaultMaxPanesPerTab)
 	}
-	named, err := Parse([]byte(`{"default":"w","profiles":{"w":{"provider":"claude"}},"layout":{"min_pane_columns":120,"max_panes_per_tab":3}}`))
+	named, err := Parse([]byte(`default = "w"
+[profiles.w]
+provider = "claude"
+[layout]
+min_pane_columns = 120
+max_panes_per_tab = 3
+`))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}

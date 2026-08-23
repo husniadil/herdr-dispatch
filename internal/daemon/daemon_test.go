@@ -106,7 +106,7 @@ func newDaemon(t *testing.T) (*Daemon, *fake.Fake) {
 				StartTimeout: time.Second, DialogCeiling: time.Second, ConfirmCeiling: 2 * time.Second,
 				Poll: time.Second, Sleep: func(time.Duration) {},
 			},
-			Store:     &store.Bindings{Path: filepath.Join(t.TempDir(), "hdis-bindings.json")},
+			Store:     &store.Bindings{Path: filepath.Join(t.TempDir(), "dispatch-bindings.json")},
 			Worktrees: &worktree.Manager{Root: t.TempDir(), Git: filepath.Join(f.Dir, "git")},
 			BasePane:  "wM:p1",
 			Log:       log.New(io.Discard, "", 0),
@@ -121,7 +121,10 @@ func newDaemon(t *testing.T) (*Daemon, *fake.Fake) {
 
 func mustConfig(t *testing.T) config.Config {
 	t.Helper()
-	cfg, err := config.Parse([]byte(`{"default":"worker","profiles":{"worker":{"provider":"claude"}}}`))
+	cfg, err := config.Parse([]byte(`default = "worker"
+[profiles.worker]
+provider = "claude"
+`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +276,7 @@ func TestDoctorDeclaresTheContractThisPluginSatisfies(t *testing.T) {
 
 // §10.3: doctor prints the state dir and the config dir. It printed neither,
 // so an operator whose override was not taking effect — a daemon started from
-// a shell that exported a different HDIS_STATE_DIR, a config edited in the
+// a shell that exported a different DISPATCH_STATE_DIR, a config edited in the
 // wrong one — had no way to ask the running daemon which pair it resolved.
 func TestDoctorNamesTheDirectoriesItResolved(t *testing.T) {
 	state := stateDir(t)
@@ -390,7 +393,7 @@ func TestTheSocketIsPrivateToTheUser(t *testing.T) {
 	}
 	defer ln.Close()
 
-	fi, err := os.Stat(filepath.Join(dir, "hdis.sock"))
+	fi, err := os.Stat(filepath.Join(dir, "dispatch.sock"))
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
@@ -401,7 +404,7 @@ func TestTheSocketIsPrivateToTheUser(t *testing.T) {
 
 func TestListenReplacesASocketNoDaemonIsBehind(t *testing.T) {
 	dir := stateDir(t)
-	if err := os.WriteFile(filepath.Join(dir, "hdis.sock"), []byte("stale"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "dispatch.sock"), []byte("stale"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -616,10 +619,10 @@ func TestStopShutsTheDaemonDownCleanly(t *testing.T) {
 		t.Fatal("the daemon did not stop when asked")
 	}
 
-	if _, err := os.Stat(filepath.Join(dir, "hdis.sock")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, "dispatch.sock")); !os.IsNotExist(err) {
 		t.Errorf("the socket outlived the daemon: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "hdis.lock")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, "dispatch.lock")); !os.IsNotExist(err) {
 		t.Errorf("the lock file outlived the daemon: %v", err)
 	}
 	// The board is htask's, and a dispatcher going away writes nothing to
@@ -728,7 +731,12 @@ func TestDoctorReportsTheVerificationLane(t *testing.T) {
 		t.Fatalf("the lane reads as on: %+v", rep.Verify)
 	}
 
-	cfg, err := config.Parse([]byte(`{"default":"w","profiles":{"w":{"provider":"claude"}},"verify":{"enabled":true}}`))
+	cfg, err := config.Parse([]byte(`default = "w"
+[profiles.w]
+provider = "claude"
+[verify]
+enabled = true
+`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -743,7 +751,12 @@ func TestDoctorReportsTheVerificationLane(t *testing.T) {
 // readable back off the running daemon like the floor beside it.
 func TestDoctorReportsTheMaxPanesPerTab(t *testing.T) {
 	d, _ := newDaemon(t)
-	cfg, err := config.Parse([]byte(`{"default":"w","profiles":{"w":{"provider":"claude"}},"layout":{"max_panes_per_tab":2}}`))
+	cfg, err := config.Parse([]byte(`default = "w"
+[profiles.w]
+provider = "claude"
+[layout]
+max_panes_per_tab = 2
+`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -797,7 +810,7 @@ func TestCleanupRemovesWhatTheDaemonOpenedNotWhatTheStateDirNamesNow(t *testing.
 	// The state dir moves under the daemon, exactly as a t.Setenv in the
 	// next test moves it. The new dir holds a live daemon's files.
 	moved := stateDir(t)
-	for _, name := range []string{"hdis.sock", "hdis.lock"} {
+	for _, name := range []string{"dispatch.sock", "dispatch.lock"} {
 		if err := os.WriteFile(filepath.Join(moved, name), []byte("live"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -805,7 +818,7 @@ func TestCleanupRemovesWhatTheDaemonOpenedNotWhatTheStateDirNamesNow(t *testing.
 
 	d.Cleanup(ln)
 
-	for _, name := range []string{"hdis.sock", "hdis.lock"} {
+	for _, name := range []string{"dispatch.sock", "dispatch.lock"} {
 		if _, err := os.Stat(filepath.Join(opened, name)); !os.IsNotExist(err) {
 			t.Errorf("%s the daemon opened outlived its teardown: %v", name, err)
 		}
@@ -850,7 +863,7 @@ fi
 	// Serve is now past its listener and blocked on the tick, so the state
 	// dir can move with no race about where it is when teardown runs.
 	moved := stateDir(t)
-	for _, name := range []string{"hdis.sock", "hdis.lock"} {
+	for _, name := range []string{"dispatch.sock", "dispatch.lock"} {
 		if err := os.WriteFile(filepath.Join(moved, name), []byte("live"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -868,7 +881,7 @@ fi
 		t.Fatal("serve did not return once its tick was let go")
 	}
 
-	for _, name := range []string{"hdis.sock", "hdis.lock"} {
+	for _, name := range []string{"dispatch.sock", "dispatch.lock"} {
 		if _, err := os.Stat(filepath.Join(moved, name)); err != nil {
 			t.Errorf("a late teardown removed %s in a state dir it never opened: %v", name, err)
 		}
@@ -951,7 +964,7 @@ func TestTheSocketIsCreatedPrivateToTheUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
-	t.Setenv("HDIS_STATE_DIR", dir)
+	t.Setenv("DISPATCH_STATE_DIR", dir)
 	ln, err := Listen()
 	if err != nil {
 		t.Fatalf("Listen: %v", err)

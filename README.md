@@ -17,13 +17,13 @@ hdis daemon        # or `hdis run`, which is the same thing
 One binary is the daemon and both doors. The daemon owns the tick and the
 bindings; the CLI and the MCP server are thin clients of it and hold nothing
 of their own. There is one daemon per user, elected by a lock at
-`$XDG_STATE_HOME/hdis/hdis.lock`, answering on a private socket at
-`$XDG_STATE_HOME/hdis/hdis.sock`. A second one refuses to start with
+`$XDG_STATE_HOME/dispatch/dispatch.lock`, answering on a private socket at
+`$XDG_STATE_HOME/dispatch/dispatch.sock`. A second one refuses to start with
 `CONFLICT: ALREADY_RUNNING` rather than driving the same board alongside the
 first.
 
 **The daemon opens its own log.** It appends to
-`$XDG_STATE_HOME/hdis/hdis.log`, beside the socket, the lock and the
+`$XDG_STATE_HOME/dispatch/dispatch.log`, beside the socket, the lock and the
 bindings, whatever the shell line that started it redirected. Every line goes
 to stdout as well, so an operator running it in the foreground sees exactly
 what the file gets; the one exception is a daemon a door started, whose
@@ -38,7 +38,7 @@ the file that was actually opened, and says `stdout only` when none was.
 
 | Flag | What it sets |
 | --- | --- |
-| `-config <path>` | The config document. Defaults to `<config_dir>/hdis.json`. |
+| `-config <path>` | The config document. Defaults to `<config_dir>/dispatch.toml`. |
 | `-log <path>` | The file the log is appended to. |
 | `-interval <duration>` | How often to tick. |
 | `-once` | Run one tick and exit, instead of listening. Nothing serves either door in this mode. |
@@ -226,8 +226,8 @@ The gate is **configured, not built in** (§9.2). With no `gate` key the gate
 allows everything, which is what most fleets want and what `hdis doctor` says
 on its `gate` line. Set it to a command and every gated call runs it:
 
-```json
-{ "gate": ["/usr/local/bin/fleet-policy", "check"] }
+```toml
+gate = ["/usr/local/bin/fleet-policy", "check"]
 ```
 
 The command reads one JSON document on stdin — `{"subject","verb","target"}`,
@@ -280,28 +280,41 @@ nothing shares.
 
 ## Configuration
 
-`hdis` reads `$XDG_CONFIG_HOME/hdis/hdis.json` (`~/.config/hdis/hdis.json`).
+`hdis` reads `$XDG_CONFIG_HOME/dispatch/dispatch.toml`
+(`~/.config/dispatch/dispatch.toml`), which is where §10.1 puts a plugin's
+config under its SHORT NAME. `hdis` is the binary abbreviation §13.2 leaves to
+each plugin, and it names the executable and nothing else — a policy gating
+`dispatch.dispatch` and an operator opening `~/.config/dispatch/dispatch.toml`
+are the same plugin under the same word.
+
 It holds worker profiles — the launch preset a worker is assembled from — one
 global default, and per-project overrides:
 
-```json
-{
-  "default": "worker",
-  "profiles": {
-    "worker": { "provider": "claude" },
-    "routed": {
-      "provider": "codex",
-      "agent": "claude",
-      "model": "sonnet",
-      "effort": "medium",
-      "args": ["--add-dir", "/srv/shared"]
-    }
-  },
-  "projects": {
-    "/Users/me/github.com/me/some-repo": "routed"
-  }
-}
+```toml
+default = "worker"
+
+[profiles.worker]
+provider = "claude"
+
+[profiles.routed]
+provider = "codex"
+agent = "claude"
+model = "sonnet"
+effort = "medium"
+args = ["--add-dir", "/srv/shared"]
+
+[projects]
+"/Users/me/github.com/me/some-repo" = "routed"
 ```
+
+The reader is a hand-written subset of TOML rather than a dependency: top-level
+`key = value`, `[table]` and `[table.sub]` headers, and values that are quoted
+strings, whole numbers, `true`/`false`, or one-line arrays of quoted strings.
+A project path is a key, so it is quoted. Anything outside that subset — an
+inline table, an array of tables, a multi-line array, an unquoted string, a key
+set twice — is refused by line number rather than ignored, because a setting an
+operator wrote and this binary silently dropped is the failure a config parser
+exists to prevent.
 
 | Field      | Meaning                                                                                                                    |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------- |
@@ -311,21 +324,20 @@ global default, and per-project overrides:
 | `effort`   | Defaults to `low`.                                                                                                           |
 | `args`     | Extra argv passed through to the worker.                                                                                     |
 
-Five keys sit at the top level beside `default`, `profiles` and `projects`:
-`"proxy"` names the codex provider's launcher, `"pane"` names the base pane a
+Six keys sit at the top level beside `default`, `profiles` and `projects`:
+`proxy` names the codex provider's launcher, `pane` names the base pane a
 daemon uses when it was not started inside a Herdr pane and was given no
-`-pane`, `"max_workers"` is how many workers may be live at once,
-`"layout"` carries `min_pane_columns` and `max_panes_per_tab`, and `"verify"`
-is the verification lane.
+`-pane`, `max_workers` is how many workers may be live at once, `gate` is the
+§9 policy gate command, `[layout]` carries `min_pane_columns` and
+`max_panes_per_tab`, and `[verify]` is the verification lane.
 
 The lane is off unless the document turns it on. On, every task a worker of
 this daemon's submits earns one self-review shot in that worker's OWN pane —
 one shot the worker RECEIVES, which is not the same as one call made:
 
-```json
-{
-  "verify": { "enabled": true }
-}
+```toml
+[verify]
+enabled = true
 ```
 
 It names no profile, because nothing separate launches: the shot lands in a
@@ -339,10 +351,10 @@ under [The boundary](#the-boundary).
 The `codex` provider's launcher is named by an optional top-level `"proxy"`
 key, and defaults to the literal `proxenos`. It lives in the config rather
 than in this binary because that binary has been renamed once already, and
-the next rename should be one line of JSON:
+the next rename should be one line of config:
 
-```json
-{ "proxy": "/opt/homebrew/bin/proxenos" }
+```toml
+proxy = "/opt/homebrew/bin/proxenos"
 ```
 
 Which profile a project gets is decided here and nowhere else. The board
@@ -760,7 +772,7 @@ to the real Anthropic endpoint writes.
 The bindings — which pane was prompted for which task, when, how often, and
 whether review was already announced — are the dispatcher's only state, and
 they are the one thing about a worker that exists nowhere else until it
-claims. They are written to `<state_dir>/hdis-bindings.json` on every change
+claims. They are written to `<state_dir>/dispatch-bindings.json` on every change
 and taken back at the next start.
 
 **What is persisted.** Only what is not derivable: the pane, the task id, the
@@ -772,7 +784,7 @@ An on-demand dispatch's reservation is persisted beside them, and it carries
 the daemon that made it. **The reservation is local and nothing else can see
 it.** This binary has no `claim` verb and never writes a hold to the board, so
 a reserved task stays on the board's own ready list until its worker claims
-it; the reservation lives only in `<state_dir>/hdis-bindings.json`, and all it
+it; the reservation lives only in `<state_dir>/dispatch-bindings.json`, and all it
 does is keep the watching loop and the `dispatch` verb from both taking the
 same task inside one daemon. The owner it carries is that daemon's board
 principal, `plugin:hdis@<its own pane>`, which is what lets a restart tell its
@@ -876,7 +888,7 @@ The answers, all of them consequences of the one question:
   so the wait costs nothing.
 
 **What a restart hands back.** Once every pane is reconciled, a reservation in
-`<state_dir>/hdis-bindings.json` that no adopted pane is working is stale by
+`<state_dir>/dispatch-bindings.json` that no adopted pane is working is stale by
 construction — a daemon went down between reserving a task and bringing a pane
 up for it — and it is dropped, so the task is dispatchable again instead of
 sitting reserved forever. Nothing has to be said to the board about it,

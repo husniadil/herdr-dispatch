@@ -70,7 +70,7 @@ reject`**, or any note verb: verification and approval belong to the board's
 review gate, and a named test walks the source to keep it that way.
 
 **Which agent kind, model, effort and args a worker launches with is this
-binary's config** — `~/.config/hdis/hdis.json` — and is **not selectable per
+binary's config** — `~/.config/dispatch/dispatch.toml` — and is **not selectable per
 call**. There is no argument for it, and the board carries no profile field,
 for the same reason: which agent runs the work is execution policy, not a fact
 about the task.

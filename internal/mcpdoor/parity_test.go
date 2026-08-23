@@ -53,7 +53,10 @@ esac`)
 	f.Bin(t, "herdr", `echo '{"id":"x","result":{"type":"pane_list","panes":[]}}'`)
 	t.Setenv("HERDR_PANE_ID", "wM:p1")
 
-	cfg, err := config.Parse([]byte(`{"default":"worker","profiles":{"worker":{"provider":"claude"}}}`))
+	cfg, err := config.Parse([]byte(`default = "worker"
+[profiles.worker]
+provider = "claude"
+`))
 	if err != nil {
 		t.Fatal(err)
 	}

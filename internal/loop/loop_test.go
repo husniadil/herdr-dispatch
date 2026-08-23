@@ -111,7 +111,10 @@ func newLoop(t *testing.T) (*Loop, *fake.Fake) {
 	// Idle, so the screen is what confirms the goal rather than the status.
 	f.Write(t, "agentget.json", `{"id":"x","result":{"type":"agent_info","agent":{"pane_id":"wM:p9","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}}}`)
 
-	cfg, err := config.Parse([]byte(`{"default":"worker","profiles":{"worker":{"provider":"claude"}}}`))
+	cfg, err := config.Parse([]byte(`default = "worker"
+[profiles.worker]
+provider = "claude"
+`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +128,7 @@ func newLoop(t *testing.T) (*Loop, *fake.Fake) {
 			StartTimeout: time.Second, DialogCeiling: time.Second, ConfirmCeiling: 5 * time.Second,
 			Poll: time.Second, Sleep: func(time.Duration) {},
 		},
-		Store:     &store.Bindings{Path: filepath.Join(t.TempDir(), "hdis-bindings.json")},
+		Store:     &store.Bindings{Path: filepath.Join(t.TempDir(), "dispatch-bindings.json")},
 		Worktrees: &worktree.Manager{Root: t.TempDir(), Git: fakeGit(t, f)},
 		BasePane:  "wM:p1",
 		Now:       func() time.Time { return clock },
@@ -500,7 +503,10 @@ func TestAKeptPaneStillGoallessPastTheLargerCeilingIsGivenUp(t *testing.T) {
 func codexLoop(t *testing.T) (*Loop, *fake.Fake, string) {
 	t.Helper()
 	l, f := newLoop(t)
-	cfg, err := config.Parse([]byte(`{"default":"worker","profiles":{"worker":{"provider":"codex"}}}`))
+	cfg, err := config.Parse([]byte(`default = "worker"
+[profiles.worker]
+provider = "codex"
+`))
 	if err != nil {
 		t.Fatal(err)
 	}

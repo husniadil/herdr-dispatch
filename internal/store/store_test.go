@@ -11,7 +11,7 @@ import (
 
 func tempStore(t *testing.T) *Bindings {
 	t.Helper()
-	return &Bindings{Path: filepath.Join(t.TempDir(), "hdis-bindings.json")}
+	return &Bindings{Path: filepath.Join(t.TempDir(), "dispatch-bindings.json")}
 }
 
 // The whole of a binding survives a round trip: which pane was prompted for
@@ -300,7 +300,7 @@ func TestACheckoutSurvivesARoundTrip(t *testing.T) {
 // they were made in: a restart that lost it could not tell a verifier which
 // commit was submitted, and could not tell the operator where the work is.
 func TestABindingsBranchAndWorktreeBothSurviveARestart(t *testing.T) {
-	b := &Bindings{Path: filepath.Join(t.TempDir(), "hdis-bindings.json")}
+	b := &Bindings{Path: filepath.Join(t.TempDir(), "dispatch-bindings.json")}
 	want := decide.Binding{
 		TaskID: "01AAA", Pane: "wM:p9", Kind: decide.KindWorker,
 		Worktree: "/state/hdis-work-7-abc", Branch: "hdis/task-7",

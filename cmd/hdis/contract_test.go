@@ -301,7 +301,7 @@ func TestAFailureExitsWithTheStatusTheContractFixes(t *testing.T) {
 	run := func(argv ...string) (string, string, int) {
 		t.Helper()
 		cmd := exec.Command(bin, argv...)
-		cmd.Env = append(os.Environ(), "HDIS_STATE_DIR="+state, "HDIS_CONFIG_DIR="+t.TempDir())
+		cmd.Env = append(os.Environ(), "DISPATCH_STATE_DIR="+state, "DISPATCH_CONFIG_DIR="+t.TempDir())
 		var stdout, stderr strings.Builder
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
 		err := cmd.Run()

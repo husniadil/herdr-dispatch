@@ -451,24 +451,35 @@ type Config struct {
 	Gate []string `json:"gate"`
 }
 
-// Parse reads a config document and refuses one it could not resolve later.
+// Parse reads a config document (§10.1: TOML) and refuses one it could not
+// resolve later.
+//
+// The TOML is read into a nested map and then decoded through the same struct
+// tags the document has always used. That is deliberate: every field name,
+// every default and every refusal below is the one this config already had,
+// and only the surface syntax moved.
 func Parse(b []byte) (Config, error) {
+	doc, err := parseTOML(string(b))
+	if err != nil {
+		return Config{}, fmt.Errorf("hdis config: %w", err)
+	}
 	// A document written for the verifier pane still names the profile that
 	// pane launched from. Nothing launches separately now, so the field has
 	// nothing left to name, and an operator who set it believes a verifier
 	// is running. DisallowUnknownFields would refuse it as a bare "profile",
 	// which does not say which one, so it is named here before the decode.
-	var probe struct {
-		Verify struct {
-			Profile *string `json:"profile"`
-		} `json:"verify"`
+	if verify, ok := doc["verify"].(map[string]any); ok {
+		if _, named := verify["profile"]; named {
+			return Config{}, fmt.Errorf("hdis config: verify.profile names a verifier pane that no longer launches; the verification lane is a self-review shot in the worker's own pane, so remove the field")
+		}
 	}
-	if err := json.Unmarshal(b, &probe); err == nil && probe.Verify.Profile != nil {
-		return Config{}, fmt.Errorf("hdis config: verify.profile names a verifier pane that no longer launches; the verification lane is a self-review shot in the worker's own pane, so remove the field")
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		return Config{}, fmt.Errorf("hdis config: %w", err)
 	}
 
 	var c Config
-	dec := json.NewDecoder(strings.NewReader(string(b)))
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&c); err != nil {
 		return Config{}, fmt.Errorf("hdis config: %w", err)

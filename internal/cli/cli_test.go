@@ -170,7 +170,7 @@ func TestAWorkerWhosePaneIsGoneSaysSo(t *testing.T) {
 }
 
 func TestDoctorSaysWhyADispatchWouldRefuse(t *testing.T) {
-	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/hdis.sock","base_pane":"","max_workers":2,"interval":"15s","board":{"reachable":true}}`)
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","base_pane":"","max_workers":2,"interval":"15s","board":{"reachable":true}}`)
 	var out strings.Builder
 	if err := Write("doctor", raw, false, &out); err != nil {
 		t.Fatalf("write: %v", err)
@@ -212,10 +212,10 @@ func TestStopsHelpStatesTheNoDaemonOutcome(t *testing.T) {
 // Stop prints what it did, in a line an operator reads.
 func TestStopPrintsWhatItStopped(t *testing.T) {
 	var out bytes.Buffer
-	if err := Write("stop", json.RawMessage(`{"stopping":true,"socket":"/tmp/hdis.sock","pid":41}`), false, &out); err != nil {
+	if err := Write("stop", json.RawMessage(`{"stopping":true,"socket":"/tmp/dispatch.sock","pid":41}`), false, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "/tmp/hdis.sock") {
+	if !strings.Contains(out.String(), "/tmp/dispatch.sock") {
 		t.Errorf("stop printed %q", out.String())
 	}
 }
@@ -225,7 +225,7 @@ func TestStopPrintsWhatItStopped(t *testing.T) {
 // is what an operator reads, so it has to say that there and not only in the
 // JSON — an operator told "on" alone would still be looking for a second pane.
 func TestDoctorSaysTheLaneIsASelfReviewShotInTheWorkersOwnPane(t *testing.T) {
-	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/hdis.sock","base_pane":"wM:p1","max_workers":2,"interval":"15s","verify":{"enabled":true},"board":{"reachable":true}}`)
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","base_pane":"wM:p1","max_workers":2,"interval":"15s","verify":{"enabled":true},"board":{"reachable":true}}`)
 	var out strings.Builder
 	if err := Write("doctor", raw, false, &out); err != nil {
 		t.Fatalf("write: %v", err)
@@ -243,7 +243,7 @@ func TestDoctorSaysTheLaneIsASelfReviewShotInTheWorkersOwnPane(t *testing.T) {
 // A lane that is off is said, rather than left to be inferred from a line
 // that is not printed.
 func TestDoctorSaysTheVerificationLaneIsOffWhenItIsOff(t *testing.T) {
-	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/hdis.sock","base_pane":"wM:p1","max_workers":2,"interval":"15s","verify":{"enabled":false},"board":{"reachable":true}}`)
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","base_pane":"wM:p1","max_workers":2,"interval":"15s","verify":{"enabled":false},"board":{"reachable":true}}`)
 	var out strings.Builder
 	if err := Write("doctor", raw, false, &out); err != nil {
 		t.Fatalf("write: %v", err)
@@ -257,7 +257,7 @@ func TestDoctorSaysTheVerificationLaneIsOffWhenItIsOff(t *testing.T) {
 // dispatcher's own config and is known either way, so it is printed before
 // the board line rather than lost behind it.
 func TestDoctorNamesTheLaneEvenWhenTheBoardIsDown(t *testing.T) {
-	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/hdis.sock","base_pane":"wM:p1","max_workers":2,"interval":"15s","verify":{"enabled":true},"board":{"reachable":false,"error":"dial: no socket"}}`)
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","base_pane":"wM:p1","max_workers":2,"interval":"15s","verify":{"enabled":true},"board":{"reachable":false,"error":"dial: no socket"}}`)
 	var out strings.Builder
 	if err := Write("doctor", raw, false, &out); err != nil {
 		t.Fatalf("write: %v", err)
@@ -289,7 +289,7 @@ func TestStatusNamesTheBranchTheWorkIsOn(t *testing.T) {
 // The number the operator just set is read back from the running daemon, in
 // the prose an operator actually reads and not only in the JSON.
 func TestDoctorNamesTheMaxPanesPerTabInProse(t *testing.T) {
-	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/hdis.sock","base_pane":"wM:p1","max_workers":4,"interval":"15s","min_pane_columns":40,"max_panes_per_tab":2,"board":{"reachable":true}}`)
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","base_pane":"wM:p1","max_workers":4,"interval":"15s","min_pane_columns":40,"max_panes_per_tab":2,"board":{"reachable":true}}`)
 	var out strings.Builder
 	if err := Write("doctor", raw, false, &out); err != nil {
 		t.Fatalf("write: %v", err)
@@ -305,12 +305,12 @@ func TestDoctorNamesTheMaxPanesPerTabInProse(t *testing.T) {
 // way the bindings and the layout are: an operator looking for a spawn
 // decision is told the file rather than guessing at the shell line.
 func TestDoctorNamesTheLogInProse(t *testing.T) {
-	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/hdis.sock","base_pane":"wM:p1","log":"/s/hdis.log","board":{"reachable":true}}`)
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","base_pane":"wM:p1","log":"/s/dispatch.log","board":{"reachable":true}}`)
 	var out strings.Builder
 	if err := Write("doctor", raw, false, &out); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if !strings.Contains(out.String(), "/s/hdis.log") {
+	if !strings.Contains(out.String(), "/s/dispatch.log") {
 		t.Fatalf("doctor does not name the log: %q", out.String())
 	}
 }
@@ -318,7 +318,7 @@ func TestDoctorNamesTheLogInProse(t *testing.T) {
 // A daemon that could not open a file says so where the path would be,
 // rather than showing an empty field an operator reads as "no log".
 func TestDoctorSaysWhenNoLogFileCouldBeOpened(t *testing.T) {
-	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/hdis.sock","board":{"reachable":true}}`)
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","board":{"reachable":true}}`)
 	var out strings.Builder
 	if err := Write("doctor", raw, false, &out); err != nil {
 		t.Fatalf("write: %v", err)
