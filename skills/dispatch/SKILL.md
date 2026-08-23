@@ -11,11 +11,19 @@ and hands off at review — where the board's own review gate takes over.
 
 The board stays the ledger. This binary is execution policy and nothing else.
 
+## Reach for the tools, not the shell
+
+Every verb is an MCP tool on the `herdr-dispatch` server AND an `hdis`
+subcommand. **Use the tools.** They take typed arguments and answer with a
+document, and nothing about them depends on `hdis` being on your PATH, which
+it may not be. The CLI is there when you have a shell and want one; neither
+surface grants anything the other does not.
+
 ## dispatch does not wait
 
-```sh
-hdis dispatch 01M0N5HG0CCEXW1A0TVF2HZQTG
-hdis status
+```
+dispatch { "task": "01M0N5HG0CCEXW1A0TVF2HZQTG" }
+status   { }
 ```
 
 `dispatch` reserves the task and returns at once. It **does not wait for a
@@ -109,6 +117,7 @@ you would before any act whose blast radius is everyone else's work.
 hdis status --json                   hdis --help
 ```
 
-`hdis --help` lists the same four verbs the door serves. Add `--json` to
+`hdis --help` lists the same four verbs the door serves, for a caller with a
+shell. Add `--json` to
 any verb for one machine-readable document, and those bytes are the same
 document the MCP tool hands its caller.

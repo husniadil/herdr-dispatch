@@ -26,8 +26,14 @@ test-full: test
 	GOOS=darwin GOARCH=arm64 go vet ./...
 	go test -race ./...
 
-install: build
-	cp $(BIN) $(shell go env GOPATH)/bin/hdis
+# `go install`, not a copy into $GOPATH/bin. GOBIN is what decides where an
+# installed binary lands, and a toolchain manager sets it away from GOPATH:
+# measured on this machine, GOBIN was the mise toolchain's bin (on PATH) while
+# $GOPATH/bin was ~/go/bin (not on PATH), so the copy put `hdis` somewhere
+# nothing could run it. An agent that cannot reach the CLI is not choosing the
+# MCP door; it is being handed one surface.
+install:
+	go install ./cmd/hdis
 
 clean:
 	rm -rf bin dist coverage.out

@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -52,7 +53,18 @@ func main() {
 			log.Fatal(err)
 		}
 	case "version":
-		fmt.Println(version.Version)
+		// The contract revision travels with the version, the way both
+		// siblings print it: §13.4 makes a plugin declare it, and a reader
+		// comparing three binaries should not have to run a different verb on
+		// one of them to see it. `--json` answers the same three facts.
+		if len(os.Args) > 2 && os.Args[2] == "--json" {
+			out, _ := json.Marshal(map[string]string{
+				"version": version.Version, "contract": version.Contract, "plugin": "herdr-dispatch",
+			})
+			fmt.Println(string(out))
+			break
+		}
+		fmt.Printf("hdis %s (herdr-dispatch), shared plugin contract %s\n", version.Version, version.Contract)
 	case "-h", "--help", "help":
 		fmt.Print(cli.Usage())
 	default:

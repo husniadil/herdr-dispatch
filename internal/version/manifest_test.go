@@ -1,7 +1,10 @@
 package version
 
 import (
+	"encoding/json"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -58,4 +61,55 @@ func field(m, key string) string {
 		return ""
 	}
 	return match[1]
+}
+
+// §13.4: a plugin declares the contract revision it satisfies, and a reader
+// comparing three sibling binaries should get that answer from the same verb
+// on each. `hdis version` printed the plugin version alone while both siblings
+// printed the plugin name and the revision beside it, so the one binary whose
+// declaration had never been swept was also the one that made you run a second
+// verb to see it.
+//
+// The binary is built and run rather than the strings compared: what a reader
+// gets is stdout, and a constant that never reaches it declares nothing.
+func TestVersionPrintsTheContractBesideTheVersion(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds the binary")
+	}
+	bin := filepath.Join(t.TempDir(), "hdis")
+	build := exec.Command("go", "build", "-o", bin, "../../cmd/hdis")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+
+	out, err := exec.Command(bin, "version").Output()
+	if err != nil {
+		t.Fatalf("hdis version: %v", err)
+	}
+	line := strings.TrimSpace(string(out))
+	for what, want := range map[string]string{
+		"the plugin version":   Version,
+		"the contract (§13.4)": Contract,
+		"which plugin it is":   "herdr-dispatch",
+	} {
+		if !strings.Contains(line, want) {
+			t.Errorf("`hdis version` does not print %s: %q", what, line)
+		}
+	}
+
+	raw, err := exec.Command(bin, "version", "--json").Output()
+	if err != nil {
+		t.Fatalf("hdis version --json: %v", err)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("--json did not answer a document: %q", raw)
+	}
+	for k, want := range map[string]string{
+		"version": Version, "contract": Contract, "plugin": "herdr-dispatch",
+	} {
+		if got[k] != want {
+			t.Errorf("--json %s = %q, want %q", k, got[k], want)
+		}
+	}
 }

@@ -7,6 +7,11 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+`hdis version` prints the plugin name and the contract revision beside the
+version, and takes `--json` for the same three facts, which is the shape both
+siblings already had. A caller parsing the bare line gets more on it than
+before; one that wants a field reads `--json`.
+
 **The declared contract revision is now 0.10.0**, up from 0.6.0. It is the
 value `hdis doctor` reports as its own top-level `contract`, distinct from the
 `board.contract` it relays from htask, and a caller reads it to decide which
