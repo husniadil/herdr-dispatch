@@ -40,7 +40,7 @@ const HerdrSchemaFile = "schema.json"
 // does not have to know feature detection exists.
 const DefaultHerdrSchema = `{"protocol":1,"requests":[` +
 	`"tab.create","tab.list","tab.close",` +
-	`"pane.split","pane.run","pane.read","pane.list","pane.close","pane.send_keys",` +
+	`"pane.split","pane.send_input","pane.read","pane.list","pane.close","pane.send_keys",` +
 	`"agent.start","agent.get","agent.list","agent.prompt",` +
 	`"notification.show"],"events":["pane_exited"]}`
 

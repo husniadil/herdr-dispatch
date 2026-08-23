@@ -18,7 +18,7 @@ func TestTheJSONSchemaShapeIsRead(t *testing.T) {
 	f.Bin(t, "herdr", `echo '{"id":"x","result":{"type":"ok"}}'`)
 	f.Write(t, fake.HerdrSchemaFile, `{"protocol":7,"schemas":{
 	  "request":{"oneOf":[
-	    {"properties":{"method":{"const":"pane.run"}}},
+	    {"properties":{"method":{"const":"pane.send_input"}}},
 	    {"properties":{"method":{"const":"agent.get"}}}]},
 	  "event":{"$defs":{"EventKind":{"enum":["pane_exited"]}}}}}`)
 
@@ -29,7 +29,7 @@ func TestTheJSONSchemaShapeIsRead(t *testing.T) {
 	if s.Protocol != 7 {
 		t.Errorf("protocol = %d, want 7", s.Protocol)
 	}
-	for _, want := range []string{"pane.run", "agent.get", "pane_exited"} {
+	for _, want := range []string{"pane.send_input", "agent.get", "pane_exited"} {
 		if !s.Has(want) {
 			t.Errorf("the schema does not report %s: %+v", want, s)
 		}
@@ -88,7 +88,7 @@ func TestTheSchemaIsReadOnce(t *testing.T) {
 func TestAMissingCapabilityIsUnsupportedAtTheVerbThatNeedsIt(t *testing.T) {
 	c, f := client(t)
 	// A Herdr with everything but tab.create.
-	f.Write(t, fake.HerdrSchemaFile, `{"protocol":1,"requests":["pane.run","pane.read","agent.get"]}`)
+	f.Write(t, fake.HerdrSchemaFile, `{"protocol":1,"requests":["pane.send_input","pane.read","agent.get"]}`)
 	f.Bin(t, "herdr", `echo '{"id":"x","result":{"type":"ok"}}'`)
 
 	_, _, err := c.TabCreate(context.Background(), "wM", "/src/p", "hdis-7")

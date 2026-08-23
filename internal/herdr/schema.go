@@ -13,11 +13,13 @@ import (
 // §11.2 makes a missing one an UNSUPPORTED that NAMES the capability, and a
 // name typed twice is a name that can be misspelled once.
 const (
-	CapTabCreate  = "tab.create"
-	CapTabList    = "tab.list"
-	CapTabClose   = "tab.close"
-	CapPaneSplit  = "pane.split"
-	CapPaneRun    = "pane.run"
+	CapTabCreate = "tab.create"
+	CapTabList   = "tab.list"
+	CapTabClose  = "tab.close"
+	CapPaneSplit = "pane.split"
+	// `herdr pane run` is the CLI spelling; the request it sends is
+	// `pane.send_input`, and the schema lists requests, not subcommands.
+	CapPaneRun    = "pane.send_input"
 	CapPaneRead   = "pane.read"
 	CapPaneList   = "pane.list"
 	CapPaneClose  = "pane.close"
@@ -28,7 +30,7 @@ const (
 )
 
 // Schema is what `herdr api schema --json` says this Herdr can do (§11.2).
-// Requests are the request methods (`agent.get`, `pane.run`) and Events the
+// Requests are the request methods (`agent.get`, `pane.send_input`) and Events the
 // event kinds Herdr publishes. The protocol number is read for doctor output
 // only: §11.2 forbids deciding anything on it, and pinning one is a contract
 // violation.
