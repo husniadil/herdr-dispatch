@@ -232,6 +232,16 @@ type Config struct {
 	// DefaultMaxWorkers. It lives here rather than only on the daemon's
 	// flag because a number that exists only in the shell line that
 	// started the daemon is a number a restart drops without saying so.
+	//
+	// The number reads two ways and this is the one the code implements:
+	// max_workers bounds how many worker panes may exist at once, and not
+	// how many agents may be spending tokens at once. A pane that has
+	// submitted and is awaiting review spends nothing and still holds its
+	// slot, on purpose, because a rejection carries on in that same pane.
+	// So it is a screen and memory bound, and raising it buys panes rather
+	// than buying throughput on a board whose slots are held by panes
+	// waiting for a human. `hdis status` and `hdis doctor` say how many
+	// slots are held that way.
 	MaxWorkers int `json:"max_workers"`
 	// Pane is the pane worker panes are split off, for a daemon that was
 	// not started inside one and was given no -pane. Without it, and

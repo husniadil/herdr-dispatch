@@ -224,6 +224,50 @@ carries no profile field, deliberately: which agent kind and model a worker
 runs as is execution policy, and execution policy does not belong in the
 ledger.
 
+### What `max_workers` bounds
+
+`max_workers` reads two ways, and the number itself says neither. This is the
+one the code implements: max_workers bounds how many worker panes may exist at
+once, and not how many agents may be spending tokens at once.
+
+A pane that has submitted and is awaiting review spends nothing and still
+holds its slot. That is on purpose — a rejection puts the row back to `doing`
+and the same pane carries on, because the conversation is there and nowhere
+else — but it means the number is a screen and memory bound. Raising it buys
+panes. It does not buy throughput on a board whose slots are all held by
+panes waiting for a human.
+
+So that the wait is not invisible, both `hdis status` and `hdis doctor` say
+when a slot is held that way, in the same words:
+
+```
+$ hdis doctor
+  workers     4 live (2 holding a slot while awaiting review), 0 reserved, max 4
+
+$ hdis status
+#24   wM:p4V     hdis-24  idle       hdis/task-24   prompted ... notified=true  submitted work  (holding a slot while awaiting review)
+```
+
+The JSON carries the same facts: `awaiting_review` is a count on the doctor
+report and a boolean on each worker in `status`.
+
+### Sharing the slots between boards
+
+The dispatcher serves every board it can read, and the ready list arrives in
+whatever order the boards are walked. Taken in that order, one board offering
+more ready work than there are slots takes them all, and a second board waits
+however long that takes.
+
+So the ready list is dealt round-robin by project before anything is spawned:
+each board gets its first task before any board gets its second. Projects keep
+the order they first appeared in and each board's tasks keep the order it
+offered them, so a machine serving a single board spawns in exactly the order
+the board gave — the rule costs nothing where there is nothing to be fair
+between.
+
+There is no per-project cap. One global number, shared out fairly, is the
+whole of it.
+
 ## What a spawn actually does
 
 1. For a `codex` profile, `proxenos settings` first. A daemon that is

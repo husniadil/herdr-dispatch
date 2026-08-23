@@ -92,7 +92,8 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 		fmt.Fprintf(out, "hdis %s on %s\n", rep.Version, rep.Socket)
 		fmt.Fprintf(out, "  contract    %s satisfied by this plugin\n", rep.Contract)
 		fmt.Fprintf(out, "  base pane   %s\n", or(rep.BasePane, "none: nothing is spawned and dispatch refuses"))
-		fmt.Fprintf(out, "  workers     %d live, %d reserved, max %d\n", rep.Workers, rep.Pending, rep.MaxWorkers)
+		fmt.Fprintf(out, "  workers     %d live%s, %d reserved, max %d\n",
+			rep.Workers, held(rep.AwaitingReview), rep.Pending, rep.MaxWorkers)
 		fmt.Fprintf(out, "  tick        every %s\n", rep.Interval)
 		fmt.Fprintf(out, "  bindings    %s, %d re-adopted at start\n",
 			or(rep.Bindings, "in memory only"), rep.Readopted)
@@ -140,9 +141,13 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 				// refuse names the same branch.
 				branch += " (behind)"
 			}
+			title := w.Title
+			if w.AwaitingReview {
+				title += "  (" + HeldPhrase + ")"
+			}
 			fmt.Fprintf(out, "#%-4d %-10s %-8s %-10s %-23s prompted %s x%d notified=%t  %s\n",
 				w.Seq, w.Pane, or(w.Tab, "-"), or(state, "unknown"), branch,
-				w.PromptedAt.Format(time.RFC3339), w.Prompts, w.Notified, w.Title)
+				w.PromptedAt.Format(time.RFC3339), w.Prompts, w.Notified, title)
 		}
 		for _, id := range st.Pending {
 			fmt.Fprintf(out, "%-5s %-10s reserved, not yet spawned\n", "", id)
@@ -152,6 +157,21 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 		return err
 	}
 	return nil
+}
+
+// HeldPhrase is what both status and doctor call a worker slot spent on a
+// pane that has submitted and is waiting for a human. It is deliberately one
+// phrase: an operator who sees nothing moving reads the same words wherever
+// they look.
+const HeldPhrase = "holding a slot while awaiting review"
+
+// held names how many slots are spent on panes waiting for a human, and says
+// nothing at all when none are.
+func held(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (%d %s)", n, HeldPhrase)
 }
 
 // Usage is the help both the bare command and `hdis help` print, listed from

@@ -305,7 +305,11 @@ type DoctorReport struct {
 	MaxWorkers int    `json:"max_workers"`
 	Interval   string `json:"interval"`
 	Workers    int    `json:"workers"`
-	Pending    int    `json:"pending"`
+	// AwaitingReview is how many of those workers are holding a slot while
+	// a human decides on what they submitted. They spend nothing and are
+	// kept on purpose: a rejection carries on in the same pane.
+	AwaitingReview int `json:"awaiting_review"`
+	Pending        int `json:"pending"`
 	// Bindings is the file the pane-to-task mapping is kept in, and
 	// Readopted is how many of them this daemon took back when it started.
 	Bindings  string `json:"bindings"`
@@ -351,17 +355,18 @@ type BoardHealth struct {
 // giving one.
 func (d *Daemon) doctor(ctx context.Context) (DoctorReport, error) {
 	rep := DoctorReport{
-		Version:    d.Version,
-		Contract:   version.Contract,
-		Socket:     config.SocketPath(),
-		BasePane:   d.Loop.BasePane,
-		MaxWorkers: d.Loop.Policy.MaxWorkers,
-		Interval:   d.Interval.String(),
-		Workers:    len(d.Loop.Bindings()),
-		Pending:    len(d.Loop.Pending()),
-		Bindings:   d.Loop.BindingsPath(),
-		Log:        d.LogPath,
-		Readopted:  d.Loop.Readopted(),
+		Version:        d.Version,
+		Contract:       version.Contract,
+		Socket:         config.SocketPath(),
+		BasePane:       d.Loop.BasePane,
+		MaxWorkers:     d.Loop.Policy.MaxWorkers,
+		Interval:       d.Interval.String(),
+		Workers:        len(d.Loop.Bindings()),
+		AwaitingReview: d.Loop.AwaitingReview(),
+		Pending:        len(d.Loop.Pending()),
+		Bindings:       d.Loop.BindingsPath(),
+		Log:            d.LogPath,
+		Readopted:      d.Loop.Readopted(),
 		Verify: VerifyHealth{
 			Enabled: d.Loop.Config.Verify.Enabled,
 			Profile: d.Loop.Config.Verify.Profile,

@@ -134,3 +134,23 @@ func TestTheDaemonTakesItsWorkerCountFromTheConfigUnlessTheFlagIsPassed(t *testi
 		t.Error("the daemon's worker count is not resolved through cfg.MaxWorkersOr, so the config document's number never reaches the policy")
 	}
 }
+
+// max_workers reads two ways: how many panes may exist, and how many agents
+// may be spending tokens at once. The code implements the first, and both the
+// config and the README have to say which one it is, or an operator raises the
+// number expecting throughput they will not get.
+func TestTheMaxWorkersReadingIsWrittenDownInTheConfigAndTheREADME(t *testing.T) {
+	const sentence = "max_workers bounds how many worker panes may exist at once, and not how many agents may be spending tokens at once"
+	for _, path := range []string{"../../README.md", "../../internal/config/config.go"} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		// A Go comment wraps the sentence across lines with a "//" on each,
+		// so the markers come out before the words are compared.
+		prose := strings.ReplaceAll(string(raw), "//", " ")
+		if !strings.Contains(flatten(prose), flatten(sentence)) {
+			t.Errorf("%s does not say which of the two things max_workers bounds (looked for %q)", path, sentence)
+		}
+	}
+}

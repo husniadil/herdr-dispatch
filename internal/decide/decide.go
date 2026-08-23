@@ -63,6 +63,9 @@ type Task struct {
 	ID        string
 	Status    string
 	ClaimedBy string
+	// Project is the board the row is filed on. It is what the ready list
+	// is shared out by, so one busy board cannot take every worker slot.
+	Project string
 	// Feedback is the review gate's words on the row, present only between a
 	// rejection and the next submission. It is the one fact that separates a
 	// worker waiting on a rejection from one that stopped without
@@ -230,12 +233,44 @@ func Decide(s Snapshot, p Policy) []Action {
 		}
 	}
 
-	for _, id := range s.Ready {
+	for _, id := range shareOut(s.Ready, s.Tasks) {
 		if live >= p.MaxWorkers {
 			break
 		}
 		out = append(out, Action{Kind: Spawn, TaskID: id})
 		live++
+	}
+	return out
+}
+
+// shareOut deals the ready list round-robin by project, so a board offering
+// more work than there are slots cannot take them all while another board
+// waits. Projects keep the order they first appear in and their tasks keep
+// the order the board offered them, so a machine serving one board gets the
+// list back exactly as it came.
+func shareOut(readyIDs []string, tasks map[string]Task) []string {
+	var order []string
+	byProject := make(map[string][]string)
+	for _, id := range readyIDs {
+		project := tasks[id].Project
+		if _, seen := byProject[project]; !seen {
+			order = append(order, project)
+		}
+		byProject[project] = append(byProject[project], id)
+	}
+	if len(order) < 2 {
+		return readyIDs
+	}
+	out := make([]string, 0, len(readyIDs))
+	for len(out) < len(readyIDs) {
+		for _, project := range order {
+			queue := byProject[project]
+			if len(queue) == 0 {
+				continue
+			}
+			out = append(out, queue[0])
+			byProject[project] = queue[1:]
+		}
 	}
 	return out
 }

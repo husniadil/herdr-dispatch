@@ -721,7 +721,7 @@ func (l *Loop) snapshot(ctx context.Context) (decide.Snapshot, error) {
 			continue
 		}
 		rows[row.ID] = row
-		snap.Tasks[row.ID] = decide.Task{ID: row.ID, Status: row.Status, ClaimedBy: row.Pane(), Feedback: row.Feedback}
+		snap.Tasks[row.ID] = readyTask(row)
 	}
 
 	ready, err := l.Board.Ready(ctx)
@@ -750,6 +750,7 @@ func (l *Loop) snapshot(ctx context.Context) (decide.Snapshot, error) {
 		}
 		reserved[row.ID] = true
 		rows[row.ID] = row
+		snap.Tasks[row.ID] = readyTask(row)
 		snap.Ready = append(snap.Ready, row.ID)
 	}
 
@@ -760,6 +761,7 @@ func (l *Loop) snapshot(ctx context.Context) (decide.Snapshot, error) {
 			continue
 		}
 		rows[row.ID] = row
+		snap.Tasks[row.ID] = readyTask(row)
 		snap.Ready = append(snap.Ready, row.ID)
 	}
 
@@ -774,6 +776,13 @@ func (l *Loop) snapshot(ctx context.Context) (decide.Snapshot, error) {
 	l.rows = rows
 	l.mu.Unlock()
 	return snap, nil
+}
+
+// readyTask is a row the board is offering, as the core reads it. The project
+// is what the core shares the ready list out by, so one board offering more
+// work than there are slots cannot take them all.
+func readyTask(row htask.Task) decide.Task {
+	return decide.Task{ID: row.ID, Status: row.Status, ClaimedBy: row.Pane(), Feedback: row.Feedback, Project: row.Project}
 }
 
 func (l *Loop) apply(ctx context.Context, actions []decide.Action) {

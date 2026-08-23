@@ -54,6 +54,11 @@ type Worker struct {
 	PromptedAt time.Time `json:"prompted_at"`
 	Prompts    int       `json:"prompts"`
 	Notified   bool      `json:"notified"`
+	// AwaitingReview is a worker whose task is sitting in review: it has
+	// submitted, it is spending nothing, and it is still holding its slot
+	// on purpose, because a rejection puts the row back to doing and this
+	// pane is where the conversation is.
+	AwaitingReview bool `json:"awaiting_review"`
 }
 
 // Status is everything the dispatcher is driving, as it believes it now.
@@ -188,6 +193,8 @@ func (l *Loop) Status(ctx context.Context) (Status, error) {
 			PromptedAt:  b.PromptedAt,
 			Prompts:     b.Prompts,
 			Notified:    b.Notified,
+
+			AwaitingReview: awaitingReview(b, row.Status),
 		})
 		projects = append(projects, row.Project)
 	}
@@ -216,6 +223,28 @@ func (l *Loop) behind(ctx context.Context, project string, b decide.Binding) boo
 		return false
 	}
 	return behind
+}
+
+// awaitingReview reports a worker holding its slot while a human decides. A
+// verifier is not one: it holds no claim and is retired when the submission
+// it was reading settles.
+func awaitingReview(b decide.Binding, status string) bool {
+	return !b.IsVerifier() && status == "review"
+}
+
+// AwaitingReview is how many worker slots are spent on panes that have
+// submitted and are waiting for a human. It is what doctor reports so an
+// operator who sees nothing moving learns why in one command.
+func (l *Loop) AwaitingReview() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	held := 0
+	for _, b := range l.bindings {
+		if awaitingReview(b, l.rows[b.TaskID].Status) {
+			held++
+		}
+	}
+	return held
 }
 
 // kindOf names a binding's lane for a caller. A binding written before the
