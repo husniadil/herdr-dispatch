@@ -7,6 +7,39 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+## 0.2.0 — 2026-08-24
+
+The release that makes `hdis` refuse the way the contract says a plugin
+refuses, and it breaks two things a consumer may have built on. The seven
+names this binary answered with — `NOT_READY`, `AT_CAPACITY`, `NO_BASE_PANE`
+and the rest — are no longer top-level codes but sub-reasons inside the
+message, so a program matching one as the `code` matches nothing now; and
+every failure used to exit 1, where each now exits the status §6.3 fixes for
+its code. The operator's own move is the config: `~/.config/hdis/hdis.json` is
+`~/.config/dispatch/dispatch.toml`, the state directory and the environment
+prefix moved with it, the document is TOML rather than JSON, and nothing reads
+the old file. What is added on top of that: a `--json` failure is one envelope
+on stdout, a §9 policy gate with parking and the `parked list` / `parked
+resolve` verbs behind it, `dump` on both doors, Herdr feature-detected at
+start so a missing capability refuses instead of being called, `HERDR_BIN_PATH`
+honoured, and a third test layer that drives the built binary against a real
+`htask`.
+
+**Breaking: the error codes, the exit statuses and the `--json` failure
+envelope are the contract's.** The seven names this binary refused with were
+top-level codes §6.3 does not have, and every failure exited 1 whatever it
+said. They are sub-reasons now, under the contract code each belongs to and
+kept as the first word of the message, so nothing a caller could read is gone
+and the exit status is the one §6.3 fixes: `USAGE` 2, `NOT_FOUND` 3,
+`UNAVAILABLE` 4, `TIMEOUT` 5, `CONFLICT` 6, `UNSUPPORTED` 7, `FORBIDDEN` 8,
+`DENIED` 9, `UNEXPECTED` 1. With `--json` the failure is one envelope on
+stdout, the same document the MCP door builds, and `--json` is read wherever
+the caller wrote it. A caller branching on `code` reads the nine words every
+sibling plugin answers with; one that branched on `NOT_READY`, `AT_CAPACITY`,
+`ALREADY_DISPATCHED`, `ALREADY_RUNNING`, `NOT_RUNNING`, `NO_BASE_PANE` or
+`INVALID` as a top-level code must read the sub-reason at the front of the
+message instead.
+
 **`make e2e` is layer 3**, out of the gate on purpose: the built binary
 against a REAL `htask` compiled from the sibling `herdr-tasks` checkout, over
 a real socket, with a fake `herdr`. It skips loudly on a machine with no such
@@ -101,6 +134,15 @@ version, and takes `--json` for the same three facts, which is the shape both
 siblings already had. A caller parsing the bare line gets more on it than
 before; one that wants a field reads `--json`.
 
+`herdr` is now run from `HERDR_BIN_PATH` when the environment names it. §11.1
+names the variable and nothing here read it, so a host that installs Herdr off
+PATH — which is what the variable is for — had every call fail on a binary
+that was not missing. It is read once when the client is built, never inside
+the call, so a test's fake on PATH is not bypassed by the operator's own
+environment. §10.3's two directories are on `hdis doctor` beside it, so an
+operator whose override is not taking effect can ask the running daemon which
+pair it resolved.
+
 **The declared contract revision is now 0.10.0**, up from 0.6.0. It is the
 value `hdis doctor` reports as its own top-level `contract`, distinct from the
 `board.contract` it relays from htask, and a caller reads it to decide which
@@ -114,51 +156,54 @@ verified by removing it. It also records the sections that do NOT reach a
 plugin holding no ledger and attributing no call, §3.4, §3.7 and §7.5 among
 them, so an absence there is a decision rather than an oversight.
 
-A self-review shot is no longer spent by the call that sent it. §11.4 forbids
-reading a successful `agent prompt` as delivery, and the lane was doing exactly
-that: the binding was marked the moment Herdr accepted the text, and only a
-task LEAVING review cleared the mark — so a prompt that was accepted and seen
-by nobody burned the submission's one check with the board still green and
-nothing anywhere saying so. The shot is now re-sent while Herdr still calls
-that worker idle, bounded by the same `max_prompts` and claim timeout the
-unclaimed nudge already uses. A worker that received the condition is working
-and never meets a second copy.
+There is a verification lane, and it is off unless the config document turns
+it on. With it on, a task in review that this daemon's own worker submitted
+earns a SELF-REVIEW SHOT: one `/goal` armed in the worker's OWN pane — no
+second pane, no second agent, no throwaway checkout — carrying a second
+condition. It never approves and never rejects, and neither does this binary:
+the board adapter carries no review verb, and no source file passes one as an
+argument. One submission earns one shot; a task leaving review rearms the
+lane, so a re-submission after a rejection earns another.
 
-Nothing a caller reads changes: no verb, no argument, no `--json` field and no
-error code. What moves is how many times a worker that never saw its condition
-is asked for it.
-
-The verification lane is now a self-review shot in the worker's OWN pane. A
-task reaching review no longer earns a VERIFIER: no second pane, no second
-agent, no throwaway checkout. It earns one prompt into the pane that produced
-the work, carrying a second condition. `verify.enabled` keeps its meaning — a
-submission earns a verification pass — and now buys that shot.
-
-`verify.profile` is GONE, and a config document still carrying it is refused
-at parse with the field named. There is nothing left for it to name: the shot
-lands in a pane already running the worker's own profile. Callers remove the
-field.
-
-`doctor`'s `verify` block loses `profile` and keeps `enabled`; its prose line
-now says the lane is a self-review shot in the worker's own pane. `status`
-keeps `kind` on each worker row, and `worker` is the only value it takes — the
-`verifier` value is gone with the lane. A bindings document naming a verifier
-pane still loads, and those records are dropped as debris rather than driven.
-
-What the second condition asks for is the whole point of the change. Not
-"review your work": the blind spot that produced the work survives rereading
-it, and an independent verifier read past the same five rejections the worker
-did. It asks for the mechanical thing — for every guard, refusal or invariant
-the report claims, write a COMPILING mutation that removes it, run the tests
-the report names, confirm they FAIL, revert — and then for which mutations bit,
+What the second condition asks for is the whole point of the lane. Not "review
+your work": the blind spot that produced the work survives rereading it, and
+an independent verifier reads past the same five rejections the worker did. It
+asks for the mechanical thing — for every guard, refusal or invariant the
+report claims, write a COMPILING mutation that removes it, run the tests the
+report names, confirm they FAIL, revert — and then for which mutations bit,
 which did not, and whether the worker reads each miss as a missing test or bad
 aim. It names where that goes: the mail door at `$HDIS_DISPATCHER_PANE`. A
 worker whose task is in review cannot amend its own report, because `htask`
 refuses a submit on a row that is not `doing`, so findings with no route named
 die in the pane.
 
+The shot is not spent by the call that sent it. §11.4 forbids reading a
+successful `agent prompt` as delivery, and the lane was doing exactly that:
+the binding was marked the moment Herdr accepted the text, and only a task
+LEAVING review cleared the mark — so a prompt that was accepted and seen by
+nobody burned the submission's one check with the board still green and
+nothing anywhere saying so. The shot is re-sent while Herdr still calls that
+worker idle, bounded by the same `max_prompts` and claim timeout the unclaimed
+nudge already uses. A worker that received the condition is working and never
+meets a second copy.
+
 Nothing about review authority moves. The shot produces no verdict: the task
 stays in review and the operator still approves or rejects.
+
+Callers turn the lane on with a `verify` object in the config document
+carrying `enabled` and nothing else. The shot lands in a pane already running
+the worker's own profile, so there is no profile to name: a document carrying
+`verify.profile` is refused at parse, by name, rather than starting a daemon
+whose operator believes a separate verifier is running. Left out, the lane is
+off and nothing changes.
+
+`doctor`'s JSON gains a `verify` block carrying `enabled`, and nothing beside
+it. Its prose output names the lane too, before the board line, so an
+unreachable board does not hide the dispatcher's own configuration. `status`'s
+JSON gains `kind` on each worker, and `worker` is the only value it takes —
+there is one lane, and the field says so rather than leaving a caller to infer
+it. Callers that parse `doctor` or `status` see added fields and no removed
+ones; a parser that ignores unknown fields does nothing.
 
 The pane cap is now derived from a measured HEIGHT as well as a measured
 width. `max_panes_per_tab` stays 16, but for the first time that number is an
@@ -201,21 +246,34 @@ decided it. The test pins what each floor allows alone — 16 for the columns,
 128 for the rows — and a derivation that consults only one of them stops
 matching.
 
-The report address gained a middle rung. `HDIS_DISPATCHER_PANE` was the task's
-pane of origin, else the daemon's base pane, and a task an operator filed at a
-terminal names no pane — so every report for one went to whoever started the
-daemon, even while another live session was sitting in that very repository
-and was relayed the report by hand. Between the two rungs the daemon now takes
-a LIVE pane whose cwd is the task's project, read from `herdr pane list`.
-Among several, the lowest pane id wins, because that is the answer that stays
-the same across ticks; a pane sitting under this daemon's own checkout root is
+The report address has three rungs. `HDIS_DISPATCHER_PANE` is the task's pane
+of origin when the board names one and that pane is alive; else a LIVE pane
+whose cwd is the task's project, read from `herdr pane list`; else the
+daemon's own base pane. A task an operator filed at a terminal names no pane —
+nothing with a pane created it — and every report for one used to go to
+whoever started the daemon, even while another live session was sitting in
+that very repository and was relayed the report by hand. Among several
+candidates the lowest pane id wins, because that is the answer that stays the
+same across ticks; a pane sitting under this daemon's own checkout root is
 never chosen, so a worker for that project does not become the address. The
 base pane stays as the last rung, so a machine with nothing live still answers
 somewhere. The workspace a worker's tab opens in comes from the same resolved
 desk rather than a second rule of its own, and the pane list is read once per
-spawn instead of twice. Nothing a caller passes changes: the CLI, the MCP tool
-list, the JSON shapes and the error codes are untouched, and the board stores
-nothing new.
+spawn instead of twice.
+
+An agent in a dispatched pane reads that variable to find out where its report
+goes, and answers there rather than at any pane written into its text. The
+name is the whole contract and is pinned by test against what the README
+documents. It is set on the pane itself, so it costs nothing on the line Herdr
+types into the pane and does not go stale when the daemon moves pane. It is an
+address only: the sender of anything a worker writes is stamped by the mail
+daemon from `HERDR_PANE_ID`.
+
+Callers read the variable and answer there, as before, but must stop treating
+its value as one fixed pane. Two panes this same daemon opened can hold
+different addresses, because they are answering to different filers. Anything
+that cached the value across tasks, or hard-coded the daemon's pane in its
+place, is wrong now and should read the variable in the pane it is running in.
 
 The trust-folder dialog is answered again. `TrustDialogMarkers` held one
 phrase, `"do you trust the files in this folder"`, and claude 2.1.239 reworded
@@ -225,21 +283,20 @@ fresh untrusted directory and `herdr agent start` there returns
 `agent_not_ready` with the dialog still on screen, that Enter is the only
 thing that lets a goal be delivered. The markers are now a SET, matching the
 new dialog's selectable option `"yes, i trust this folder"` alongside the
-older phrase, so an operator on either claude build is answered. Nothing a
-caller passes changes: the CLI, the MCP tool list, the JSON shapes and the
-error codes are untouched. `config.MeasuredReadableColumns` stays 40 — the new
-phrase is 24 characters against the older one's 37, so the longest marker the
-floor derives from did not move — and a test now derives that floor from the
-marker set instead of restating it.
+older phrase, so an operator on either claude build is answered.
+`config.MeasuredReadableColumns` stays 40 — the new phrase is 24 characters
+against the older one's 37, so the longest marker the floor derives from did
+not move — and a test now derives that floor from the marker set instead of
+restating it.
 
-The daemon now opens its own log at `$XDG_STATE_HOME/hdis/hdis.log` and
-appends to it, instead of leaving the log to whatever the shell line that
-started it redirected — a restart that dropped the redirect used to throw the
-log away silently, and it was only ever noticed once the log was needed. Every
-line still goes to stdout, so a foreground operator loses nothing; a daemon a
-door started, whose stdout is already that file, gets the file alone rather
-than each line twice. The new `-log` flag moves the file and defaults to that
-path. A log that cannot be opened is reported on stdout and the daemon starts
+The daemon now opens its own log at `<state_dir>/dispatch.log` and appends to
+it, instead of leaving the log to whatever the shell line that started it
+redirected — a restart that dropped the redirect used to throw the log away
+silently, and it was only ever noticed once the log was needed. Every line
+still goes to stdout, so a foreground operator loses nothing; a daemon a door
+started, whose stdout is already that file, gets the file alone rather than
+each line twice. The new `-log` flag moves the file and defaults to that path.
+A log that cannot be opened is reported on stdout and the daemon starts
 anyway. `hdis doctor` gained a `log` field naming the file that was opened,
 omitted when none could be.
 
@@ -248,25 +305,24 @@ worker's branch is cut from the project's HEAD at spawn time, so a task that
 lands first moves that HEAD on and the next branch can no longer be
 fast-forwarded — a fact the operator used to meet at merge time. The CLI
 prints the branch as `hdis/task-7 (behind)` and the JSON status gained a
-`behind` boolean on every worker row; a verifier, which works detached and has
-no branch, is always `false`. Behind is measured against the project's current
-HEAD with `git merge-base --is-ancestor`, and only when `status` is called,
-never on the tick. A git that cannot answer is an error rather than the answer
-"behind": the row stays unmarked and the reason goes to the log, because
-marking every worker behind would send the operator to rebase branches that
-were never behind. Nothing here rebases, merges or serialises dispatch: the recovery is
-still the operator's.
+`behind` boolean on every worker row. Behind is measured against the project's
+current HEAD with `git merge-base --is-ancestor`, and only when `status` is
+called, never on the tick. A git that cannot answer is an error rather than
+the answer "behind": the row stays unmarked and the reason goes to the log,
+because marking every worker behind would send the operator to rebase branches
+that were never behind. Nothing here rebases, merges or serialises dispatch:
+the recovery is still the operator's.
 
 A worker now comes up in a TAB of its own rather than as a split of the
 operator's pane, and the tab is created in the workspace of the pane the task
 was FILED from. `herdr tab create --workspace/--cwd/--label/--env --no-focus`
 replaces `herdr pane split --pane <base>` as the placement call. The operator's
 tab is never split; a worker shares only the tab opened for ITS OWN task,
-compared against the tab's whole label and not its `hdis ` prefix, and a
-verifier joins the tab of the task it verifies. Panes inside a tab make a
-grid — the second splits right off the first, the third DOWN off the first,
-the fourth down off the second — capped at `layout.max_panes_per_tab`, and a
-full tab overflows into another tab in the same workspace.
+compared against the tab's whole label and not its `hdis ` prefix. Panes
+inside a tab make a grid — the second splits right off the first, the third
+DOWN off the first, the fourth down off the second — capped at
+`layout.max_panes_per_tab`, and a full tab overflows into another tab in the
+same workspace.
 
 Placement now follows the same rule the report address already did: the task's
 pane of origin when the board names one AND that pane is still alive, the
@@ -297,8 +353,9 @@ measured dropping while the pane and its work were still live. A pane whose cwd
 is a checkout under this daemon's own `<state_dir>/worktrees` is recognised,
 adopted and retired with no name at all. The name remains a label.
 
-`codes.NO_BASE_PANE` is unchanged. `tab create --workspace` needs no pane, so
-this release makes a paneless dispatch possible, but nothing here takes it.
+`NO_BASE_PANE` is unchanged as a refusal. `tab create --workspace` needs no
+pane, so this release makes a paneless dispatch possible, but nothing here
+takes it.
 
 A restart can now read the row of a pane no binding names, which is the pane
 the restart rule exists for. A pane names its task by number, and a by-ID read
@@ -306,33 +363,28 @@ is board-agnostic — so the board refused the number, by design, and every such
 pane was logged as "left as it is". The number is now asked with the project it
 is unique in: the repository the pane's checkout belongs to, which git names
 through the common directory a worktree shares with the repository it was cut
-from. A worker in its worktree, a verifier in its detached one, and a pane
-opened before worktrees existed all resolve the same way. A pane whose checkout
-names no repository is left alone and logged, rather than guessed at. The
-board's refusal of a bare number across projects is untouched, and reads by ID
-still pass `--all-projects`.
+from. A worker in its worktree and a pane opened before worktrees existed
+resolve the same way. A pane whose checkout names no repository is left alone
+and logged, rather than guessed at. The board's refusal of a bare number
+across projects is untouched, and reads by ID still pass `--all-projects`.
 
 **`hdis dispatch <number>` refuses differently when the board is not offering
-that task.** The reply is now `NOT_READY`, saying the number is not among the
-tasks the board is offering and to name the task by ID to be told what it is.
-It used to be `UNAVAILABLE` quoting the board's `USAGE` refusal of a bare
-number, which reads as a broken door rather than as a task that is not on
-offer. Dispatch by ID is unchanged, and so is dispatch of a number the board
-IS offering.
+that task.** The reply is now `NOT_READY`, a sub-reason under `CONFLICT`,
+saying the number is not among the tasks the board is offering and to name the
+task by ID to be told what it is. It used to be `UNAVAILABLE` quoting the
+board's `USAGE` refusal of a bare number, which reads as a broken door rather
+than as a task that is not on offer. Dispatch by ID is unchanged, and so is
+dispatch of a number the board IS offering.
 
 A worker now works in a git worktree of its own, on a branch named for its
 task, rather than in the project directory. The branch is `hdis/task-<seq>`,
 created at the project's current HEAD; the checkout is made under
 `<state_dir>/worktrees` and removed when the binding that owns it is dropped,
-which leaves the branch and every commit on it reachable. Until now only a
-verifier got a checkout of its own, so every worker this daemon opened edited,
-staged and committed in the tree the operator sits in — and one task's commit
-swept up another task's uncommitted work the first time two ran at once. When
-a checkout cannot be made, nothing is spawned at all and the reason is logged.
-
-A verifier now detaches at the commit that was SUBMITTED, the tip of its
-worker's branch, rather than at the project's HEAD. HEAD stopped being the
-commit under review the moment a worker stopped committing to it.
+which leaves the branch and every commit on it reachable. Until now every
+worker this daemon opened edited, staged and committed in the tree the
+operator sits in — and one task's commit swept up another task's uncommitted
+work the first time two ran at once. When a checkout cannot be made, nothing
+is spawned at all and the reason is logged.
 
 **Operators have a step they did not have before.** A worker's commits land on
 `hdis/task-<seq>` and nowhere else, so approving a task no longer leaves the
@@ -352,56 +404,18 @@ restart reap covers every checkout this daemon made: it is bounded to
 `<state_dir>/worktrees` and to entries carrying the `hdis-` prefix this binary
 names its own with.
 
-Declares the shared plugin contract at 0.6.0, up from the 0.4.0 of the first
-release. §5.1/§10.1 forbid resolving a store from the Herdr-injected plugin
-dirs, which this binary has no store to resolve and never read; §11.4 states
-that prompt delivery is best-effort with the authoritative record elsewhere,
-which here is the board; the 0.6.0 amendment reshapes §6.6 into recusal by
-session, and this plugin performs no reviews. Nothing in the binary moved for
-any of the three.
-
-Callers read the new value in `doctor`'s `contract` field. Nothing else to do.
-
-There is a verification lane, and it is off unless the config document turns it
-on. With it on, a task in review that this daemon's own worker submitted earns
-a SELF-REVIEW SHOT: one `/goal` armed in the worker's own pane, asking it to
-write a compiling mutation against every guard its report claims, run the tests
-the report names, confirm they fail, revert each one, and say which mutations
-bit. It never approves and never rejects, and neither does this binary — the
-board adapter carries no review verb, and no source file passes one as an
-argument. One submission earns one shot; a task leaving review rearms the lane,
-so a re-submission after a rejection earns another.
-
-Callers turn it on with a `verify` object in the config document carrying
-`enabled` and nothing else. The lane no longer launches a pane of its own, so
-there is no profile to name: a document that still carries `verify.profile` is
-refused at parse, by name, rather than starting a daemon whose operator
-believes a separate verifier is running. Left out, the lane is off and nothing
-changes.
-
-`doctor`'s JSON gains a `verify` block carrying `enabled`, and nothing beside
-it: the shot lands in a pane that is already up, so there is nothing else to
-name. Its prose output names the lane too, before the board line, so an
-unreachable board does not hide the dispatcher's own configuration. `status`'s
-JSON gains `kind` on each worker, which is always `worker` — there is one
-lane, and the field says so rather than leaving a caller to infer it.
-
-Callers that parse `doctor` or `status` see two added fields and no removed
-ones. A parser that ignores unknown fields does nothing.
-
 The bindings are durable, and a restart reconciles what it left behind. They
-are written to `${XDG_STATE_HOME:-~/.local/state}/hdis/hdis-bindings.json` on
-every change, whole and atomically. At the next start the daemon asks one
-question of every live pane it opened — what is this, and what still needs
-doing — answering it from Herdr's agent list and the board rows rather than
-from the bindings, which stay as a hint. A pane still working its task is
-adopted, a reservation no live pane is working is dropped, a task that reached a
-terminal state or left review takes its pane with it, and every
-`hdis-` checkout under this daemon's own worktree root that no binding
-names is removed. Nothing outside that root, and nothing in it this daemon did
-not create, is touched. A prompted-but-unclaimed worker is no longer forgotten,
-and a restart no longer dispatches a task into a second pane while the first is
-still alive.
+are written to `<state_dir>/dispatch-bindings.json` on every change, whole and
+atomically. At the next start the daemon asks one question of every live pane
+it opened — what is this, and what still needs doing — answering it from
+Herdr's agent list and the board rows rather than from the bindings, which
+stay as a hint. A pane still working its task is adopted, a reservation no
+live pane is working is dropped, a task that reached a terminal state or left
+review takes its pane with it, and every `hdis-` checkout under this daemon's
+own worktree root that no binding names is removed. Nothing outside that root,
+and nothing in it this daemon did not create, is touched. A
+prompted-but-unclaimed worker is no longer forgotten, and a restart no longer
+dispatches a task into a second pane while the first is still alive.
 
 The board principal is now `plugin:hdis@<pane>`, so a hold the board keeps
 names the daemon that took it and a peer's hold is not in the answer to
@@ -410,31 +424,9 @@ names the daemon that took it and a peer's hold is not in the answer to
 Callers do nothing. `doctor`'s JSON gains `bindings` (where they live) and
 `readopted` (how many came back at the last start). The bindings document
 itself gains a `reservations` array beside `bindings`, and each binding gains a
-`worktree` field naming a verifier's checkout — both omitted when empty, so a
+`worktree` field naming the checkout it owns — both omitted when empty, so a
 document this binary writes stays readable to one that predates them. Anything
 reading that file by hand should expect the two.
-
-Every pane this dispatcher splits carries `HDIS_DISPATCHER_PANE`, the report
-address for the task that pane was brought up for: the pane the task was
-CREATED FROM when the board's row names one, and the daemon's own base pane
-only when it does not. A task an operator filed at a terminal has no pane of
-origin at all — nothing with a pane created it — and the daemon's pane is then
-the only address there is, which is the rule working, not a gap in the row. It
-is set on the split itself so it costs nothing on the line Herdr types into the
-pane and does not go stale when the daemon moves pane. It is an address only:
-the sender of anything a worker writes is stamped by the mail daemon from
-`HERDR_PANE_ID`.
-
-An agent in a dispatched pane reads that variable to find out where its report
-goes, and answers there rather than at any pane written into its text. The
-name is the whole contract and is pinned by test against what README documents.
-
-Callers read the variable and answer there, as before, but must stop treating
-its value as one fixed pane. Two panes this same daemon opened can now hold
-different addresses, because they are answering to different filers; the
-verification lane follows the same rule. Anything that cached the value
-across tasks, or hard-coded the daemon's pane in its place, is wrong now and
-should read the variable in the pane it is running in.
 
 Every worker pane is also launched with `FORCE_PROMPT_CACHING_5M=1`, so a
 worker takes the 5-minute prompt-cache TTL instead of the 1-hour one a REPL
