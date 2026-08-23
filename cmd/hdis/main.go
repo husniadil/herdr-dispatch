@@ -73,6 +73,7 @@ func main() {
 func serve(argv []string) error {
 	fs := flag.NewFlagSet("hdis daemon", flag.ExitOnError)
 	configPath := fs.String("config", config.ConfigPath(), "worker profiles and per-project overrides")
+	logPath := fs.String("log", config.LogPath(), "the file the log is appended to; stdout keeps every line too")
 	interval := fs.Duration("interval", 15*time.Second, "how often to tick")
 	once := fs.Bool("once", false, "run one tick and exit")
 	basePane := fs.String("pane", os.Getenv("HERDR_PANE_ID"), "the pane worker panes are split off")
@@ -83,6 +84,24 @@ func serve(argv []string) error {
 	confirmCeiling := fs.Duration("confirm-ceiling", spawn.DefaultConfirmCeiling, "how long to wait for a delivered goal to show on the worker's screen")
 	if err := fs.Parse(argv); err != nil {
 		return err
+	}
+
+	// The log is opened here, before anything worth reading is said. Where
+	// it goes is the daemon's own call for the same reason the socket, the
+	// lock and the bindings are: a shell line that redirects elsewhere can
+	// be lost on a restart, and it is only ever missed once the log is
+	// already needed.
+	if err := config.EnsureStateDir(); err != nil {
+		return err
+	}
+	logOut, logFile, logErr := daemon.OpenLog(*logPath, os.Stdout)
+	if logFile != nil {
+		defer logFile.Close()
+	}
+	log.SetOutput(logOut)
+	if logErr != nil {
+		*logPath = ""
+		log.Printf("%v; logging to stdout alone", logErr)
 	}
 
 	cfg, err := config.Load(*configPath)
@@ -187,6 +206,7 @@ func serve(argv []string) error {
 		Interval: *interval,
 		Version:  version.Version,
 		Log:      log.Default(),
+		LogPath:  *logPath,
 		Lock:     lock,
 	}
 	err = d.Serve(ctx, ln)

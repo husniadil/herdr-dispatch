@@ -21,6 +21,18 @@ of their own. There is one daemon per user, elected by a lock at
 `$XDG_STATE_HOME/hdis/hdis.sock`. A second one refuses to start with
 `ALREADY_RUNNING` rather than driving the same board alongside the first.
 
+**The daemon opens its own log.** It appends to
+`$XDG_STATE_HOME/hdis/hdis.log`, beside the socket, the lock and the
+bindings, whatever the shell line that started it redirected. Every line goes
+to stdout as well, so an operator running it in the foreground sees exactly
+what the file gets; the one exception is a daemon a door started, whose
+stdout IS that file already, where writing to both would double every line.
+`-log` moves the file and defaults to that path, so a redirect stays possible
+and is never required. A log that cannot be opened is said on stdout and the
+daemon starts anyway — refusing to dispatch because a file will not open is
+worse than dispatching where the lines can still be read. `hdis doctor` names
+the file that was actually opened, and says `stdout only` when none was.
+
 `hdis daemon -h` lists the knobs — tick interval, how many workers may be
 live at once, how long a delivered goal may go unclaimed, and how many times
 one task's goal is re-delivered before the worker is given up on.
@@ -112,7 +124,7 @@ hdis status --json
 
 A door that finds no live socket starts the daemon and waits for it, bounded
 at three seconds, rather than fail. A daemon started that way has no terminal
-to write to, so its log goes to `$XDG_STATE_HOME/hdis/hdis.log`.
+to write to, and its log goes where every daemon's does.
 
 Wire the MCP door into any client that speaks stdio MCP:
 

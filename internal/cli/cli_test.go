@@ -251,3 +251,30 @@ func TestDoctorNamesTheMaxPanesPerTabInProse(t *testing.T) {
 		}
 	}
 }
+
+// The log the running daemon opened is read back off it in prose, the same
+// way the bindings and the layout are: an operator looking for a spawn
+// decision is told the file rather than guessing at the shell line.
+func TestDoctorNamesTheLogInProse(t *testing.T) {
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/hdis.sock","base_pane":"wM:p1","log":"/s/hdis.log","board":{"reachable":true}}`)
+	var out strings.Builder
+	if err := Write("doctor", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if !strings.Contains(out.String(), "/s/hdis.log") {
+		t.Fatalf("doctor does not name the log: %q", out.String())
+	}
+}
+
+// A daemon that could not open a file says so where the path would be,
+// rather than showing an empty field an operator reads as "no log".
+func TestDoctorSaysWhenNoLogFileCouldBeOpened(t *testing.T) {
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/hdis.sock","board":{"reachable":true}}`)
+	var out strings.Builder
+	if err := Write("doctor", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if !strings.Contains(out.String(), "stdout only") {
+		t.Fatalf("doctor does not say the log went nowhere: %q", out.String())
+	}
+}

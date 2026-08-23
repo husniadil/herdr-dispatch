@@ -43,6 +43,10 @@ type Daemon struct {
 	// Version is this binary's version, for doctor.
 	Version string
 	Log     *log.Logger
+	// LogPath is the log file this daemon opened, as it opened it, and what
+	// doctor names. Empty means it could not open one and is writing to
+	// stdout alone.
+	LogPath string
 	// Lock is the one-daemon lock this daemon holds, as Lock opened it.
 	// Teardown removes that file and no other: the path is what was
 	// opened, never what the state dir names by the time teardown runs.
@@ -304,9 +308,14 @@ type DoctorReport struct {
 	Pending    int    `json:"pending"`
 	// Bindings is the file the pane-to-task mapping is kept in, and
 	// Readopted is how many of them this daemon took back when it started.
-	Bindings  string      `json:"bindings"`
-	Readopted int         `json:"readopted"`
-	Board     BoardHealth `json:"board"`
+	Bindings  string `json:"bindings"`
+	Readopted int    `json:"readopted"`
+	// Log is the file this daemon opened its log on, which is where an
+	// operator reads a spawn decision back. It is what was opened, not what
+	// the state dir names now, and it is empty when the open failed and the
+	// lines are going to stdout alone.
+	Log   string      `json:"log,omitempty"`
+	Board BoardHealth `json:"board"`
 	// Verify is the verification lane: whether a submission earns a
 	// verifier, and which profile that verifier launches with.
 	Verify VerifyHealth `json:"verify"`
@@ -351,6 +360,7 @@ func (d *Daemon) doctor(ctx context.Context) (DoctorReport, error) {
 		Workers:    len(d.Loop.Bindings()),
 		Pending:    len(d.Loop.Pending()),
 		Bindings:   d.Loop.BindingsPath(),
+		Log:        d.LogPath,
 		Readopted:  d.Loop.Readopted(),
 		Verify: VerifyHealth{
 			Enabled: d.Loop.Config.Verify.Enabled,

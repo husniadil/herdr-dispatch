@@ -7,6 +7,17 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+The daemon now opens its own log at `$XDG_STATE_HOME/hdis/hdis.log` and
+appends to it, instead of leaving the log to whatever the shell line that
+started it redirected — a restart that dropped the redirect used to throw the
+log away silently, and it was only ever noticed once the log was needed. Every
+line still goes to stdout, so a foreground operator loses nothing; a daemon a
+door started, whose stdout is already that file, gets the file alone rather
+than each line twice. The new `-log` flag moves the file and defaults to that
+path. A log that cannot be opened is reported on stdout and the daemon starts
+anyway. `hdis doctor` gained a `log` field naming the file that was opened,
+omitted when none could be.
+
 A worker now comes up in a TAB of its own rather than as a split of the
 operator's pane, and the tab is created in the workspace of the pane the task
 was FILED from. `herdr tab create --workspace/--cwd/--label/--env --no-focus`

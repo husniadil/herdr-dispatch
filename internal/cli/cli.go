@@ -96,6 +96,7 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 		fmt.Fprintf(out, "  tick        every %s\n", rep.Interval)
 		fmt.Fprintf(out, "  bindings    %s, %d re-adopted at start\n",
 			or(rep.Bindings, "in memory only"), rep.Readopted)
+		fmt.Fprintf(out, "  log         %s\n", or(rep.Log, "stdout only: no file could be opened"))
 		fmt.Fprintf(out, "  verify      %s\n", verifyLane(rep.Verify))
 		fmt.Fprintf(out, "  layout      min_pane_columns %d, max_panes_per_tab %d per task\n",
 			rep.MinPaneColumns, rep.MaxPanesPerTab)
