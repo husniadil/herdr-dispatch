@@ -178,6 +178,39 @@ func PointerGoal(seq int) string {
 // so TypedLineBudget does not bound it; it is kept near a nudge's length
 // anyway, because everything hdis puts into a pane goes through a terminal.
 //
+// It says what to DO with a finding, because a condition that asks for
+// mutations and stops there leaves the worker to invent the rule, and two
+// workers in a row did. The answer is KEEP FIXING. The shot is cheap exactly
+// because the pane is warm and the context is still there, so a rule that
+// says find the gap then sit on it defers the cheapest moment to fix anything
+// and throws away what the lane was built for. A moved head costs the
+// operator one more gate run, which is machine time; holding costs real gaps
+// left unpinned to protect a hash, and the hash is the wrong thing to
+// protect. The new head is named in the FIRST line of the message so the
+// operator reads it before choosing what to gate.
+//
+// Two boundaries travel with it, because keep fixing must not read as keep
+// building: a gap a mutation proved, or something the operator named. A new
+// idea, a widened scope, a second thought about the design goes in the
+// message as a proposal and waits for a verdict. Both of task 78's workers
+// stayed inside that line unprompted, so the wording describes that behaviour
+// rather than restricting it.
+//
+// And nothing is promised for later. hdis retires a bound pane the moment its
+// task reaches a terminal status, so a finding a worker files "after this
+// lands" dies with the pane that owed it — on herdr-tasks task 78 the
+// operator filed the note in its place. The lane cannot hold the pane open
+// instead: hdis stops at review and never learns the verdict's timing, so
+// holding would mean holding indefinitely, and the binding is the one thing
+// this daemon closes on a terminal row. So the condition spends the message
+// it is already sending: everything the worker has, including what it will
+// not fix, goes out before the pane closes.
+//
+// One half of this is the operator's and hdis cannot enforce it, so it is
+// recorded here as prose rather than pinned: verify the head the MESSAGE
+// names, and read the message before starting the gate. Getting that
+// backwards is what made task 78's first moved head cost anything at all.
+//
 // Recusal is untouched: this produces no verdict. The task stays in review
 // and the operator still approves or rejects.
 func SelfReviewCondition(seq int) string {
@@ -185,7 +218,11 @@ func SelfReviewCondition(seq int) string {
 		"invariant your report claims, write a COMPILING mutation that removes it, run the "+
 		"tests your report names, and confirm they FAIL. Revert each one. Then report which "+
 		"mutations bit and which did not, and for each that did not, say whether you believe "+
-		"it is a missing test or bad aim, with the mail MCP send to $"+DispatcherPaneVar+".", seq)
+		"it is a missing test or bad aim, with the mail MCP send to $"+DispatcherPaneVar+". "+
+		"KEEP FIXING what a mutation proved unpinned, and name the new head in the first line "+
+		"of that message. Fix only a gap a mutation proved or something the operator named; "+
+		"send anything else as a proposal that waits for a verdict. Send everything you have "+
+		"before your pane closes with the task; nothing waits for later.", seq)
 }
 
 // TypedLineBudget bounds the whole line herdr types into a worker's pane.

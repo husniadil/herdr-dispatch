@@ -816,6 +816,15 @@ func TestARereadRequestIsNotASelfReviewCondition(t *testing.T) {
 		// worker cannot amend its own report; findings with no route named
 		// die in the pane, and the board goes green having bought nothing.
 		"no destination": "Task 23 is submitted. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim.",
+		// The shape task 55 rejected, and the condition exactly as it stood
+		// before it: every mechanical step intact, a route named, and no word
+		// about what the worker may DO with a gap it just proved. Two workers
+		// in a row had to invent that rule; the third must be told it.
+		"no rule for findings": "Task 23 is submitted and not yet judged. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to $" + DispatcherPaneVar + ".",
+		// And each boundary alone is not the pair: keeping the fix rule while
+		// dropping the line that holds it to proven gaps is how "keep fixing"
+		// turns into "keep building".
+		"no boundary on the fix": "Task 23 is submitted. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to $" + DispatcherPaneVar + ". KEEP FIXING what a mutation proved unpinned and name the new head in the first line of that message. Send everything you have before your pane closes with the task; nothing waits for later.",
 	} {
 		if missing := mechanicalAsks(text); len(missing) == 0 {
 			t.Errorf("%q passes as a self-review condition: %s", name, text)
@@ -841,6 +850,16 @@ func mechanicalAsks(goal string) []string {
 		"which mutations bit":                {"which mutations bit and which did not"},
 		"a reading of the ones that did not": {"missing test or bad aim"},
 		"somewhere for the findings to go":   {strings.ToLower("the mail MCP send to $" + DispatcherPaneVar)},
+		// What to DO with a finding. A condition that asks for mutations and
+		// stops there leaves the worker to invent the rule, which is what two
+		// workers in a row had to do. Each boundary is its own ask, because a
+		// single combined string passes when half of it is reworded away.
+		"the gap fixed and not just found": {"keep fixing"},
+		"the new head named up front":      {"name the new head in the first line"},
+		"the boundary on what may be fixed": {
+			"fix only a gap a mutation proved or something the operator named"},
+		"anything else held as a proposal": {"as a proposal that waits"},
+		"nothing deferred past the pane":   {"before your pane closes"},
 	} {
 		found := false
 		for _, phrase := range phrases {
