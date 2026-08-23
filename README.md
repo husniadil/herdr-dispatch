@@ -19,7 +19,8 @@ bindings; the CLI and the MCP server are thin clients of it and hold nothing
 of their own. There is one daemon per user, elected by a lock at
 `$XDG_STATE_HOME/hdis/hdis.lock`, answering on a private socket at
 `$XDG_STATE_HOME/hdis/hdis.sock`. A second one refuses to start with
-`ALREADY_RUNNING` rather than driving the same board alongside the first.
+`CONFLICT: ALREADY_RUNNING` rather than driving the same board alongside the
+first.
 
 **The daemon opens its own log.** It appends to
 `$XDG_STATE_HOME/hdis/hdis.log`, beside the socket, the lock and the
@@ -137,7 +138,7 @@ its pane and no new one comes up until a daemon is started again, so a caller
 confirms with the operator first — the duty §3.7 puts on an agent, taught where
 the caller reads the verb rather than enforced by keeping it off a door where
 withholding never refused anybody: `hdis stop` is a CLI subcommand, so any
-agent with a shell could always run it. It answers `NOT_RUNNING`
+agent with a shell could always run it. It answers `CONFLICT: NOT_RUNNING`
 when nothing is listening: the other verbs start a daemon when none answers,
 and starting one just to stop it is the opposite of what was asked. What it
 does not do is write to the board — a worker mid-task keeps its claim and its
@@ -169,11 +170,18 @@ against the board's own ready list, reserves it, and returns; the next tick
 does the work. Read the outcome with `status`. The reservation is also what
 keeps the watching loop and the dispatch verb from both taking one task.
 
-It refuses with a name rather than a sentence to parse: `NOT_READY` when the
-board will not hand the task out, `NOT_FOUND` when the board has no such
-task, `AT_CAPACITY` when `-max-workers` are already live or reserved,
-`ALREADY_DISPATCHED` when this daemon is already driving it, and
-`NO_BASE_PANE` when there is nowhere to put a worker.
+It refuses with a name rather than a sentence to parse. The code is one of the
+contract's own nine (§6.3), and the sub-reason this binary refused for is the
+first word of the message, so nothing a caller could branch on before is lost:
+`USAGE` when no task was named; `CONFLICT` as `NOT_READY` when the board will
+not hand the task out, as `AT_CAPACITY` when `-max-workers` are already live
+or reserved, or as `ALREADY_DISPATCHED` when this daemon is already driving
+it; `UNSUPPORTED` as `NO_BASE_PANE` when there is nowhere to put a worker;
+`NOT_FOUND` when the board has no such task; and `UNAVAILABLE` when the board
+itself could not be read. The exit status is the one §6.3 fixes for the code —
+2, 3, 4, 6, 7 and the rest — and with `--json` a failure is exactly one
+`{"error":{"code":…,"message":…}}` document on stdout, the same envelope the
+MCP door builds.
 
 **Which profile a worker launches with is not selectable per call.** It is
 decided by the config and nowhere else, for the same reason the board carries

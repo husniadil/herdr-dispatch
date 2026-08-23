@@ -65,7 +65,7 @@ func (c *Client) dialOrStart() (net.Conn, error) {
 		return conn, nil
 	}
 	if c.NoStart {
-		return nil, codes.Errorf(codes.NotRunning,
+		return nil, codes.Refusef(codes.NotRunning,
 			"no hdis daemon is listening on %s", path)
 	}
 	if err := c.start(); err != nil {

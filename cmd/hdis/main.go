@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/husniadil/herdr-dispatch/internal/cli"
+	"github.com/husniadil/herdr-dispatch/internal/codes"
 	"github.com/husniadil/herdr-dispatch/internal/config"
 	"github.com/husniadil/herdr-dispatch/internal/daemon"
 	"github.com/husniadil/herdr-dispatch/internal/decide"
@@ -49,6 +50,12 @@ func main() {
 			log.Fatal(err)
 		}
 	case "mcp":
+		// The door takes no arguments, and silently ignoring one is how a
+		// caller ends up believing it passed something that took effect.
+		if len(os.Args) > 2 {
+			fmt.Fprintf(os.Stderr, "hdis: mcp takes no argument %q\n", os.Args[2])
+			os.Exit(codes.Exit(codes.Usage))
+		}
 		if err := mcpdoor.Serve(context.Background(), version.Version, nil); err != nil {
 			log.Fatal(err)
 		}
@@ -74,8 +81,18 @@ func main() {
 			os.Exit(2)
 		}
 		if err := cli.Run(v, os.Args[2:], os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "hdis: %s\n", err)
-			os.Exit(1)
+			// One failure, one report, one stream (§6.2): with --json the
+			// envelope IS the report and it goes to stdout, otherwise a
+			// sentence goes to stderr and stdout stays empty. The status is
+			// the one §6.3 fixes for the code, so a caller scripting three
+			// sibling plugins reads the same number from each rather than
+			// this binary's old "1 for everything".
+			if cli.WantsJSON(os.Args[2:]) {
+				cli.WriteError(err, os.Stdout)
+			} else {
+				fmt.Fprintf(os.Stderr, "hdis: %s\n", err)
+			}
+			os.Exit(codes.Exit(codes.Of(err)))
 		}
 	}
 }

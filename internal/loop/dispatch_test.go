@@ -74,7 +74,7 @@ func TestDispatchRefusesATaskTheBoardWillNotHandOut(t *testing.T) {
 	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"doing","claimed_by":"agent:wM:p4"},"ready":false,"dependents":[]}`)
 
 	_, err := l.Dispatch(context.Background(), "7")
-	if got, want := codes.Of(err), codes.NotReady; got != want {
+	if got, want := codes.ReasonOf(err), codes.NotReady; got != want {
 		t.Fatalf("dispatch of a claimed task = %v (%q), want %q", err, got, want)
 	}
 }
@@ -181,7 +181,7 @@ func TestDispatchRefusesWhenTheFleetIsAtMaxWorkers(t *testing.T) {
 	l.bindings = []decide.Binding{{TaskID: "01ZZZ", Pane: "wM:p8", PromptedAt: clock, Prompts: 1}}
 
 	_, err := l.Dispatch(context.Background(), "7")
-	if got, want := codes.Of(err), codes.AtCapacity; got != want {
+	if got, want := codes.ReasonOf(err), codes.AtCapacity; got != want {
 		t.Fatalf("dispatch at capacity = %v (%q), want %q", err, got, want)
 	}
 }
@@ -191,7 +191,7 @@ func TestDispatchRefusesWithoutABasePane(t *testing.T) {
 	l.BasePane = ""
 
 	_, err := l.Dispatch(context.Background(), "7")
-	if got, want := codes.Of(err), codes.NoBasePane; got != want {
+	if got, want := codes.ReasonOf(err), codes.NoBasePane; got != want {
 		t.Fatalf("dispatch with no base pane = %v (%q), want %q", err, got, want)
 	}
 }
@@ -203,7 +203,7 @@ func TestDispatchRefusesATaskItIsAlreadyDriving(t *testing.T) {
 	}
 
 	_, err := l.Dispatch(context.Background(), "7")
-	if got, want := codes.Of(err), codes.AlreadyDispatched; got != want {
+	if got, want := codes.ReasonOf(err), codes.AlreadyDispatched; got != want {
 		t.Fatalf("second dispatch = %v (%q), want %q", err, got, want)
 	}
 }
@@ -365,7 +365,7 @@ func TestDispatchStillRefusesATaskThatIsNotReadyOnAnotherBoard(t *testing.T) {
 	f.Write(t, "get.json", `{"task":{"id":"01ZZZ","seq":42,"project":"/src/other","title":"elsewhere","status":"doing","claimed_by":"agent:wM:p4"},"ready":false,"dependents":[]}`)
 
 	_, err := l.Dispatch(context.Background(), "01ZZZ")
-	if got, want := codes.Of(err), codes.NotReady; got != want {
+	if got, want := codes.ReasonOf(err), codes.NotReady; got != want {
 		t.Fatalf("dispatch of a claimed task on another board = %v (%q), want %q", err, got, want)
 	}
 	if !strings.Contains(err.Error(), "agent:wM:p4") {
@@ -404,7 +404,7 @@ func TestDispatchOfANumberTheBoardIsNotOffering(t *testing.T) {
 	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
 
 	_, err := l.Dispatch(context.Background(), "7")
-	if got, want := codes.Of(err), codes.NotReady; got != want {
+	if got, want := codes.ReasonOf(err), codes.NotReady; got != want {
 		t.Fatalf("dispatch of a number not on offer = %v (%q), want %q", err, got, want)
 	}
 	if got := calls(t, f, "task get"); len(got) != 0 {

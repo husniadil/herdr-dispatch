@@ -49,16 +49,61 @@ func TestTheFlagIsReadWhereverItSits(t *testing.T) {
 	}
 }
 
+// Go's flag package stops at the first non-flag word, so a flag written after
+// the positional landed in the positionals and the call was refused for an
+// argument the verb does not take. `hdis dispatch 41 --json` is what a caller
+// writes, and it means the same thing as `hdis --json dispatch 41`.
+func TestTheFlagIsReadAfterThePositionalToo(t *testing.T) {
+	req, asJSON, err := Request(verb(t, "dispatch"), []string{"7", "--json"})
+	if err != nil {
+		t.Fatalf("dispatch 7 --json: %v", err)
+	}
+	if !asJSON || req.Args["task"] != "7" {
+		t.Fatalf("json=%t request=%+v", asJSON, req)
+	}
+	if !WantsJSON([]string{"7", "--json"}) || WantsJSON([]string{"7"}) {
+		t.Error("WantsJSON does not read the flag where the caller wrote it")
+	}
+	if WantsJSON([]string{"--json=false", "7"}) {
+		t.Error("an explicit false still asked for a document")
+	}
+}
+
+// §6.2: with --json a failure is one envelope on stdout, carrying the
+// contract code and the message. It is the same document the MCP door builds.
+func TestAFailureWithJSONIsTheContractEnvelope(t *testing.T) {
+	var out strings.Builder
+	err := WriteError(codes.Refusef(codes.NoBasePane, "no pane to split off"), &out)
+	if err != nil {
+		t.Fatalf("WriteError: %v", err)
+	}
+	var body struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(out.String()), &body); err != nil {
+		t.Fatalf("the envelope is not one JSON document: %q (%v)", out.String(), err)
+	}
+	if body.Error.Code != string(codes.Unsupported) {
+		t.Errorf("code = %q, want %q", body.Error.Code, codes.Unsupported)
+	}
+	if body.Error.Message != "NO_BASE_PANE: no pane to split off" {
+		t.Errorf("message = %q", body.Error.Message)
+	}
+}
+
 func TestAMissingRequiredPositionalIsRefused(t *testing.T) {
 	_, _, err := Request(verb(t, "dispatch"), nil)
-	if got, want := codes.Of(err), codes.Invalid; got != want {
+	if got, want := codes.ReasonOf(err), codes.Invalid; got != want {
 		t.Fatalf("dispatch with nothing = %v (%q), want %q", err, got, want)
 	}
 }
 
 func TestAnArgumentTheVerbDoesNotTakeIsRefused(t *testing.T) {
 	_, _, err := Request(verb(t, "status"), []string{"7"})
-	if got, want := codes.Of(err), codes.Invalid; got != want {
+	if got, want := codes.ReasonOf(err), codes.Invalid; got != want {
 		t.Fatalf("status 7 = %v (%q), want %q", err, got, want)
 	}
 }

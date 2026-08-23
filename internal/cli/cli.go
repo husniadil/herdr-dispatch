@@ -5,10 +5,12 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,11 +28,19 @@ const Door = "cli"
 // Request builds the daemon request for one subcommand, and reports whether
 // the caller asked for the answer as it came.
 func Request(v verbs.Verb, argv []string) (protocol.Request, bool, error) {
+	// --json is taken out of argv before anything else parses it. Go's flag
+	// package stops at the first non-flag word, so `hdis dispatch 41 --json`
+	// left --json sitting in the positionals and the call was refused for an
+	// argument it does not take — while `hdis --json dispatch 41` worked. A
+	// flag that means the same thing wherever it is written is the whole of
+	// what §6.2 promises a machine caller.
+	asJSON := WantsJSON(argv)
+	argv = withoutJSON(argv)
+
 	fs := flag.NewFlagSet("hdis "+strings.Join(v.CLI, " "), flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	asJSON := fs.Bool("json", false, "print the daemon's answer as it came")
 	if err := fs.Parse(argv); err != nil {
-		return protocol.Request{}, false, codes.Errorf(codes.Invalid, "%s: %v", strings.Join(v.CLI, " "), err)
+		return protocol.Request{}, false, codes.Refusef(codes.Invalid, "%s: %v", strings.Join(v.CLI, " "), err)
 	}
 
 	req := protocol.Request{
@@ -48,7 +58,7 @@ func Request(v verbs.Verb, argv []string) (protocol.Request, bool, error) {
 		}
 		if len(rest) == 0 {
 			if a.Required {
-				return protocol.Request{}, false, codes.Errorf(codes.Invalid,
+				return protocol.Request{}, false, codes.Refusef(codes.Invalid,
 					"%s needs <%s>", strings.Join(v.CLI, " "), a.Name)
 			}
 			continue
@@ -56,10 +66,74 @@ func Request(v verbs.Verb, argv []string) (protocol.Request, bool, error) {
 		req.Args[a.Name], rest = rest[0], rest[1:]
 	}
 	if len(rest) > 0 {
-		return protocol.Request{}, false, codes.Errorf(codes.Invalid,
+		return protocol.Request{}, false, codes.Refusef(codes.Invalid,
 			"%s takes no argument %q", strings.Join(v.CLI, " "), rest[0])
 	}
-	return req, *asJSON, nil
+	return req, asJSON, nil
+}
+
+// WantsJSON reads --json out of a raw argv, wherever in it the caller wrote
+// the flag. A value that is not an explicit false counts as asking for a
+// document: a machine caller that asked for JSON should be told in JSON even
+// when what it wrote was refused.
+func WantsJSON(argv []string) bool {
+	on := false
+	for _, a := range argv {
+		switch {
+		case a == "--":
+			return on
+		case a == "--json", a == "-json":
+			on = true
+		case strings.HasPrefix(a, "--json="), strings.HasPrefix(a, "-json="):
+			_, v, _ := strings.Cut(a, "=")
+			b, err := strconv.ParseBool(v)
+			on = err != nil || b
+		}
+	}
+	return on
+}
+
+// withoutJSON is argv with every --json out of it, so what is left is the
+// verb's own arguments in the order the verb declares them.
+func withoutJSON(argv []string) []string {
+	out := make([]string, 0, len(argv))
+	for i, a := range argv {
+		if a == "--" {
+			return append(out, argv[i:]...)
+		}
+		switch {
+		case a == "--json", a == "-json",
+			strings.HasPrefix(a, "--json="), strings.HasPrefix(a, "-json="):
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
+// WriteError prints the §6.2 failure document: with --json, one envelope on
+// stdout carrying the contract code and the message; otherwise nothing here,
+// because a human reads the sentence on stderr instead. It is the same
+// document the MCP door builds for the same failure.
+func WriteError(err error, out io.Writer) error {
+	body, merr := json.Marshal(map[string]any{
+		"error": map[string]string{"code": string(codes.Of(err)), "message": message(err)},
+	})
+	if merr != nil {
+		return merr
+	}
+	_, werr := fmt.Fprintln(out, string(body))
+	return werr
+}
+
+// message is the failure without the code repeated in front of it: the
+// envelope already carries the code in its own field.
+func message(err error) string {
+	var named *codes.Error
+	if errors.As(err, &named) {
+		return named.Message
+	}
+	return err.Error()
 }
 
 // Run sends one subcommand to the daemon and writes the answer.

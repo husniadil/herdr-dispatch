@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -272,4 +275,82 @@ func TestTheChangelogHasALineForTheDeclaredContractRevision(t *testing.T) {
 	t.Errorf("CHANGELOG.md has no entry saying %q, and this binary declares contract revision %s "+
 		"in `hdis doctor`. §13.3 makes a change a consumer can pin on legal between minors only "+
 		"with an entry here", clause, version.Contract)
+}
+
+// §6.3: the exit status is fixed by the code, and §6.2: with --json the whole
+// report is one envelope on stdout. This binary exited 1 for every failure and
+// printed nothing to stdout at all, so a machine caller could not tell a
+// caller error from an unreachable daemon without parsing English off stderr.
+//
+// The binary is built and run rather than the functions called: what a caller
+// scripting three sibling plugins reads is a status and a stream, and a
+// mapping that never reaches either declares nothing.
+func TestAFailureExitsWithTheStatusTheContractFixes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds the binary")
+	}
+	bin := filepath.Join(t.TempDir(), "hdis")
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+	// An empty state dir of its own: `stop` never starts a daemon, so this
+	// asks a socket nothing is listening on, and the operator's own daemon is
+	// never reached.
+	state := t.TempDir()
+
+	run := func(argv ...string) (string, string, int) {
+		t.Helper()
+		cmd := exec.Command(bin, argv...)
+		cmd.Env = append(os.Environ(), "HDIS_STATE_DIR="+state, "HDIS_CONFIG_DIR="+t.TempDir())
+		var stdout, stderr strings.Builder
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		err := cmd.Run()
+		var exit *exec.ExitError
+		status := 0
+		if errors.As(err, &exit) {
+			status = exit.ExitCode()
+		} else if err != nil {
+			t.Fatalf("run %v: %v", argv, err)
+		}
+		return stdout.String(), stderr.String(), status
+	}
+
+	// NOT_RUNNING is a state guard that failed, which §6.3 calls CONFLICT: 6.
+	stdout, stderr, status := run("stop")
+	if status != 6 {
+		t.Errorf("hdis stop with no daemon exited %d, want CONFLICT's 6", status)
+	}
+	if stdout != "" {
+		t.Errorf("without --json a failure still wrote to stdout: %q", stdout)
+	}
+	if !strings.Contains(stderr, "NOT_RUNNING") {
+		t.Errorf("stderr does not carry the sub-reason: %q", stderr)
+	}
+
+	stdout, _, status = run("stop", "--json")
+	if status != 6 {
+		t.Errorf("hdis stop --json exited %d, want CONFLICT's 6", status)
+	}
+	var body struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &body); err != nil {
+		t.Fatalf("stdout is not the one §6.2 envelope: %q (%v)", stdout, err)
+	}
+	if body.Error.Code != "CONFLICT" || !strings.HasPrefix(body.Error.Message, "NOT_RUNNING: ") {
+		t.Errorf("envelope: %+v", body.Error)
+	}
+
+	// A caller-validatable input error is USAGE: 2.
+	if _, _, status := run("dispatch"); status != 2 {
+		t.Errorf("hdis dispatch with no task exited %d, want USAGE's 2", status)
+	}
+	// The MCP door takes no argument, and one it silently dropped left the
+	// caller believing it had taken effect.
+	if _, stderr, status := run("mcp", "--port", "8080"); status != 2 {
+		t.Errorf("hdis mcp with an argument exited %d, want USAGE's 2 (%q)", status, stderr)
+	}
 }

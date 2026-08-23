@@ -97,7 +97,7 @@ func handlerFor(v verbs.Verb, call Caller) mcp.ToolHandler {
 		args := map[string]any{}
 		if len(req.Params.Arguments) > 0 {
 			if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-				return failure(codes.Errorf(codes.Invalid, "unreadable arguments: %v", err)), nil
+				return failure(codes.Refusef(codes.Invalid, "unreadable arguments: %v", err)), nil
 			}
 		}
 		if err := check(v, args); err != nil {
@@ -137,23 +137,23 @@ func check(v verbs.Verb, args map[string]any) error {
 	}
 	for name := range args {
 		if _, ok := declared[name]; !ok {
-			return codes.Errorf(codes.Invalid, "%s takes no argument named %q", v.Name, name)
+			return codes.Refusef(codes.Invalid, "%s takes no argument named %q", v.Name, name)
 		}
 	}
 	for _, a := range v.Args {
 		raw, ok := args[a.Name]
 		if !ok || raw == nil {
 			if a.Required {
-				return codes.Errorf(codes.Invalid, "%s needs %s", v.Name, a.Name)
+				return codes.Refusef(codes.Invalid, "%s needs %s", v.Name, a.Name)
 			}
 			continue
 		}
 		s, ok := raw.(string)
 		if !ok {
-			return codes.Errorf(codes.Invalid, "%s wants %s as a string", v.Name, a.Name)
+			return codes.Refusef(codes.Invalid, "%s wants %s as a string", v.Name, a.Name)
 		}
 		if a.Required && s == "" {
-			return codes.Errorf(codes.Invalid, "%s needs %s", v.Name, a.Name)
+			return codes.Refusef(codes.Invalid, "%s needs %s", v.Name, a.Name)
 		}
 	}
 	return nil

@@ -59,6 +59,8 @@ is written down.
 | §10.1 | `config_dir` never from `HERDR_PLUGIN_CONFIG_DIR` | `TestTheHerdrPluginDirsAreNotRead` |
 | §11.4 | One-line slash command in `agent start` argv | `TestTheTypedSpawnLineStaysUnderItsBudgetWithACodexProfile`, `TestThePromptedSelfReviewGoalFitsItsOwnBudget` |
 | §11.4 | A successful `agent prompt` is not delivery | `TestASelfReviewShotHerdrAcceptedIsNotTreatedAsDelivered` |
+| §6.2 | With `--json`, a failure is one `{"error":{code,message}}` document on stdout | `TestAFailureWithJSONIsTheContractEnvelope`, `TestAFailureExitsWithTheStatusTheContractFixes` |
+| §6.3 | The code is one of the nine, the exit status is the one fixed for it, and a finer name is a sub-reason inside `message` | `TestEverySubReasonAnswersUnderAContractCode`, `TestTheSubReasonsMapOntoTheCodesTheContractFixes`, `TestExitIsTheStatusTheContractFixes`, `TestAFailureExitsWithTheStatusTheContractFixes` |
 | §12.2 | A test cites the section it enforces | `TestEveryTestThisDocumentNamesExists` |
 | §13.4 | The short name is `dispatch` | `TestTheManifestNamesThisPluginAtThisVersion` |
 
@@ -81,3 +83,11 @@ mode had no test at all.
 **§5.1 and §10.1 were right and unpinned.** Nothing here has ever read
 `HERDR_PLUGIN_STATE_DIR` or `HERDR_PLUGIN_CONFIG_DIR`, and nothing said so, so
 the first reader to reach for them would have found no resistance.
+
+**§6.3 defined seven codes of its own.** `INVALID`, `NOT_READY`,
+`AT_CAPACITY`, `NO_BASE_PANE`, `ALREADY_DISPATCHED`, `ALREADY_RUNNING` and
+`NOT_RUNNING` were top-level codes, which §6.3 forbids without a contract bump,
+and every failure exited 1 whatever the code said. They are now sub-reasons
+inside `message`, under the contract code each belongs to, and the exit status
+is §6.3's own. Nothing a caller could read is gone: the sub-reason is the first
+word of the sentence.

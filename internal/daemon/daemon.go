@@ -80,7 +80,7 @@ func Lock() (*os.File, error) {
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		f.Close()
-		return nil, codes.Errorf(codes.AlreadyRunning,
+		return nil, codes.Refusef(codes.AlreadyRunning,
 			"another hdis daemon is running: it holds %s", path)
 	}
 	return f, nil
@@ -238,7 +238,7 @@ func (d *Daemon) write(conn net.Conn, resp protocol.Response) {
 func (d *Daemon) Handle(ctx context.Context, req protocol.Request) (json.RawMessage, error) {
 	v, ok := verbs.ByName(req.Verb)
 	if !ok {
-		return nil, codes.Errorf(codes.Invalid, "no verb named %q", req.Verb)
+		return nil, codes.Refusef(codes.Invalid, "no verb named %q", req.Verb)
 	}
 	if err := check(v, req.Args); err != nil {
 		return nil, err
@@ -262,7 +262,7 @@ func (d *Daemon) Handle(ctx context.Context, req protocol.Request) (json.RawMess
 		return encode(st, err)
 	case "stop":
 		if d.halt == nil {
-			return nil, codes.Errorf(codes.NotRunning, "this daemon is not serving")
+			return nil, codes.Refusef(codes.NotRunning, "this daemon is not serving")
 		}
 		d.logf("stopping: %s asked over %s", req.Caller(), door(req))
 		// The board hears nothing about this. A worker mid-task keeps its
@@ -271,7 +271,7 @@ func (d *Daemon) Handle(ctx context.Context, req protocol.Request) (json.RawMess
 		d.stopOnce.Do(func() { close(d.halt) })
 		return encode(StopReport{Stopping: true, Socket: config.SocketPath(), PID: os.Getpid()}, nil)
 	}
-	return nil, codes.Errorf(codes.Invalid, "verb %q is declared and not served", v.Name)
+	return nil, codes.Refusef(codes.Invalid, "verb %q is declared and not served", v.Name)
 }
 
 // wake asks the tick to run now rather than at the end of the interval. It
@@ -400,23 +400,23 @@ func check(v verbs.Verb, args map[string]any) error {
 	}
 	for name := range args {
 		if _, ok := declared[name]; !ok {
-			return codes.Errorf(codes.Invalid, "%s takes no argument named %q", v.Name, name)
+			return codes.Refusef(codes.Invalid, "%s takes no argument named %q", v.Name, name)
 		}
 	}
 	for _, a := range v.Args {
 		raw, ok := args[a.Name]
 		if !ok || raw == nil {
 			if a.Required {
-				return codes.Errorf(codes.Invalid, "%s needs %s", v.Name, a.Name)
+				return codes.Refusef(codes.Invalid, "%s needs %s", v.Name, a.Name)
 			}
 			continue
 		}
 		s, ok := raw.(string)
 		if !ok {
-			return codes.Errorf(codes.Invalid, "%s wants %s as a string", v.Name, a.Name)
+			return codes.Refusef(codes.Invalid, "%s wants %s as a string", v.Name, a.Name)
 		}
 		if a.Required && s == "" {
-			return codes.Errorf(codes.Invalid, "%s needs %s", v.Name, a.Name)
+			return codes.Refusef(codes.Invalid, "%s needs %s", v.Name, a.Name)
 		}
 	}
 	return nil

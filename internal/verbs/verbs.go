@@ -52,9 +52,14 @@ var All = []Verb{
 		Short: "Bring a worker up for one ready task, now",
 		Long: "Reserves the task for the next tick and returns at once: bringing " +
 			"a worker up takes minutes, and this call does not wait for it. Read " +
-			"the outcome with status. Refuses with NOT_READY when the board will " +
-			"not hand the task out, AT_CAPACITY when the fleet is full, and " +
-			"NO_BASE_PANE when the daemon has no pane to split a worker off.",
+			"the outcome with status. Every refusal carries a contract code and " +
+			"opens the message with the sub-reason it refused for: USAGE when no " +
+			"task was named; CONFLICT as NOT_READY when the board will not hand " +
+			"the task out, as AT_CAPACITY when the fleet is full, or as " +
+			"ALREADY_DISPATCHED when this daemon is already driving it; " +
+			"UNSUPPORTED as NO_BASE_PANE when the daemon has no pane to split a " +
+			"worker off; NOT_FOUND when no board has the task; and UNAVAILABLE " +
+			"when the board itself could not be read.",
 		Args: []Arg{
 			{Name: "task", Type: String, Desc: "The task id or its number on the board", Required: true, Positional: true},
 		},
@@ -65,7 +70,7 @@ var All = []Verb{
 		Long: "The daemon stops ticking, closes its socket, drops its lock and " +
 			"exits; it writes nothing to the board on the way out, and the tasks " +
 			"it was driving keep their claims and their leases, which are the " +
-			"board's to time out. Answers NOT_RUNNING when no daemon is " +
+			"board's to time out. Answers CONFLICT as NOT_RUNNING when no daemon is " +
 			"listening: nothing is started just to be stopped. It is a brake on " +
 			"the WHOLE dispatcher and not on one task: every worker it is " +
 			"driving keeps running in its pane, and no new one comes up until a " +

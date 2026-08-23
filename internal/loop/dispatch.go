@@ -79,7 +79,7 @@ type Status struct {
 // task in the meantime; the tick does the work and records the binding.
 func (l *Loop) Dispatch(ctx context.Context, ref string) (Reservation, error) {
 	if l.BasePane == "" {
-		return Reservation{}, codes.Errorf(codes.NoBasePane,
+		return Reservation{}, codes.Refusef(codes.NoBasePane,
 			`this daemon has no pane to split a worker off: start it inside a Herdr pane, pass -pane, or set "pane" in the config`)
 	}
 
@@ -96,18 +96,18 @@ func (l *Loop) Dispatch(ctx context.Context, ref string) (Reservation, error) {
 	defer l.mu.Unlock()
 	for _, b := range l.bindings {
 		if b.TaskID == row.ID {
-			return Reservation{}, codes.Errorf(codes.AlreadyDispatched,
+			return Reservation{}, codes.Refusef(codes.AlreadyDispatched,
 				"task %d already has a worker in pane %s", row.Seq, b.Pane)
 		}
 	}
 	for _, held := range l.pending {
 		if held.TaskID == row.ID {
-			return Reservation{}, codes.Errorf(codes.AlreadyDispatched,
+			return Reservation{}, codes.Refusef(codes.AlreadyDispatched,
 				"task %d is already reserved for the next tick", row.Seq)
 		}
 	}
 	if live := len(l.bindings) + len(l.pending); live >= l.Policy.MaxWorkers {
-		return Reservation{}, codes.Errorf(codes.AtCapacity,
+		return Reservation{}, codes.Refusef(codes.AtCapacity,
 			"%d workers are live or reserved and max-workers is %d", live, l.Policy.MaxWorkers)
 	}
 	l.pending = append(l.pending, store.Reservation{
@@ -135,7 +135,7 @@ func (l *Loop) whyNotReady(ctx context.Context, ref string) error {
 		// the board for a bare number across projects is what it refuses by
 		// design, and the answer would be a USAGE error rather than a word
 		// about the task.
-		return codes.Errorf(codes.NotReady,
+		return codes.Refusef(codes.NotReady,
 			"task %d is not among the tasks the board is offering; name it by id to be told what it is instead", seq)
 	}
 	row, err := l.Board.Get(ctx, ref)
@@ -151,9 +151,9 @@ func (l *Loop) whyNotReady(ctx context.Context, ref string) error {
 		return codes.Errorf(codes.Unavailable, "cannot read task %s from the board: %v", ref, err)
 	}
 	if claimed := row.ClaimedBy; claimed != "" {
-		return codes.Errorf(codes.NotReady, "task %d is %s, held by %s", row.Seq, row.Status, claimed)
+		return codes.Refusef(codes.NotReady, "task %d is %s, held by %s", row.Seq, row.Status, claimed)
 	}
-	return codes.Errorf(codes.NotReady, "task %d is %s and the board is not offering it", row.Seq, row.Status)
+	return codes.Refusef(codes.NotReady, "task %d is %s and the board is not offering it", row.Seq, row.Status)
 }
 
 // Status reports the bindings and what herdr says about their panes. The

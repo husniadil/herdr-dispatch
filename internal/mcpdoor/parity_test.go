@@ -307,10 +307,15 @@ func TestARefusalReachesTheCallerAsAToolErrorWithItsCode(t *testing.T) {
 	if err := json.Unmarshal([]byte(text(res)), &body); err != nil {
 		t.Fatalf("error body: %v", err)
 	}
-	if body.Error.Code != string(codes.NoBasePane) {
+	// §6.3: the code is one of the contract's nine, and the sub-reason this
+	// binary refuses for is the first word of the message.
+	if body.Error.Code != string(codes.Unsupported) {
 		t.Fatalf("error body: %+v", body.Error)
 	}
-	if strings.Contains(body.Error.Message, string(codes.NoBasePane)) {
+	if !strings.HasPrefix(body.Error.Message, string(codes.NoBasePane)+": ") {
+		t.Errorf("the message does not carry the sub-reason: %q", body.Error.Message)
+	}
+	if strings.Contains(body.Error.Message, string(codes.Unsupported)) {
 		t.Errorf("the message repeats the code: %q", body.Error.Message)
 	}
 }

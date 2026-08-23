@@ -149,7 +149,7 @@ func TestASecondDaemonMeetsTheFirstOnesLock(t *testing.T) {
 		second.Close()
 		t.Fatal("a second daemon took the lock")
 	}
-	if got, want := codes.Of(err), codes.AlreadyRunning; got != want {
+	if got, want := codes.ReasonOf(err), codes.AlreadyRunning; got != want {
 		t.Fatalf("second lock = %v (%q), want %q", err, got, want)
 	}
 }
@@ -168,7 +168,7 @@ func TestASecondRunnerCannotDoubleSpawnATask(t *testing.T) {
 	defer held.Close()
 
 	// The second runner starts here, and gets no further.
-	if _, err := Lock(); codes.Of(err) != codes.AlreadyRunning {
+	if _, err := Lock(); codes.ReasonOf(err) != codes.AlreadyRunning {
 		t.Fatalf("the second runner started: %v", err)
 	}
 
@@ -299,7 +299,7 @@ func TestDispatchRefusesWithTheCodeTheLoopGave(t *testing.T) {
 	d.Loop.BasePane = ""
 
 	_, err := call(t, d, protocol.Request{Verb: "dispatch", Args: map[string]any{"task": "7"}})
-	if got, want := codes.Of(err), codes.NoBasePane; got != want {
+	if got, want := codes.ReasonOf(err), codes.NoBasePane; got != want {
 		t.Fatalf("dispatch = %v (%q), want %q", err, got, want)
 	}
 }
@@ -329,7 +329,7 @@ func TestAnUnknownVerbIsInvalid(t *testing.T) {
 	d, _ := newDaemon(t)
 
 	_, err := call(t, d, protocol.Request{Verb: "approve", Args: map[string]any{"task": "7"}})
-	if got, want := codes.Of(err), codes.Invalid; got != want {
+	if got, want := codes.ReasonOf(err), codes.Invalid; got != want {
 		t.Fatalf("unknown verb = %v (%q), want %q", err, got, want)
 	}
 }
@@ -339,7 +339,7 @@ func TestAMissingRequiredArgumentIsInvalid(t *testing.T) {
 	d, _ := newDaemon(t)
 
 	_, err := call(t, d, protocol.Request{Verb: "dispatch"})
-	if got, want := codes.Of(err), codes.Invalid; got != want {
+	if got, want := codes.ReasonOf(err), codes.Invalid; got != want {
 		t.Fatalf("dispatch with no task = %v (%q), want %q", err, got, want)
 	}
 }
@@ -349,7 +349,7 @@ func TestAnUndeclaredArgumentIsInvalid(t *testing.T) {
 	d, _ := newDaemon(t)
 
 	_, err := call(t, d, protocol.Request{Verb: "status", Args: map[string]any{"profile": "routed"}})
-	if got, want := codes.Of(err), codes.Invalid; got != want {
+	if got, want := codes.ReasonOf(err), codes.Invalid; got != want {
 		t.Fatalf("status with an argument it does not take = %v (%q), want %q", err, got, want)
 	}
 }
@@ -455,7 +455,8 @@ func TestARefusalTravelsAsANamedCode(t *testing.T) {
 	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if resp.Error == nil || resp.Error.Code != string(codes.NoBasePane) {
+	if resp.Error == nil || resp.Error.Code != string(codes.Unsupported) ||
+		!strings.HasPrefix(resp.Error.Message, string(codes.NoBasePane)+": ") {
 		t.Fatalf("response: %+v", resp)
 	}
 }

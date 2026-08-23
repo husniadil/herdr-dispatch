@@ -130,7 +130,7 @@ func TestARefusalKeepsItsNameThroughTheSocket(t *testing.T) {
 	// No pane was inherited and none is configured, so this is the daemon
 	// saying it has nowhere to put a worker.
 	_, err := c.Call(protocol.Request{Verb: "dispatch", Args: map[string]any{"task": "7"}})
-	if got, want := codes.Of(err), codes.NoBasePane; got != want {
+	if got, want := codes.ReasonOf(err), codes.NoBasePane; got != want {
 		t.Fatalf("dispatch = %v (%q), want %q", err, got, want)
 	}
 }
@@ -160,7 +160,7 @@ func TestStopWithNoDaemonDoesNotStartOne(t *testing.T) {
 	c := &Client{Bin: bin, Timeout: 10 * time.Second, NoStart: true}
 	reap(t, c)
 	_, err := c.Call(protocol.Request{Verb: "stop", Door: "cli"})
-	if got, want := codes.Of(err), codes.NotRunning; got != want {
+	if got, want := codes.ReasonOf(err), codes.NotRunning; got != want {
 		t.Fatalf("stop with no daemon = %v (%q), want %q", err, got, want)
 	}
 	if c.Started != nil {

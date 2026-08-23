@@ -36,19 +36,25 @@ with `status`, which is one row per binding: the task, the pane its worker
 lives in, when the goal was delivered, how often, whether review was
 announced, and the worker's `agent_status` as Herdr reports it.
 
-It refuses with a name rather than a sentence to parse: `NOT_READY` when the
-board will not hand the task out, `NOT_FOUND` when no board has it,
-`AT_CAPACITY` when the fleet is already full, `ALREADY_DISPATCHED` when this
-daemon is driving it, and `NO_BASE_PANE` when there is nowhere to put a
-worker.
+It refuses with a name rather than a sentence to parse. The `code` is one of
+the shared contract's nine, and the sub-reason is the first word of the
+`message`: `CONFLICT` as `NOT_READY` when the board will not hand the task
+out, as `AT_CAPACITY` when the fleet is already full, or as
+`ALREADY_DISPATCHED` when this daemon is driving it; `UNSUPPORTED` as
+`NO_BASE_PANE` when there is nowhere to put a worker; `NOT_FOUND` when no
+board has it; `USAGE` when no task was named; and `UNAVAILABLE` when the board
+itself could not be read.
 
 ## Name the task by its id
 
 A task crossing boards **must be the 26-character id**. A number is the task's
 place on one board and is **only unique inside a project**, so it cannot
-address a task anywhere else and the board answers `USAGE` when it is asked
-to. Pass the number only for a task on the board you are standing on; pass the
-id for anything else.
+address a task anywhere else. `hdis` resolves a number against the ready list
+alone and never widens the question, so a number belonging to another board
+comes back as `CONFLICT: NOT_READY` saying it is not among the tasks on offer
+— not as a word about the task, because nothing here can look it up. Pass the
+number only for a task on the board you are standing on; pass the id for
+anything else.
 
 ## What the dispatcher will not do for you
 
