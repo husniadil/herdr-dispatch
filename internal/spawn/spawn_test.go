@@ -1533,11 +1533,6 @@ func TestTheTrustDialogIsAnsweredInTodaysWordingAndTheOlderOne(t *testing.T) {
 	}
 }
 
-// The readable-column floor is derived from the markers, never restated
-// beside them. Claude renders its body at the pane's columns minus three and
-// word-wraps, so the longest phrase the detector matches needs its own length
-// plus three columns to land on one line, and one that wraps never matches.
-// Change the marker set and this test moves the floor with it.
 // The row floor is the column floor's counterpart, and it needs the same
 // protection for a reason this repo has already been bitten by: a constant
 // measured against a marker set outlives the set that was measured. The
@@ -1596,6 +1591,11 @@ func TestTheReadableRowFloorIsDerivedFromTheMarkerSets(t *testing.T) {
 	}
 }
 
+// The readable-column floor is derived from the markers, never restated
+// beside them. Claude renders its body at the pane's columns minus three and
+// word-wraps, so the longest phrase the detector matches needs its own length
+// plus three columns to land on one line, and one that wraps never matches.
+// Change the marker set and this test moves the floor with it.
 func TestTheReadableColumnFloorIsDerivedFromTheLongestMarker(t *testing.T) {
 	const inset = 3
 
