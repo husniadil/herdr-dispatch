@@ -369,3 +369,49 @@ func commit(t *testing.T, dir, msg string) {
 		t.Fatalf("commit in %s: %v: %s", dir, err, out)
 	}
 }
+
+// A git that cannot answer is not the answer "behind". Only exit 1 means
+// "not an ancestor"; every other exit is git refusing, and reading a refusal
+// as behind would mark EVERY worker behind at once. An operator's response to
+// behind is to rebase, so that failure would rebase branches that were never
+// behind, replacing each reviewed commit with one nobody reviewed — which is
+// the incident this whole feature exists to prevent.
+//
+// The unknown-branch case above does NOT cover this: it is refused one line
+// earlier, by the rev-parse, and never reaches the exit code at all. So this
+// case needs a git that gets that far and then fails.
+func TestBehindFailsRatherThanAnsweringWhenGitCannotTellUs(t *testing.T) {
+	src := repo(t)
+	m := &Manager{Root: t.TempDir()}
+	ctx := context.Background()
+	if _, _, err := m.Worker(ctx, src, 7); err != nil {
+		t.Fatalf("worker: %v", err)
+	}
+	// Everything but the question itself still works, so the call reaches
+	// the exit code rather than failing on the way to it.
+	m.Git = gitFailingAt(t, "merge-base")
+
+	behind, err := m.Behind(ctx, src, Branch(7))
+	if err == nil {
+		t.Fatalf("a git that could not answer was read as an answer: behind=%t", behind)
+	}
+	if behind {
+		t.Fatalf("a failure was reported as behind, which is what sends the operator to rebase")
+	}
+	if !strings.Contains(err.Error(), Branch(7)) {
+		t.Fatalf("the failure does not name the branch it is about: %v", err)
+	}
+}
+
+// gitFailingAt is git, except that the named subcommand exits 2. Exit 2 is
+// deliberately not 1: 1 is the answer this package reads, and a stub that
+// used it would pass whatever the code did with the other exits.
+func gitFailingAt(t *testing.T, verb string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "git")
+	script := "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = \"" + verb + "\" ]; then exit 2; fi\ndone\nexec git \"$@\"\n"
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatalf("write stub git: %v", err)
+	}
+	return path
+}

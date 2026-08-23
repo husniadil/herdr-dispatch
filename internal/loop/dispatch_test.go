@@ -1,9 +1,13 @@
 package loop
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -489,4 +493,46 @@ func gitIn(t *testing.T, dir string, args ...string) {
 	if err != nil {
 		t.Fatalf("git %s in %s: %v: %s", strings.Join(args, " "), dir, err, out)
 	}
+}
+
+// The other half of the same property, where the operator actually reads it:
+// a git that cannot answer leaves the row UNMARKED and says why in the log.
+// Marking it instead would send the operator to rebase a branch that was
+// never behind, which replaces a reviewed commit with one nobody reviewed.
+func TestAGitThatCannotAnswerLeavesTheRowUnmarkedAndSaysWhy(t *testing.T) {
+	l, f, _ := newVerifyLoop(t, false)
+	var logged bytes.Buffer
+	l.Log = log.New(&logged, "", 0)
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	f.Write(t, "panes.json", paneList("wM:p9", "working"))
+	// Broken only at the question, so the call gets as far as asking it.
+	l.Worktrees.(*worktree.Manager).Git = gitFailingAt(t, "merge-base")
+
+	st, err := l.Status(context.Background())
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if len(st.Workers) != 1 {
+		t.Fatalf("workers: %+v", st.Workers)
+	}
+	if st.Workers[0].Behind {
+		t.Fatalf("a git that could not answer marked the branch behind")
+	}
+	if !strings.Contains(logged.String(), worktree.Branch(7)) {
+		t.Fatalf("the reason never reached the operator's log: %q", logged.String())
+	}
+}
+
+// gitFailingAt is git, except that the named subcommand exits 2 — not 1,
+// which is an answer this code reads rather than a failure.
+func gitFailingAt(t *testing.T, verb string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "git")
+	script := "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = \"" + verb + "\" ]; then exit 2; fi\ndone\nexec git \"$@\"\n"
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatalf("write stub git: %v", err)
+	}
+	return path
 }

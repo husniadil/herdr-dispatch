@@ -26,8 +26,10 @@ prints the branch as `hdis/task-7 (behind)` and the JSON status gained a
 `behind` boolean on every worker row; a verifier, which works detached and has
 no branch, is always `false`. Behind is measured against the project's current
 HEAD with `git merge-base --is-ancestor`, and only when `status` is called,
-never on the tick. A git that cannot answer logs the reason and leaves the row
-unmarked. Nothing here rebases, merges or serialises dispatch: the recovery is
+never on the tick. A git that cannot answer is an error rather than the answer
+"behind": the row stays unmarked and the reason goes to the log, because
+marking every worker behind would send the operator to rebase branches that
+were never behind. Nothing here rebases, merges or serialises dispatch: the recovery is
 still the operator's.
 
 A worker now comes up in a TAB of its own rather than as a split of the

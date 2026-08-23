@@ -728,12 +728,26 @@ other way:
   process spawn. A git that cannot answer leaves the fact unsaid and logs why,
   because a report that guesses is a report that is wrong.
 
+**A git that cannot answer is not the answer "behind".** Only git's exit 1
+means "not an ancestor"; every other exit is git refusing, and reading a
+refusal as behind would mark every worker behind at once. The operator's
+response to behind is to rebase, so that failure would rebase branches that
+were never behind, replacing each reviewed commit with one nobody reviewed —
+the very incident this exists to prevent. So a failure is an error, the row
+stays unmarked, and the reason goes to the log.
+
 `TestStatusSaysABranchIsBehindOnlyOnceTheProjectHeadHasMovedPastIt`,
 `TestTheJSONStatusCarriesBehindAsAField`,
-`TestBehindIsTrueOnlyOnceTheProjectHeadHasMovedPastTheBranch` and
-`TestBehindRefusesABranchTheRepositoryDoesNotHave` pin it, in both
-directions: a check that always reports and a check that never reports each
-fail the first of them.
+`TestBehindIsTrueOnlyOnceTheProjectHeadHasMovedPastTheBranch`,
+`TestBehindRefusesABranchTheRepositoryDoesNotHave`,
+`TestBehindFailsRatherThanAnsweringWhenGitCannotTellUs` and
+`TestAGitThatCannotAnswerLeavesTheRowUnmarkedAndSaysWhy` pin it, in every
+direction: a check that always reports and a check that never reports each
+fail the first of them, and reading any git failure as behind fails the last
+two. The failure cases use a stub git that exits 2 at `merge-base` and is
+real git everywhere else, so the call reaches the exit code rather than
+failing on the way to it — the unknown-branch case is refused one line
+earlier, by the `rev-parse`, and covers a different thing.
 
 **hdis still does not rebase.** Saying "behind" is the whole of it. Having a
 worker rebase before it submits is the shape that removes the problem rather
