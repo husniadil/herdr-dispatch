@@ -61,9 +61,9 @@ type Loop struct {
 	// spawned without one: an agent with nowhere of its own to work would
 	// have to work in the tree the operator sits in.
 	//
-	// It is an interface so a test can see the ARGUMENTS a spawn passes,
-	// above all which commit a verifier is sent to read. That choice is made
-	// here, and a pin one layer down only proves the manager honours
+	// It is an interface so a test can see the ARGUMENTS a spawn passes —
+	// which project and which task number a checkout is cut for. That choice
+	// is made here, and a pin one layer down only proves the manager honours
 	// whatever it is handed.
 	Worktrees Trees
 	// Store is where the bindings outlive the process. A nil Store keeps
@@ -141,7 +141,7 @@ func (l *Loop) Tick(ctx context.Context) error {
 //
 // The persisted bindings are a hint and never the frame. What they carry
 // that Herdr cannot — how often a goal was delivered and when, whether
-// review was announced, which checkout a verifier was given — is kept on the
+// review was announced, which checkout a worker was given — is kept on the
 // pane it names; a binding whose pane is gone is dropped, because the pane
 // was the thing it was about.
 //
@@ -550,10 +550,11 @@ func lane(name string) (string, int, bool) {
 // with it. It is only ever reached with a pane this daemon opened and whose
 // binding still names it at the moment of the drop — the same standing a
 // live retire has. The task's lease is not touched: that is the board's.
+//
+// Spawn is not checked for nil, the same as every other use of it here: a
+// Loop is only ever built with a pipeline, and a nil one is a programming
+// error to fail loud on rather than a case to survive quietly.
 func (l *Loop) retirePane(ctx context.Context, pane string) {
-	if l.Spawn == nil {
-		return
-	}
 	if err := l.Spawn.Retire(ctx, pane); err != nil {
 		l.logf("pane %s could not be retired: %v", pane, err)
 	}
@@ -569,9 +570,16 @@ func (l *Loop) principal() string {
 }
 
 // release hands back every task the board says this dispatcher is holding
-// that no adopted pane is working. It is the reservation window seen from
-// the board: a daemon that went down between reserving a task and bringing a
-// pane up leaves a hold nothing alive owns.
+// that no adopted pane is working.
+//
+// Nothing in this binary creates such a hold: there is no claim verb — the
+// board adapter's whole method set is pinned by
+// TestTheBoardAdapterCarriesNoReviewVerb — and a reserved task stays on the
+// board's ready list until its own worker claims it. So this is a backstop
+// against a hold arriving some other way (an operator claiming as this
+// principal, a future verb), and the ordinary answer is an empty list. The
+// dispatcher's own reservation window is closed by the pending set in the
+// store, not here.
 //
 // It runs after the panes are reconciled, and that order is the whole of its
 // safety: a task a live pane is working is already bound by then, so the

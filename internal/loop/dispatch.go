@@ -30,8 +30,8 @@ type Worker struct {
 	Title   string `json:"title"`
 	Project string `json:"project"`
 	Pane    string `json:"pane"`
-	// Kind is which lane the pane was brought up for: a worker does the
-	// task, a verifier checks what a worker submitted.
+	// Kind is which lane the pane was brought up for. There is one, worker,
+	// and this says so rather than leaving a caller to infer it.
 	Kind string `json:"kind"`
 	// AgentStatus is herdr's own word for the worker, or empty when herdr
 	// no longer lists the pane at all.
@@ -39,7 +39,7 @@ type Worker struct {
 	// PaneAlive is whether herdr still lists the pane. A binding whose pane
 	// is gone is dropped by the next tick.
 	// Branch is where a worker's commits are, so an operator reading status
-	// can find the work; a verifier works detached and has none.
+	// can find the work.
 	Branch string `json:"branch,omitempty"`
 	// Behind is whether the project's HEAD has moved past that branch since
 	// the worker was spawned, which is what makes `git merge --ff-only`

@@ -144,8 +144,8 @@ func (m *Manager) Remove(ctx context.Context, dir string) error {
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		return nil
 	}
-	// --force because the verifier is meant to have dirtied it: making one
-	// mutation and showing it caught is the job.
+	// --force because a worker is meant to have dirtied it: it edits and
+	// stages, and its commits are on the branch, which outlives the tree.
 	_, err := m.run(ctx, dir, "worktree", "remove", "--force", dir)
 	if err == nil {
 		return nil

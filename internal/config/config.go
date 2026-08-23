@@ -373,9 +373,9 @@ const SearchCeiling = 4096
 // to 4.
 //
 // The cap is a FLOOR GUARD and nothing more. Grouping is by TASK: a tab holds
-// one task, so this bounds the panes ONE task may have — a worker and its
-// verifier, two today — and it is not what keeps two tasks apart. That is the
-// tab label, compared in the spawn pipeline.
+// one task, so this bounds the panes ONE task may have — one today, since a
+// task gets a worker and nothing else — and it is not what keeps two tasks
+// apart. That is the tab label, compared in the spawn pipeline.
 var DefaultMaxPanesPerTab = MaxPanesClearing(MeasuredReadableColumns, MeasuredReadableRows)
 
 // DefaultMaxWorkers is how many workers may be live at once when neither the

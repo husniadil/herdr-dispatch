@@ -42,10 +42,14 @@ negotiable in either direction:
 - **Never reimplement lease release.** Pane-gone sweeps, the lease timer, and
   the startup reconciliation are htask's own. A second writer racing them is
   the bug, not a safety net.
-- Herdr is driven the same way: shell out to `herdr <verb>` (`pane split`,
-  `agent start`, `agent prompt`, `agent wait`, `notification show`). No
-  socket, no PTY parsing, no detection logic of our own — Herdr's
-  `agent_status` is the only truth about a worker this repo accepts.
+- Herdr is driven the same way: shell out to `herdr <verb>` (`pane list`,
+  `pane split`, `pane read`, `pane run`, `pane close`, `tab create`,
+  `tab list`, `tab close`, `agent start`, `agent prompt`, `agent list`,
+  `agent get`, `notification show`). No socket and no PTY parsing.
+  `agent_status` is Herdr's word about a worker and the only one this repo
+  accepts for whether it is working; the one thing read off a pane's own
+  screen is whether a `/goal` registered, because Herdr has no status for
+  that.
 
 ## Principles
 
@@ -72,7 +76,9 @@ negotiable in either direction:
   fails before the code that makes it pass.
 - No `panic` in production code paths; errors carry what the operator needs
   to act.
-- Dependency budget: standard library only until a dependency earns its way
-  in, with the reason recorded in the README when one does.
+- Dependency budget: one library, the official MCP go-sdk
+  (`github.com/modelcontextprotocol/go-sdk`), which the MCP door is built on.
+  Everything else is the standard library, and the next dependency earns its
+  way in with the reason recorded in the README.
 - Lowercase conventional commits, no emojis, no co-author lines.
 - Everything committed is English. Tests, docs, comments, commit messages.

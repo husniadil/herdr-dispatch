@@ -46,11 +46,17 @@ const Kind = "claude"
 const GoalPrefix = "/goal "
 
 // DispatcherPaneVar is the environment variable every pane this pipeline
-// splits carries: the pane of the daemon that spawned it, so a worker has an
+// opens carries: the DESK the task's report is owed at, so a worker has an
 // address to answer at without one being typed into its condition.
 //
+// The name predates the rule and is kept because agents read it: it is not
+// the daemon's own pane except as the last of desk()'s three rungs. What
+// place() writes into it is the pane the board says the task was filed from,
+// else a live pane already sitting in the task's project, else this daemon's
+// pane.
+//
 // It is an address and nothing more. Publishing it lets a worker send to the
-// dispatcher; it never says who the worker is. The sender on anything the
+// desk; it never says who the worker is. The sender on anything the
 // worker then writes is stamped by the mail daemon from HERDR_PANE_ID, which
 // is Herdr's own word about the pane, and never from this variable.
 const DispatcherPaneVar = "HDIS_DISPATCHER_PANE"
@@ -584,9 +590,7 @@ func (p *Pipeline) Run(ctx context.Context, req Request) (string, error) {
 //
 // A tab also belongs to ONE task. Its label already carries the task number,
 // so placement is a comparison rather than new state: a worker goes in the
-// tab opened for ITS OWN task, or a new tab is opened for it. A verifier
-// belongs with the worker it verifies, which is the same task, so the same
-// comparison puts it in the same tab with no special case.
+// tab opened for ITS OWN task, or a new tab is opened for it.
 //
 // Inside that tab the splits follow config.GridSplit, so four panes come out
 // as four equal rectangles rather than a column beside a stack.

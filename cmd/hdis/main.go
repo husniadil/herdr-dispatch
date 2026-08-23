@@ -205,8 +205,9 @@ func serve(argv []string) error {
 			OwnTrees: config.WorktreeDir(),
 			Log:      log.Default(),
 		},
-		// A verifier gets a checkout of its own, never the project directory
-		// its worker holds and the operator reviews in.
+		// Every worker gets a checkout of its own, never the project
+		// directory the operator sits in and every other worker would
+		// otherwise hold.
 		Worktrees: &worktree.Manager{Root: config.WorktreeDir()},
 		Store:     &store.Bindings{Path: config.BindingsPath()},
 		BasePane:  pane,

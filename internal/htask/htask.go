@@ -77,8 +77,8 @@ type Task struct {
 
 // Pane returns the pane the claiming principal runs in, or empty while the
 // task is unclaimed or held by someone who is not an agent. htask names an
-// agent claimant `agent:<workspace>:<pane>`; the pane id is what is left when
-// the prefix comes off.
+// agent claimant `agent:<pane id>`; the pane id is what is left when the
+// prefix comes off.
 func (t Task) Pane() string {
 	pane, ok := strings.CutPrefix(t.ClaimedBy, "agent:")
 	if !ok {

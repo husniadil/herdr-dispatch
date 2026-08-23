@@ -5,9 +5,10 @@ description: The dispatcher that puts a worker agent on a ready task from the ht
 
 # Dispatch
 
-`hdis` is the dispatcher. It watches the htask board for ready work, splits a
-Herdr pane for each ready task, delivers the task's goal, tracks the worker,
-and hands off at review — where the board's own review gate takes over.
+`hdis` is the dispatcher. It watches the htask board for ready work, opens a
+Herdr tab for each ready task and brings a worker up in it, delivers the
+task's goal, tracks the worker, and hands off at review — where the board's own
+review gate takes over.
 
 The board stays the ledger. This binary is execution policy and nothing else.
 
@@ -33,8 +34,10 @@ wait for the goal to show on screen — and no caller holds a call that long.
 
 **A returning `dispatch` is a reservation, not a worker.** Read the outcome
 with `status`, which is one row per binding: the task, the pane its worker
-lives in, when the goal was delivered, how often, whether review was
-announced, and the worker's `agent_status` as Herdr reports it.
+lives in, the tab that pane is in, the worker's `agent_status` as Herdr reports
+it, the branch its commits are on — marked `(behind)` when the project's HEAD
+has moved past it, which is what makes a fast-forward merge refuse — when the
+goal was delivered, how often, and whether review was announced.
 
 It refuses with a name rather than a sentence to parse. The `code` is one of
 the shared contract's nine, and the sub-reason is the first word of the
@@ -74,15 +77,16 @@ about the task.
 
 ## HDIS_DISPATCHER_PANE, if you are the worker
 
-Every pane the dispatcher splits is launched with
+Every pane the dispatcher opens is launched with
 
 ```
 HDIS_DISPATCHER_PANE=<a Herdr pane id>
 ```
 
 in its environment. If you find it there, it is **the address you owe your
-report at** — the pane the task was created from when the board's row names
-one, and the daemon's own pane when it does not. Answer there rather than at a
+report at**, resolved in three rungs: the pane the board's row says the task
+was created from; failing that, a live pane already sitting in the task's own
+project; failing that, the daemon's own pane. Answer there rather than at a
 pane id somebody wrote into your prompt: the dispatcher moves panes between
 restarts, and the variable is read fresh.
 

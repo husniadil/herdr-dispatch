@@ -254,14 +254,14 @@ source-walking test fails on any of the three.
 
 `status` gains a `branch` field on each worker, and its prose line names the
 branch beside the pane, so the work can be found without reading the bindings
-file. A verifier works detached and has none, so the field is omitted for one
-and the line reads `detached`.
+file. A record written before the field existed carries none, and the line
+reads `detached` for it.
 
 The bindings file gains a `branch` on each record. A binding written by an
 older hdis simply has none, and both files stay readable to both binaries. The
-restart reap now covers worker checkouts as well as verifier ones: it is still
-bounded to `<state_dir>/worktrees` and to entries carrying the `hdis-` prefix
-this binary names its own with.
+restart reap covers every checkout this daemon made: it is bounded to
+`<state_dir>/worktrees` and to entries carrying the `hdis-` prefix this binary
+names its own with.
 
 Declares the shared plugin contract at 0.6.0, up from the 0.4.0 of the first
 release. §5.1/§10.1 forbid resolving a store from the Herdr-injected plugin
@@ -274,28 +274,28 @@ any of the three.
 Callers read the new value in `doctor`'s `contract` field. Nothing else to do.
 
 There is a verification lane, and it is off unless the config document turns it
-on and names a profile. With it on, a task in review that this daemon's own
-worker submitted earns a VERIFIER: a fresh pane on the same spawn path, opened
-in a detached git worktree of the project at the commit under review, never the
-shared tree. It reads the board's report through an MCP door, runs the
-project's own uncached gate, checks two claims against the code and one
-compiling mutation, and sends its findings by mail. It never approves and never
-rejects, and neither does this binary — the board adapter carries three read
-verbs, and no source file passes a review verb as an argument. One submission
-earns one verifier; a task leaving review rearms the lane, so a re-submission
-after a rejection earns another. When the worktree cannot be made, no verifier
-is spawned at all.
+on. With it on, a task in review that this daemon's own worker submitted earns
+a SELF-REVIEW SHOT: one `/goal` armed in the worker's own pane, asking it to
+write a compiling mutation against every guard its report claims, run the tests
+the report names, confirm they fail, revert each one, and say which mutations
+bit. It never approves and never rejects, and neither does this binary — the
+board adapter carries no review verb, and no source file passes one as an
+argument. One submission earns one shot; a task leaving review rearms the lane,
+so a re-submission after a rejection earns another.
 
-Callers turn it on with a `verify` object in the config document, `enabled`
-plus a `profile` naming one of the defined profiles. A profile that is not
-defined is refused at parse rather than at spawn. Left out, the lane is off and
-nothing changes.
+Callers turn it on with a `verify` object in the config document carrying
+`enabled` and nothing else. The lane no longer launches a pane of its own, so
+there is no profile to name: a document that still carries `verify.profile` is
+refused at parse, by name, rather than starting a daemon whose operator
+believes a separate verifier is running. Left out, the lane is off and nothing
+changes.
 
-`doctor`'s JSON gains a `verify` block: `enabled` always, and `profile` when
-the lane is on. Its prose output names the lane too, before the board line, so
-an unreachable board does not hide the dispatcher's own configuration.
-`status`'s JSON gains `kind` on each worker, `worker` or `verifier`, because a
-task in review holds two panes.
+`doctor`'s JSON gains a `verify` block carrying `enabled`, and nothing beside
+it: the shot lands in a pane that is already up, so there is nothing else to
+name. Its prose output names the lane too, before the board line, so an
+unreachable board does not hide the dispatcher's own configuration. `status`'s
+JSON gains `kind` on each worker, which is always `worker` — there is one
+lane, and the field says so rather than leaving a caller to infer it.
 
 Callers that parse `doctor` or `status` see two added fields and no removed
 ones. A parser that ignores unknown fields does nothing.
@@ -306,9 +306,9 @@ every change, whole and atomically. At the next start the daemon asks one
 question of every live pane it opened — what is this, and what still needs
 doing — answering it from Herdr's agent list and the board rows rather than
 from the bindings, which stay as a hint. A pane still working its task is
-adopted, a hold no live pane is working is released, a task that reached a
+adopted, a reservation no live pane is working is dropped, a task that reached a
 terminal state or left review takes its pane with it, and every
-`hdis-verify-` checkout under this daemon's own worktree root that no binding
+`hdis-` checkout under this daemon's own worktree root that no binding
 names is removed. Nothing outside that root, and nothing in it this daemon did
 not create, is touched. A prompted-but-unclaimed worker is no longer forgotten,
 and a restart no longer dispatches a task into a second pane while the first is

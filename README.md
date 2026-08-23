@@ -34,15 +34,26 @@ daemon starts anyway — refusing to dispatch because a file will not open is
 worse than dispatching where the lines can still be read. `hdis doctor` names
 the file that was actually opened, and says `stdout only` when none was.
 
-`hdis daemon -h` lists the knobs — tick interval, how many workers may be
-live at once, how long a delivered goal may go unclaimed, and how many times
-one task's goal is re-delivered before the worker is given up on.
+`hdis daemon -h` lists the knobs:
+
+| Flag | What it sets |
+| --- | --- |
+| `-config <path>` | The config document. Defaults to `<config_dir>/hdis.json`. |
+| `-log <path>` | The file the log is appended to. |
+| `-interval <duration>` | How often to tick. |
+| `-once` | Run one tick and exit, instead of listening. Nothing serves either door in this mode. |
+| `-pane <id>` | The pane worker panes are split off. |
+| `-max-workers <n>` | How many workers may be live at once; `0` means the config's `max_workers`. |
+| `-claim-timeout <duration>` | How long a delivered goal may go unclaimed before a nudge. |
+| `-max-prompts <n>` | How many times one task's goal may be delivered before giving up. |
+| `-start-timeout <duration>` | How long herdr waits for a worker to become interactive. |
+| `-confirm-ceiling <duration>` | How long to wait for a delivered goal to show on the worker's screen. |
 
 Worker panes are splits of a base pane, so the daemon needs one: it takes
 `HERDR_PANE_ID` when it was started inside a Herdr pane, `-pane` when it was
 given one, and the config's `"pane"` key otherwise. Without any of the three
 it still comes up and still answers both doors, but it does not tick and
-every dispatch refuses with `NO_BASE_PANE`. Every spawn it could reach for
+every dispatch refuses with `UNSUPPORTED: NO_BASE_PANE`. Every spawn it could reach for
 would fail on the same missing pane, once per interval forever, and a log of
 one error repeated is a log nobody reads.
 
@@ -226,10 +237,12 @@ global default, and per-project overrides:
 | `effort`   | Defaults to `low`.                                                                                                           |
 | `args`     | Extra argv passed through to the worker.                                                                                     |
 
-Three keys sit at the top level beside `profiles`: `"proxy"` names the codex
-provider's launcher, `"pane"` names the base pane a daemon uses when it was
-not started inside a Herdr pane and was given no `-pane`, and `"verify"` is
-the verification lane.
+Five keys sit at the top level beside `default`, `profiles` and `projects`:
+`"proxy"` names the codex provider's launcher, `"pane"` names the base pane a
+daemon uses when it was not started inside a Herdr pane and was given no
+`-pane`, `"max_workers"` is how many workers may be live at once,
+`"layout"` carries `min_pane_columns` and `max_panes_per_tab`, and `"verify"`
+is the verification lane.
 
 The lane is off unless the document turns it on. On, every task a worker of
 this daemon's submits earns one self-review shot in that worker's OWN pane —
@@ -682,11 +695,20 @@ announced. Board facts — status, claim, lease, evidence — are read from the
 board every tick, and pane facts from Herdr; neither is written here.
 
 An on-demand dispatch's reservation is persisted beside them, and it carries
-the daemon that made it. The daemon's board principal is
-`plugin:hdis@<its own pane>`, so a hold the board is keeping names the daemon
-that took it: a restart reads its own pane in that principal and knows the
-hold is its own to resolve, and a hold carrying another pane belongs to a peer
-that may well still be running.
+the daemon that made it. **The reservation is local and nothing else can see
+it.** This binary has no `claim` verb and never writes a hold to the board, so
+a reserved task stays on the board's own ready list until its worker claims
+it; the reservation lives only in `<state_dir>/hdis-bindings.json`, and all it
+does is keep the watching loop and the `dispatch` verb from both taking the
+same task inside one daemon. The owner it carries is that daemon's board
+principal, `plugin:hdis@<its own pane>`, which is what lets a restart tell its
+own stale record from one a peer daemon on this machine wrote.
+
+The reservation also carries how often a spawn under it has failed. A spawn
+that cannot succeed — a profile the config does not name, a checkout git
+refuses to make — is given up on after three attempts, with a line in the log
+saying so, and the task is left on the board rather than holding a worker slot
+nothing can ever use.
 
 **How it is written.** A JSON document, whole, to a temp file in the same
 directory and then renamed over the old one. A reader sees the previous
@@ -779,11 +801,13 @@ The answers, all of them consequences of the one question:
   split this exists to prevent. Nothing is spawned while Herdr is down either,
   so the wait costs nothing.
 
-**What a restart hands back.** Once every pane is reconciled, a hold the board
-is still keeping for this daemon that no adopted pane is working is stale by
-construction: it is handed back with `task release` and a note saying the
-dispatcher went down before a worker came up, so the task returns to the ready
-list instead of sitting reserved forever. And a checkout under
+**What a restart hands back.** Once every pane is reconciled, a reservation in
+`<state_dir>/hdis-bindings.json` that no adopted pane is working is stale by
+construction — a daemon went down between reserving a task and bringing a pane
+up for it — and it is dropped, so the task is dispatchable again instead of
+sitting reserved forever. Nothing has to be said to the board about it,
+because nothing was ever said to the board: the task never left the ready
+list. And a checkout under
 `<state_dir>/worktrees` that no binding names is removed: the binding is the
 only record of where a checkout
 is, so one lost while the daemon was down leaves the directory with nothing to
@@ -793,10 +817,8 @@ logged with the reason.
 
 **What a restart will never touch.** A pane this daemon did not open — one
 whose agent name is not its own and which none of its bindings names — is
-never adopted and never closed. A hold carrying another daemon's principal is
-never released: `task list --mine` is scoped to the principal, so a peer's row
-is not even in the answer, and a reservation record naming a peer is left for
-it. Anything outside `<state_dir>/worktrees` is never removed, and inside it
+never adopted and never closed. A reservation record naming another daemon's
+principal is left for that daemon rather than acted on. Anything outside `<state_dir>/worktrees` is never removed, and inside it
 only entries carrying the `hdis-` prefix hdis names its own with,
 `hdis-work-` for a worker's checkout.
 Lease release stays htask's own — a single stale hold this daemon itself is
