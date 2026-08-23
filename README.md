@@ -382,13 +382,13 @@ something a person can pick out of a row of tabs, which is the one thing a tab
 has that a pane does not, and `hdis status` prints it beside the pane. It is
 also what tells this daemon the tab is its own.
 
-## The readable width
+## The readable width and height
 
 `layout.min_pane_columns` is the narrowest pane whose detection text this
-repo's own matches still read correctly, and `layout.max_panes_per_tab` is
-what that width works out to as a count. Both were MEASURED rather than
-guessed, and the measurement is recorded beside them in
-`internal/config/config.go`.
+repo's own matches still read correctly, `config.MeasuredReadableRows` is the
+shortest, and `layout.max_panes_per_tab` is what BOTH work out to as a count.
+All three were MEASURED rather than guessed, and the measurements are recorded
+beside them in `internal/config/config.go`.
 
 Measured on 2026-08-23 against herdr 0.8.2 and claude 2.1.239, in a throwaway
 workspace that was torn down afterwards: nine panes of measured width — 21,
@@ -414,13 +414,60 @@ generations split sideways, so a pane's width halves once every two
 generations and the odd ones spend themselves on height: the widths are 226
 for one pane, 113 for two through four, and 56 for five through sixteen. The
 seventeenth starts the generation that halves 56 to 28, which is under the
-floor, so the cap is **16**. It was 5 while the split was always taken off the
-last pane, because that rule narrowed a pane every second split forever; a
-real grid narrows far more slowly. `min_pane_columns` may be raised and never
+floor. Taken alone that allows **16** panes, and 16 is what the cap was until
+the height was measured too. `min_pane_columns` may be raised and never
 lowered below what was measured.
 
+### The readable height
+
+The height is the half the first derivation left out, and it is the half that
+binds. `herdr pane read --source detection` returns the BOTTOM of a pane's
+buffer, so a pane too short does not wrap a marker — it scrolls the marker off
+the top and hands back a snapshot that no longer holds it.
+
+Measured on 2026-08-23 against herdr 0.8.2 and claude 2.1.239, in a throwaway
+workspace that was torn down afterwards: one tab per height, a git repo of its
+own per tab so the trust dialog is raised rather than remembered, every pane
+pinned to exactly **40 columns** (where the dialog wraps hardest of any width
+a worker is allowed) and to a measured height, a real Claude brought up in
+each with the real `PointerGoal` condition, and each pane read back through
+`herdr pane read --source detection`. Heights probed at 40 columns: 67, 24,
+22, 20, 18, 17, 16, 14 and 12 rows.
+
+- At **17 rows and above** the dialog's identifying sentence read whole, from
+  `Quick safety check: Is this a project you created or one you trust?`.
+- At **16 rows** that sentence was cut. The snapshot opened mid-sentence at
+  `you created or one you trust? (Like`, so a match on its head fails while
+  the worker is perfectly fine.
+- Below that it degrades further: at 14 and 12 rows nothing above `Security
+  guide` survives, and at 8 rows even `2. No, exit` is gone.
+- The goal markers are cheaper. `/goal active` sits in the status line at the
+  very bottom and read at every height down to **8 rows**; the `goal set:`
+  echo scrolls off below about 30. Either marker satisfies the match, so the
+  goal read is not what sets this floor.
+
+So **17 rows**, the tallest requirement of any read in use.
+
+A whole tab measured 69 rows — a different window from the 226-column one, and
+each constant is honest about the window it was taken in. A down split also
+costs chrome before it halves: a 69-row pane split downwards measured 33 and
+32, and splitting the 33 again gave 16 and 15, so `config.SplitRowCost` takes
+the larger of the two because this number guards a floor. The heights are then
+69 rows for one and two panes, 32 for three through eight, and **14** for nine
+through sixteen. Fourteen is under the 17-row floor, so the generation that
+fills 9..16 is the one that breaks — four splits before the width does.
+
+The cap is the tighter of the two floors, so **8**. The 62-row window the
+finding describes lands on the same answer: 29 rows at eight panes and 12 at
+sixteen.
+
 `layout.max_panes_per_tab` is unaffected by an operator setting of `2`: at two
-panes the grid rule and the old rule agree.
+panes the grid rule and the old rule agree, and neither floor is near.
+
+`TestTheMaxPanesPerTabDefaultIsTheMostBothMeasuredFloorsAllow` derives the cap
+from both floors and pins what each one allows alone, so a derivation that
+drops either floor stops matching. `TestShortestRowsFollowsTheGridRuleAndTheMeasuredSplitCost`
+pins the row ladder itself.
 
 One thing the measurement is NOT: it is not the reason a narrow pane loses a
 typed line. At 25, 27 and 29 columns the condition arrived whole and only the

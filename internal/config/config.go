@@ -164,26 +164,139 @@ func NarrowestColumns(panes int) int {
 	return width
 }
 
+// MeasuredReadableRows is the shortest pane whose detection text this repo's
+// own matches still read whole, measured rather than guessed, and it is the
+// half of the pane cap that nothing measured until now.
+//
+// It matters for the same reason MeasuredReadableColumns does, one axis over.
+// `herdr pane read --source detection` returns the BOTTOM of the pane's
+// buffer, so a pane too short does not wrap a marker, it scrolls the marker
+// off the top and hands back a snapshot that no longer holds it. The
+// dispatcher then reads a worker sitting on a dialog and sees no dialog.
+//
+// Measured on 2026-08-23 against herdr 0.8.2 and claude 2.1.239, in a
+// throwaway workspace: one tab per height, a git repo of its own per tab so
+// the trust dialog is raised rather than remembered, every pane pinned to
+// exactly 40 columns (MeasuredReadableColumns, where the dialog wraps hardest
+// of any width a worker is allowed) and to a measured height, a real Claude
+// brought up in each with the real PointerGoal condition, and the pane read
+// back through `herdr pane read --source detection`. Heights probed at 40
+// columns: 67, 24, 22, 20, 18, 17, 16, 14, 12. What it showed:
+//
+//   - At 17 rows and above the dialog's identifying sentence read whole,
+//     starting at "Quick safety check: Is this a project you created or one
+//     you trust?".
+//   - At 16 rows that sentence was cut: the snapshot opened mid-sentence at
+//     "you created or one you trust? (Like", so a match on its head fails
+//     while the worker is perfectly fine.
+//   - Below 16 it degrades further; at 14 and 12 rows nothing above "Security
+//     guide" survives, and at 8 rows even "2. No, exit" is gone.
+//   - GoalMarkers are cheaper: "/goal active" sits in the status line at the
+//     very bottom and read at every height down to 8 rows. The "goal set:"
+//     echo scrolls off below about 30 rows, but either marker satisfies the
+//     match, so the goal read is not what sets this floor.
+//
+// So 17, the tallest requirement of any read in use, taken against the marker
+// set as it stands today: TrustDialogMarkers and GoalMarkers in
+// internal/spawn. Task 49 is open against the trust phrase — claude 2.1.239
+// rewrote that dialog and the phrase currently in TrustDialogMarkers appears
+// nowhere in it at any size, which this probe confirmed at every height. This
+// number is what the read WOULD need once that phrase is fixed to something
+// the dialog actually renders, and it is measured against the dialog's own
+// top line, the earliest thing in the block a fixed marker could match. A fix
+// that matches lower in the block (the "1. Yes, I trust this folder" option
+// read down to 8 rows) would lower this floor, and the derivation below moves
+// with it.
+const MeasuredReadableRows = 17
+
+// MeasuredWindowRows is how tall one whole tab was in the same session: the
+// root pane of a fresh tab reported 69 rows.
+//
+// It is NOT the same window MeasuredWindowColumns came from. That 226 was
+// measured in another session's window; this one is 50 columns wide and 69
+// rows tall, and the two constants are each honest about the window they were
+// taken in. The cap below is unchanged by the difference: the 62-row window
+// the finding describes gives 29 rows at eight panes and 12 at sixteen, which
+// lands on the same answer as 69 does.
+const MeasuredWindowRows = 69
+
+// SplitRowCost is how many rows a down split spends on chrome before it
+// halves what is left, measured rather than assumed.
+//
+// Columns lose nothing to a split — the panes across a tab sum to the whole
+// window — and NarrowestColumns is right to halve cleanly. Rows do not. A
+// fresh 69-row pane split downwards was measured at 33 and 32, and splitting
+// the 33 again gave 16 and 15, so a split costs between 2 and 5 rows. The
+// larger of the two is taken because this number guards a floor: it makes the
+// derived pane count the smaller, never the larger, and at four panes deep it
+// is one row more pessimistic than what was measured.
+const SplitRowCost = 4
+
+// ShortestRows is how tall the shortest pane in a tab of the given size is,
+// under GridSplit and starting from MeasuredWindowRows.
+//
+// It is the mirror of NarrowestColumns: only the ODD generations split down,
+// so a pane's height halves once per two generations and the even ones spend
+// themselves on width instead.
+func ShortestRows(panes int) int {
+	rows := MeasuredWindowRows
+	for n := 1; n < panes; n++ {
+		if _, direction := GridSplit(n); direction == "down" {
+			// The pane being halved is the tallest one left, so the
+			// shortest height only moves on the first split of a
+			// generation.
+			if n&(n-1) == 0 {
+				rows = (rows - SplitRowCost) / 2
+			}
+		}
+	}
+	return rows
+}
+
+// MaxPanesClearing is the largest pane count whose smallest pane still clears
+// both floors under GridSplit: at least minColumns wide and minRows tall.
+//
+// Both floors are arguments rather than constants read from the package so
+// that either one can be neutralised in a test and the answer the other one
+// alone gives can be pinned. A derivation that consults only one of them
+// stops matching those pins.
+func MaxPanesClearing(minColumns, minRows int) int {
+	// Two down generations past sixteen panes is far below any floor a
+	// pane is readable at, so nothing above this ceiling can clear.
+	const ceiling = 64
+	best := 1
+	for n := 1; n <= ceiling; n++ {
+		if NarrowestColumns(n) >= minColumns && ShortestRows(n) >= minRows {
+			best = n
+		}
+	}
+	return best
+}
+
 // DefaultMaxPanesPerTab is how many panes may share one of this dispatcher's
-// tabs, and it follows from GridSplit and MeasuredReadableColumns rather than
+// tabs, and it follows from GridSplit and BOTH measured floors rather than
 // from taste.
 //
 // Under the grid rule the widths run 226 for one pane, 113 for two through
-// four, and 113/2 = 56 for five through sixteen — the generation that fills
-// 9..16 spends itself on height, so the width holds. The seventeenth starts
-// the generation that halves 56 to 28, which is under the 40-column floor a
-// worker's detection text still reads at. So sixteen.
+// four, and 56 for five through sixteen; the seventeenth starts the
+// generation that halves 56 to 28, under the 40-column floor. Taken alone
+// that is where the number 16 came from.
 //
-// This is a larger number than the 5 that stood before, and it is larger
-// because the rule changed: the old placement always split the LAST pane, so
-// a pane narrowed every second split forever and 56 was reached at five panes
-// and 28 at six. A real grid halves the width far more slowly.
+// The heights are what that reasoning left out, and they bind first. Only the
+// odd generations split down, but they cost chrome as well as halving: 69
+// rows for one and two panes, 32 for three through eight, and 14 for nine
+// through sixteen. Fourteen is under the 17-row floor a worker's detection
+// text still reads at, so the generation that fills 9..16 is the one that
+// breaks, four splits before the width does.
+//
+// So eight, the tighter of the two, and the derivation says which floor
+// decided it rather than restating a number.
 //
 // The cap is a FLOOR GUARD and nothing more. Grouping is by TASK: a tab holds
 // one task, so this bounds the panes ONE task may have — a worker and its
 // verifier, two today — and it is not what keeps two tasks apart. That is the
 // tab label, compared in the spawn pipeline.
-const DefaultMaxPanesPerTab = 16
+var DefaultMaxPanesPerTab = MaxPanesClearing(MeasuredReadableColumns, MeasuredReadableRows)
 
 // DefaultMaxWorkers is how many workers may be live at once when neither the
 // config nor the daemon flag names a number.
@@ -205,8 +318,10 @@ type Layout struct {
 	MinPaneColumns int `json:"min_pane_columns"`
 	// MaxPanesPerTab is how many panes may share one of this dispatcher's
 	// tabs before the next opens a tab of its own. Zero means
-	// DefaultMaxPanesPerTab, which is what MinPaneColumns and the measured
-	// window width work out to under config.GridSplit.
+	// DefaultMaxPanesPerTab, which is what MinPaneColumns,
+	// MeasuredReadableRows and the measured window work out to under
+	// config.GridSplit. Raising it past that default puts panes below a
+	// height or width the dispatcher was measured to still read them at.
 	//
 	// It bounds panes per TASK, because a tab holds one task: nothing here
 	// keeps two tasks apart, and raising it never puts a second task in a

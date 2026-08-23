@@ -271,16 +271,65 @@ func TestTheGridRulePutsFourPanesInATwoByTwo(t *testing.T) {
 	}
 }
 
-// The cap is derived from the grid rule and the measured floor rather than
-// chosen: the largest pane count whose narrowest pane still clears it.
-func TestTheMaxPanesPerTabDefaultIsTheWidestTheFloorAllows(t *testing.T) {
+// The cap is derived from the grid rule and BOTH measured floors rather than
+// chosen: the largest pane count whose smallest pane still clears the column
+// floor a marker needs to land on one line AND the row floor it needs to stay
+// inside the detection buffer.
+//
+// Both halves are load-bearing and this test says so twice over. The pinned
+// single-floor caps are what catch a derivation that drops one: with the row
+// clause gone MaxPanesClearing(1, MeasuredReadableRows) no longer stops at
+// the row-only cap, and with the column clause gone
+// MaxPanesClearing(MeasuredReadableColumns, 1) no longer stops at the
+// column-only cap. The combined assertion alone would not catch either,
+// because only the tighter of the two floors decides the answer.
+func TestTheMaxPanesPerTabDefaultIsTheMostBothMeasuredFloorsAllow(t *testing.T) {
+	columnOnly := MaxPanesClearing(MeasuredReadableColumns, 1)
+	if columnOnly != 16 {
+		t.Errorf("the column floor alone allows %d panes, want 16", columnOnly)
+	}
+	rowOnly := MaxPanesClearing(1, MeasuredReadableRows)
+	if rowOnly != 8 {
+		t.Errorf("the row floor alone allows %d panes, want 8", rowOnly)
+	}
+	want := columnOnly
+	if rowOnly < want {
+		want = rowOnly
+	}
+	if DefaultMaxPanesPerTab != want {
+		t.Errorf("the cap is %d, but the tighter of the two floors allows %d",
+			DefaultMaxPanesPerTab, want)
+	}
 	if got := NarrowestColumns(DefaultMaxPanesPerTab); got < MeasuredReadableColumns {
 		t.Errorf("%d panes leaves the narrowest at %d columns, under the %d floor",
 			DefaultMaxPanesPerTab, got, MeasuredReadableColumns)
 	}
-	if got := NarrowestColumns(DefaultMaxPanesPerTab + 1); got >= MeasuredReadableColumns {
-		t.Errorf("%d panes still clears the floor at %d columns, so the cap is set lower than the rule allows",
-			DefaultMaxPanesPerTab+1, got)
+	if got := ShortestRows(DefaultMaxPanesPerTab); got < MeasuredReadableRows {
+		t.Errorf("%d panes leaves the shortest at %d rows, under the %d floor",
+			DefaultMaxPanesPerTab, got, MeasuredReadableRows)
+	}
+	cols, rows := NarrowestColumns(DefaultMaxPanesPerTab+1), ShortestRows(DefaultMaxPanesPerTab+1)
+	if cols >= MeasuredReadableColumns && rows >= MeasuredReadableRows {
+		t.Errorf("%d panes still clears both floors at %d columns and %d rows, so the cap is set lower than the rule allows",
+			DefaultMaxPanesPerTab+1, cols, rows)
+	}
+}
+
+// The row ladder is the mirror of the column one: only the ODD generations
+// split downwards, and a split costs measured chrome before it halves what is
+// left. The numbers are what a 69-row window was measured to give.
+func TestShortestRowsFollowsTheGridRuleAndTheMeasuredSplitCost(t *testing.T) {
+	for _, c := range []struct{ panes, rows int }{
+		{1, MeasuredWindowRows},
+		{2, MeasuredWindowRows},
+		{3, 32},
+		{8, 32},
+		{9, 14},
+		{16, 14},
+	} {
+		if got := ShortestRows(c.panes); got != c.rows {
+			t.Errorf("ShortestRows(%d) = %d, want %d", c.panes, got, c.rows)
+		}
 	}
 }
 
