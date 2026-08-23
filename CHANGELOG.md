@@ -8,27 +8,45 @@ entry here, so every entry says what moved and what a caller does about it.
 ## Unreleased
 
 The pane cap is now derived from a measured HEIGHT as well as a measured
-width, and the height is what binds: `max_panes_per_tab` drops from 16 to 8.
-Only the EVEN generations of the grid rule split sideways, so reaching
-sixteen panes spends two generations on rows, and nothing had ever measured what a
+width. `max_panes_per_tab` stays 16, but for the first time that number is an
+answer to both axes rather than to one of them with the other unexamined. Only
+the EVEN generations of the grid rule split sideways, so reaching sixteen
+panes spends two generations on rows, and nothing had ever measured what a
 worker's detection text needs in rows. `herdr pane read --source detection`
 returns the BOTTOM of a pane's buffer, so a pane too short does not wrap a
 marker — it scrolls the marker off the top and hands back a snapshot that no
 longer holds it.
 
+The row floor cannot be derived from a phrase's length the way
+`MeasuredReadableColumns` is, because what a marker costs in rows is where it
+sits in the block the dialog renders. So the coupling is pinned instead.
+`config.MarkerRows` carries a measured row cost for every marker in use, keyed
+by the phrase, and `TestTheReadableRowFloorIsDerivedFromTheMarkerSets` fails
+when a marker is added, removed or reworded without a height measured for it,
+and when the table names a phrase nothing matches on any more. A read matches
+an OR, so it costs its cheapest marker; the floor is the tallest of the reads.
+
 Measured against herdr 0.8.2 and claude 2.1.239, one tab per height at exactly
-40 columns with a real Claude in each: the trust dialog's identifying sentence
-reads whole at 17 rows and is cut at 16, so `config.MeasuredReadableRows` is
-17. A whole tab measured 69 rows, and a down split costs measured chrome
-before it halves (69 gave 33 and 32; 33 gave 16 and 15), so
-`config.SplitRowCost` is 4 and `config.ShortestRows` runs 69 rows for one and
-two panes, 32 for three through eight, and 14 for nine through sixteen.
-Fourteen is under the floor, four splits before the width reaches its own.
+40 columns with a real Claude in each, eighteen heights from 67 rows down to
+2: `yes, i trust this folder` reads whole at 4 rows and is gone at 3, and the
+Enter that answers the dialog lands at 4 too; `/goal active` reads at every
+height down to 2. `do you trust the files in this folder` renders at no height
+on this build and `goal set:` scrolls with the transcript rather than the
+pane, so both carry `config.RowsNotDependable` and neither can lower a floor.
+`config.MeasuredReadableRows` is 4.
+
+A whole tab measured 69 rows, and a down split costs measured chrome before it
+halves (69 gave 33 and 32; 33 gave 16 and 15), so `config.SplitRowCost` is 4
+and `config.ShortestRows` runs 69 rows for one and two panes, 32 for three
+through eight, 14 for nine through sixteen, and 5 from thirty-three. Against a
+4-row floor the rows do not give out until 128 panes, four generations past
+where the width does.
 
 `config.MaxPanesClearing` takes both floors as arguments and
 `DefaultMaxPanesPerTab` is what it returns, so the number now says which floor
-decided it. The test pins what each floor allows alone — 16 for the columns, 8
-for the rows — and a derivation that consults only one of them stops matching.
+decided it. The test pins what each floor allows alone — 16 for the columns,
+128 for the rows — and a derivation that consults only one of them stops
+matching.
 
 The report address gained a middle rung. `HDIS_DISPATCHER_PANE` was the task's
 pane of origin, else the daemon's base pane, and a task an operator filed at a
@@ -107,10 +125,10 @@ Bindings gained a `tab` key; an older document without one
 still loads, and its pane is retired as a pane.
 
 Config gained a `layout` object with `min_pane_columns` (default 40) and
-`max_panes_per_tab` (default 8). Both are measured numbers with the
+`max_panes_per_tab` (default 16). Both are measured numbers with the
 measurement recorded beside them in the source and in the README: 40 is the
-narrowest pane whose detection text still reads correctly, and 8 is what the
-grid rule holds at that floor and at the 17-row floor below.
+narrowest pane whose detection text still reads correctly, and 16 is what the
+grid rule holds at that floor and at the row floor below it.
 The cap bounds the panes ONE task may have, because a tab holds one task, and
 it is not what keeps two tasks apart. A document naming a
 `min_pane_columns` BELOW 40 is refused, because under it the dispatcher cannot

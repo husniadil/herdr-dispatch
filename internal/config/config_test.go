@@ -289,8 +289,12 @@ func TestTheMaxPanesPerTabDefaultIsTheMostBothMeasuredFloorsAllow(t *testing.T) 
 		t.Errorf("the column floor alone allows %d panes, want 16", columnOnly)
 	}
 	rowOnly := MaxPanesClearing(1, MeasuredReadableRows)
-	if rowOnly != 8 {
-		t.Errorf("the row floor alone allows %d panes, want 8", rowOnly)
+	if rowOnly != 128 {
+		t.Errorf("the row floor alone allows %d panes, want 128", rowOnly)
+	}
+	if columnOnly >= SearchCeiling || rowOnly >= SearchCeiling {
+		t.Fatalf("the walk ran out of room rather than finding a floor: columns %d, rows %d, ceiling %d",
+			columnOnly, rowOnly, SearchCeiling)
 	}
 	want := columnOnly
 	if rowOnly < want {

@@ -164,9 +164,96 @@ func NarrowestColumns(panes int) int {
 	return width
 }
 
-// MeasuredReadableRows is the shortest pane whose detection text this repo's
-// own matches still read whole, measured rather than guessed, and it is the
-// half of the pane cap that nothing measured until now.
+// RowsNotDependable is the row cost of a marker that cannot be what keeps a
+// read working, whatever the pane's height.
+//
+// Two kinds of marker earn it, and both are real entries in MarkerRows. One
+// is a phrase the claude build in front of us never renders, so no height
+// makes it appear. The other is a phrase that DOES render but scrolls with
+// the transcript rather than sitting at a fixed place on screen, so what it
+// costs in rows is a function of how much the worker has printed since, not
+// of how tall the pane is. Neither can lower a floor, and the derivation
+// treats both the same way: they are carried so that every marker in use has
+// an entry, and they are never the cheapest of a read.
+const RowsNotDependable = 1 << 30
+
+// MarkerRows is how short a pane may be while each marker the dispatcher
+// matches on still reads back whole through `herdr pane read --source
+// detection`, measured at MeasuredReadableColumns.
+//
+// It is keyed by the marker phrase itself so that the marker sets in
+// internal/spawn and this table are checked against each other rather than
+// kept in step by hand:
+// TestTheReadableRowFloorIsDerivedFromTheMarkerSets fails when a marker is
+// added, removed or reworded without its row cost being measured, and fails
+// when an entry here names a phrase nothing matches on any more. That test is
+// the whole point of this table. The row floor cannot be derived from a
+// phrase's LENGTH the way MeasuredReadableColumns is, because what a marker
+// costs in rows is where it sits in the block the dialog renders, not how
+// wide it is — so the coupling is pinned instead of computed.
+//
+// Measured on 2026-08-23 against herdr 0.8.2 and claude 2.1.239, in a
+// throwaway workspace: one tab per height, a git repo of its own per tab so
+// the trust dialog is raised rather than remembered, every pane pinned to
+// exactly 40 columns (MeasuredReadableColumns, where the dialog wraps hardest
+// of any width a worker is allowed) and to a measured height, a real Claude
+// brought up in each with the real PointerGoal condition, the pane read back
+// through `herdr pane read --source detection`, then answered with an Enter
+// and read again. Heights probed at 40 columns: 67, 24, 22, 20, 18, 17, 16,
+// 14, 12, 10, 8, 7, 6, 5, 4, 3 and 2 rows.
+var MarkerRows = map[string]int{
+	// The new dialog's selectable option, "❯ 1. Yes, I trust this folder",
+	// sits two lines above "Enter to confirm · Esc to cancel" and is the
+	// last thing in the block to go. It read whole at 4 rows; at 3 the
+	// snapshot held only "Enter to confirm · Esc to cancel". The Enter
+	// that answers the dialog landed at 4 rows too — the same pane came
+	// back with the goal registered — so this is the height at which the
+	// whole answer-the-dialog step still works, not only the match.
+	"yes, i trust this folder": 4,
+	// The older build's phrase. claude 2.1.239 does not render it at any
+	// height: it was absent from every one of the eighteen snapshots, and
+	// the dialog it was read from is gone. It costs nothing to keep for an
+	// operator on that older build, and it can never be the marker that
+	// makes a read work here.
+	"do you trust the files in this folder": RowsNotDependable,
+	// The echo of the condition, which scrolls up as the worker starts
+	// working. It survived at 30 and 67 rows and was already gone at 24,
+	// but that boundary moves with how much the worker printed rather than
+	// with the pane, so it is not a height this repo may lean on.
+	"goal set:": RowsNotDependable,
+	// The status line, pinned to the bottom row of the pane. It read at
+	// every height probed, down to the 2 rows that were the shortest pane
+	// herdr would give.
+	"/goal active": 2,
+}
+
+// ReadableRowsFor is what ONE read needs: the cheapest of the markers that
+// satisfy it.
+//
+// A read matches an OR over its set, so the shortest pane it still works in
+// is decided by the marker that survives lowest, not by the whole set. It
+// returns RowsNotDependable when no marker in the set has a dependable
+// measurement, which is a set no height can be trusted to satisfy.
+func ReadableRowsFor(markers []string) int {
+	cheapest := RowsNotDependable
+	for _, m := range markers {
+		rows, ok := MarkerRows[m]
+		if !ok {
+			// An unmeasured marker cannot be counted on either. The
+			// spawn-side test is what turns this into a failure
+			// rather than a silent one.
+			continue
+		}
+		if rows < cheapest {
+			cheapest = rows
+		}
+	}
+	return cheapest
+}
+
+// MeasuredReadableRows is the shortest pane every read the dispatcher makes
+// still works in: the TALLEST requirement across the reads, each of which
+// costs only its own cheapest marker.
 //
 // It matters for the same reason MeasuredReadableColumns does, one axis over.
 // `herdr pane read --source detection` returns the BOTTOM of the pane's
@@ -174,40 +261,19 @@ func NarrowestColumns(panes int) int {
 // off the top and hands back a snapshot that no longer holds it. The
 // dispatcher then reads a worker sitting on a dialog and sees no dialog.
 //
-// Measured on 2026-08-23 against herdr 0.8.2 and claude 2.1.239, in a
-// throwaway workspace: one tab per height, a git repo of its own per tab so
-// the trust dialog is raised rather than remembered, every pane pinned to
-// exactly 40 columns (MeasuredReadableColumns, where the dialog wraps hardest
-// of any width a worker is allowed) and to a measured height, a real Claude
-// brought up in each with the real PointerGoal condition, and the pane read
-// back through `herdr pane read --source detection`. Heights probed at 40
-// columns: 67, 24, 22, 20, 18, 17, 16, 14, 12. What it showed:
+// Four, and both halves of that are in MarkerRows: the trust read costs 4
+// rows because its cheapest dependable marker is the dialog's option line,
+// and the goal read costs 2 because the status line never leaves the bottom.
+// The number is a constant rather than a call because it bounds a default
+// below, and TestTheReadableRowFloorIsDerivedFromTheMarkerSets is what keeps
+// it equal to what the shipped marker sets work out to.
 //
-//   - At 17 rows and above the dialog's identifying sentence read whole,
-//     starting at "Quick safety check: Is this a project you created or one
-//     you trust?".
-//   - At 16 rows that sentence was cut: the snapshot opened mid-sentence at
-//     "you created or one you trust? (Like", so a match on its head fails
-//     while the worker is perfectly fine.
-//   - Below 16 it degrades further; at 14 and 12 rows nothing above "Security
-//     guide" survives, and at 8 rows even "2. No, exit" is gone.
-//   - GoalMarkers are cheaper: "/goal active" sits in the status line at the
-//     very bottom and read at every height down to 8 rows. The "goal set:"
-//     echo scrolls off below about 30 rows, but either marker satisfies the
-//     match, so the goal read is not what sets this floor.
-//
-// So 17, the tallest requirement of any read in use, taken against the marker
-// set as it stands today: TrustDialogMarkers and GoalMarkers in
-// internal/spawn. Task 49 is open against the trust phrase — claude 2.1.239
-// rewrote that dialog and the phrase currently in TrustDialogMarkers appears
-// nowhere in it at any size, which this probe confirmed at every height. This
-// number is what the read WOULD need once that phrase is fixed to something
-// the dialog actually renders, and it is measured against the dialog's own
-// top line, the earliest thing in the block a fixed marker could match. A fix
-// that matches lower in the block (the "1. Yes, I trust this folder" option
-// read down to 8 rows) would lower this floor, and the derivation below moves
-// with it.
-const MeasuredReadableRows = 17
+// It was 17 while TrustDialogMarkers held only the older build's phrase and
+// the floor had to be measured against the dialog's own top sentence, which
+// is the earliest thing in the block and the most expensive. Matching the
+// option line instead moved the read to the bottom of the block, and the
+// floor with it.
+const MeasuredReadableRows = 4
 
 // MeasuredWindowRows is how tall one whole tab was in the same session: the
 // root pane of a fresh tab reported 69 rows.
@@ -261,9 +327,13 @@ func ShortestRows(panes int) int {
 // alone gives can be pinned. A derivation that consults only one of them
 // stops matching those pins.
 func MaxPanesClearing(minColumns, minRows int) int {
-	// Two down generations past sixteen panes is far below any floor a
-	// pane is readable at, so nothing above this ceiling can clear.
-	const ceiling = 64
+	// A runaway guard and nothing more. Both ladders fall monotonically,
+	// so the answer is found long before this; it is deliberately far
+	// above where either floor gives out — the row floor alone reaches 128
+	// panes — so that the search never returns the bound itself and calls
+	// it an answer. MaxPanesPerTabIsBelowTheSearchCeiling is what says so
+	// if a future floor ever pushes past it.
+	const ceiling = SearchCeiling
 	best := 1
 	for n := 1; n <= ceiling; n++ {
 		if NarrowestColumns(n) >= minColumns && ShortestRows(n) >= minRows {
@@ -273,24 +343,33 @@ func MaxPanesClearing(minColumns, minRows int) int {
 	return best
 }
 
+// SearchCeiling bounds MaxPanesClearing's walk. It is exported so a test can
+// tell a real answer from the walk running out of room.
+const SearchCeiling = 4096
+
 // DefaultMaxPanesPerTab is how many panes may share one of this dispatcher's
 // tabs, and it follows from GridSplit and BOTH measured floors rather than
 // from taste.
 //
 // Under the grid rule the widths run 226 for one pane, 113 for two through
 // four, and 56 for five through sixteen; the seventeenth starts the
-// generation that halves 56 to 28, under the 40-column floor. Taken alone
-// that is where the number 16 came from.
+// generation that halves 56 to 28, under the 40-column floor. So sixteen on
+// that axis.
 //
-// The heights are what that reasoning left out, and they bind first. Only the
-// odd generations split down, but they cost chrome as well as halving: 69
-// rows for one and two panes, 32 for three through eight, and 14 for nine
-// through sixteen. Fourteen is under the 17-row floor a worker's detection
-// text still reads at, so the generation that fills 9..16 is the one that
-// breaks, four splits before the width does.
+// The heights were the axis nothing had measured, because only the ODD
+// generations split down and the derivation had never looked at them. They
+// cost chrome as well as halving: 69 rows for one and two panes, 32 for three
+// through eight, 14 for nine through sixteen, and 5 from thirty-three. Against
+// the 4-row floor the shipped marker set works out to, rows do not give out
+// until 128 panes — four whole generations past where the width does.
 //
-// So eight, the tighter of the two, and the derivation says which floor
-// decided it rather than restating a number.
+// So sixteen, the tighter of the two, and the same number the column axis
+// alone gave. What changed is that it is now the ANSWER to both floors rather
+// than to one of them with the other unexamined, and the derivation says
+// which floor decided it. It reached 8 for a day, against a marker set that
+// had to match the dialog's top sentence; matching its option line instead
+// moved the trust read to the bottom of the block and the floor from 17 rows
+// to 4.
 //
 // The cap is a FLOOR GUARD and nothing more. Grouping is by TASK: a tab holds
 // one task, so this bounds the panes ONE task may have — a worker and its
@@ -321,7 +400,8 @@ type Layout struct {
 	// DefaultMaxPanesPerTab, which is what MinPaneColumns,
 	// MeasuredReadableRows and the measured window work out to under
 	// config.GridSplit. Raising it past that default puts panes below a
-	// height or width the dispatcher was measured to still read them at.
+	// width the dispatcher was measured to still read them at, and far
+	// enough past it below a readable height too.
 	//
 	// It bounds panes per TASK, because a tab holds one task: nothing here
 	// keeps two tasks apart, and raising it never puts a second task in a

@@ -1538,6 +1538,64 @@ func TestTheTrustDialogIsAnsweredInTodaysWordingAndTheOlderOne(t *testing.T) {
 // word-wraps, so the longest phrase the detector matches needs its own length
 // plus three columns to land on one line, and one that wraps never matches.
 // Change the marker set and this test moves the floor with it.
+// The row floor is the column floor's counterpart, and it needs the same
+// protection for a reason this repo has already been bitten by: a constant
+// measured against a marker set outlives the set that was measured. The
+// column floor survived TrustDialogMarkers changing because it is DERIVED
+// from the set; the row floor cannot be derived, because what a marker costs
+// in rows is where it sits in the rendered block rather than how long it is.
+// So the coupling is pinned instead.
+//
+// Every marker the dispatcher matches on must carry a measured row cost in
+// config.MarkerRows, and each read costs its CHEAPEST marker because a read
+// matches an OR. The floor is the tallest of the reads. Adding, removing or
+// rewording a marker here fails this test until the row cost is measured too.
+func TestTheReadableRowFloorIsDerivedFromTheMarkerSets(t *testing.T) {
+	reads := map[string][]string{
+		"the trust-dialog read": TrustDialogMarkers,
+		"the goal read":         GoalMarkers,
+	}
+
+	for name, markers := range reads {
+		for _, m := range markers {
+			if _, ok := config.MarkerRows[m]; !ok {
+				t.Fatalf("%s matches on %q, which has no measured row cost. "+
+					"config.MeasuredReadableRows is derived from config.MarkerRows, "+
+					"so a new marker needs a height measured for it before it ships",
+					name, m)
+			}
+		}
+	}
+
+	inUse := map[string]bool{}
+	for _, markers := range reads {
+		for _, m := range markers {
+			inUse[m] = true
+		}
+	}
+	for m := range config.MarkerRows {
+		if !inUse[m] {
+			t.Errorf("config.MarkerRows carries a row cost for %q, which nothing matches on any more", m)
+		}
+	}
+
+	floor, costliest := 0, ""
+	for name, markers := range reads {
+		rows := config.ReadableRowsFor(markers)
+		if rows == config.RowsNotDependable {
+			t.Fatalf("%s has no marker with a dependable row cost, so no pane height can be trusted to satisfy it", name)
+		}
+		if rows > floor {
+			floor, costliest = rows, name
+		}
+	}
+	if config.MeasuredReadableRows != floor {
+		t.Fatalf("the floor must follow the marker sets: %s is the tallest read at %d rows, "+
+			"but config.MeasuredReadableRows is %d",
+			costliest, floor, config.MeasuredReadableRows)
+	}
+}
+
 func TestTheReadableColumnFloorIsDerivedFromTheLongestMarker(t *testing.T) {
 	const inset = 3
 
