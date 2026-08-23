@@ -94,6 +94,19 @@ type Loop struct {
 	// readopted is how many persisted bindings the last Adopt kept, for
 	// doctor to report.
 	readopted int
+	// unadopted is set when an Adopt failed, and it is what keeps a
+	// dispatcher that never reconciled from acting as though it had.
+	//
+	// The failure it exists for is Herdr being unreachable at start: Adopt
+	// returns early with nothing adopted, so the in-memory set is empty
+	// while the store still names every live worker. Left alone, the next
+	// tick dispatches on that empty set and the first spawn writes it over
+	// the store — a task already prompted and not yet claimed gets a second
+	// worker, and the record of the first is gone.
+	//
+	// So while it is set nothing is saved and no tick dispatches; each tick
+	// tries the Adopt again instead, and clears it when one succeeds.
+	unadopted bool
 	// rows is the last tick's board rows, by task id: the project a worker
 	// runs in, the number an operator reads, the title status prints. It is
 	// a cache of board facts and never a source of them.
@@ -103,6 +116,11 @@ type Loop struct {
 // Tick runs one round. A board that cannot be read fails the tick loudly and
 // spawns nothing; a single action that fails is logged and the rest go on.
 func (l *Loop) Tick(ctx context.Context) error {
+	if l.needsAdopt() {
+		if _, err := l.Adopt(ctx); err != nil {
+			return fmt.Errorf("nothing is dispatched until a start-up reconciliation succeeds: %w", err)
+		}
+	}
 	snap, err := l.snapshot(ctx)
 	if err != nil {
 		return err
@@ -146,6 +164,7 @@ func (l *Loop) Adopt(ctx context.Context) (int, error) {
 
 	rowsAlive, err := l.Herdr.PaneList(ctx)
 	if err != nil {
+		l.markUnadopted()
 		return 0, fmt.Errorf("herdr cannot say which panes are alive, so %d persisted binding(s) stay unadopted: %w", len(held.Bindings), err)
 	}
 	panes := make(map[string]string, len(rowsAlive))
@@ -154,6 +173,7 @@ func (l *Loop) Adopt(ctx context.Context) (int, error) {
 	}
 	agents, err := l.Herdr.Agents(ctx)
 	if err != nil {
+		l.markUnadopted()
 		return 0, fmt.Errorf("herdr cannot say which agents it has registered, so %d persisted binding(s) stay unadopted: %w", len(held.Bindings), err)
 	}
 	// The tab labels are the second evidence of ownership, and the one that
@@ -203,6 +223,9 @@ func (l *Loop) Adopt(ctx context.Context) (int, error) {
 	l.rows = rows
 	l.pending = mine
 	l.readopted = len(kept)
+	// Cleared before the save, because the save is what a failed Adopt
+	// suppresses and this reconciliation is the one that earned it.
+	l.unadopted = false
 	l.saveLocked()
 	l.mu.Unlock()
 	if l.Store != nil && (len(held.Bindings) > 0 || len(held.Reservations) > 0) {
@@ -631,6 +654,21 @@ func (l *Loop) reap(ctx context.Context) {
 	}
 }
 
+// markUnadopted records that the start-up reconciliation did not happen, so
+// no tick dispatches and no save lands until one does.
+func (l *Loop) markUnadopted() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.unadopted = true
+}
+
+// needsAdopt reports whether an Adopt has failed and none has succeeded since.
+func (l *Loop) needsAdopt() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.unadopted
+}
+
 // Readopted is how many persisted bindings the last Adopt kept.
 func (l *Loop) Readopted() int {
 	l.mu.Lock()
@@ -653,6 +691,12 @@ func (l *Loop) BindingsPath() string {
 // nobody.
 func (l *Loop) saveLocked() {
 	if l.Store == nil {
+		return
+	}
+	// A dispatcher that never reconciled holds an empty set it did not earn.
+	// Writing it out would destroy the one record of the workers a previous
+	// process left running.
+	if l.unadopted {
 		return
 	}
 	if err := l.Store.Save(store.State{Bindings: l.bindings, Reservations: l.pending}); err != nil {

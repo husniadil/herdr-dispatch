@@ -201,6 +201,9 @@ func TestARestartWithNoHerdrAdoptsNothingAndKeepsTheStore(t *testing.T) {
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("tick: %v", err)
 	}
+	// The worker the first process brought up is alive and has not claimed
+	// yet, which is the whole of what the store is protecting.
+	f.Write(t, "panes.json", panesWith("working"))
 	f.Bin(t, "herdr", `echo "herdr: no server" >&2; exit 1`)
 
 	next := restarted(t, l)
@@ -213,6 +216,25 @@ func TestARestartWithNoHerdrAdoptsNothingAndKeepsTheStore(t *testing.T) {
 	held, err := l.Store.Load()
 	if err != nil || len(held.Bindings) != 1 {
 		t.Fatalf("the store was not left intact: %+v (%v)", held, err)
+	}
+
+	// Herdr comes back, and the daemon keeps ticking through the whole
+	// window: that is what makes a failed Adopt dangerous rather than merely
+	// loud. A tick dispatching on the empty set it never earned would bring
+	// a SECOND worker up for a task already prompted, and the save behind
+	// that spawn would write the empty set over the store, taking the record
+	// of the first worker with it. So the tick reconciles first.
+	f.Bin(t, "herdr", herdrScript)
+	before := len(calls(t, f, "tab create"))
+	if err := next.Tick(context.Background()); err != nil {
+		t.Fatalf("tick after herdr came back: %v", err)
+	}
+	if got := len(calls(t, f, "tab create")) - before; got != 0 {
+		t.Fatalf("%d second worker pane(s) came up for a task that already had one", got)
+	}
+	held, err = l.Store.Load()
+	if err != nil || len(held.Bindings) != 1 || held.Bindings[0].Pane != "wM:p9" {
+		t.Fatalf("the tick after the failed adopt wrote over the store: %+v (%v)", held, err)
 	}
 }
 
