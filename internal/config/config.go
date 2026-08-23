@@ -87,13 +87,17 @@ type Verify struct {
 // matches. So 40, the widest requirement of any marker in use, and not the
 // 23 the goal markers alone would have allowed.
 //
-// Two things this measurement is NOT. It is not a claim that the trust
-// marker currently matches anything — it does not, at any width, because
-// claude 2.1.239 rewrote that dialog; that is a separate defect and this
-// number is what the marker WOULD need once it is fixed. And it is not the
-// reason a narrow pane loses a typed line: at 25, 27 and 29 columns the
-// condition arrived whole and only the Enter was lost, which an explicit
-// send-keys then delivered.
+// This number is derived, not restated: spawn's
+// TestTheReadableColumnFloorIsDerivedFromTheLongestMarker recomputes it from
+// spawn.TrustDialogMarkers and spawn.GoalMarkers and fails if the two drift
+// apart. Re-measured on 2026-08-23 when claude 2.1.239's reworded dialog was
+// added to the marker set: the new phrase, "yes, i trust this folder", is 24
+// characters, so the 37-character older phrase is still the longest one in
+// use and the floor did not move.
+//
+// One thing this measurement is NOT: it is not the reason a narrow pane
+// loses a typed line. At 25, 27 and 29 columns the condition arrived whole
+// and only the Enter was lost, which an explicit send-keys then delivered.
 const MeasuredReadableColumns = 40
 
 // MeasuredWindowColumns is how wide one whole tab was in the same session:

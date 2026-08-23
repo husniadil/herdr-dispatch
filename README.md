@@ -374,28 +374,60 @@ lowered below what was measured.
 `layout.max_panes_per_tab` is unaffected by an operator setting of `2`: at two
 panes the grid rule and the old rule agree.
 
-One thing the measurement is NOT: it is not a claim that the trust marker
-currently matches anything. It does not, at any width — see
-[Known defect: the trust-dialog wording](#known-defect-the-trust-dialog-wording).
+One thing the measurement is NOT: it is not the reason a narrow pane loses a
+typed line. At 25, 27 and 29 columns the condition arrived whole and only the
+Enter was lost, which an explicit send-keys then delivered.
 
-## Known defect: the trust-dialog wording
+The floor is derived, never restated beside the markers it follows from:
+`TestTheReadableColumnFloorIsDerivedFromTheLongestMarker` recomputes it from
+`TrustDialogMarkers` and `GoalMarkers` and fails if the two drift apart.
 
-`TrustDialogMarkers` is `"do you trust the files in this folder"`, and claude
-2.1.239 no longer renders that phrase. Its dialog now reads:
+## The trust-dialog wording
+
+Claude rewords its trust-folder dialog between builds, so `TrustDialogMarkers`
+is a SET, the way `GoalMarkers` already is:
+
+```go
+var TrustDialogMarkers = []string{
+	"yes, i trust this folder",
+	"do you trust the files in this folder",
+}
+```
+
+claude 2.1.239 dropped the second phrase for a new one, which left the
+detector matching nothing at any pane width and the Enter never pressed. Read
+back on 2026-08-23 through `herdr pane read --source detection` in a
+173-column pane under herdr 0.8.2, its dialog is:
 
 ```
-Quick safety check: Is this a project you created or one you trust? …
-❯ 1. Yes, I trust this folder
+ Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source project, or work from your team). If not, take a moment to review
+ what's in this folder first.
+
+ Claude Code'll be able to read, edit, and execute files here.
+
+ Security guide
+
+ ❯ 1. Yes, I trust this folder
+   2. No, exit
 ```
 
-Measured at all five widths above: the marker matched at NONE of them. So
-`answerStartupDialog` never recognises the dialog and never presses Enter; the
-spawn survives only because the confirm step's ceiling outlasts it or the
-dialog does not appear at all.
+Two choices in that set are deliberate. The newer phrase is the dialog's
+selectable OPTION rather than its prose, because the option is what the dialog
+is for and the sentence around it is what churns. The older phrase stays so an
+operator still on a pre-2.1.239 claude is not broken by the fix;
+`TestTheTrustDialogIsAnsweredInTodaysWordingAndTheOlderOne` drives the whole
+pipeline against a recorded transcript of each and asserts exactly one Enter.
 
-This is a real defect and it is **not** fixed here — it is a detector-wording
-bug, not a placement one, and it is filed separately. The 40-column floor
-above is what that marker WOULD need once the wording is corrected.
+Adding the newer phrase did not move the 40-column floor: it is 24 characters
+against the older phrase's 37, so the longest marker in use is unchanged.
+
+The matcher earns its place rather than sitting there silently. Measured the
+same day: `herdr agent start` into a fresh untrusted directory returns
+`agent_not_ready` and leaves the dialog on screen unanswered — herdr does not
+answer it, and nothing else does. Every worker worktree under
+`<state_dir>/worktrees` is a fresh directory, so without this Enter the goal
+is never delivered and the pane sits at the dialog until the ceiling ends the
+spawn. Deleting the matcher was considered and rejected on that evidence.
 
 ## The dispatcher's address
 

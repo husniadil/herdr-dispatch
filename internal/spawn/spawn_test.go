@@ -1394,3 +1394,86 @@ func TestTheToolchainGuardCatchesEachToolchainPutBack(t *testing.T) {
 		}
 	}
 }
+
+// recordedTrustDialog2_1_239 is what claude 2.1.239 actually renders in a
+// fresh untrusted directory, read back on 2026-08-23 through the exact call
+// the pipeline makes — `herdr pane read --source detection` — in a 173-column
+// pane under herdr 0.8.2. It is quoted rather than paraphrased because a
+// marker measured against a paraphrase is how this detector broke.
+const recordedTrustDialog2_1_239 = ` Accessing workspace:
+
+ /private/var/tmp/hdis-trust49/x5312
+
+ Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source project, or work from your team). If not, take a moment to review
+ what's in this folder first.
+
+ Claude Code'll be able to read, edit, and execute files here.
+
+ Security guide
+
+ ❯ 1. Yes, I trust this folder
+   2. No, exit
+
+ Enter to confirm · Esc to cancel`
+
+// recordedTrustDialogOlder is the wording claude rendered before 2.1.239, the
+// one the single marker was written for. An operator still on that build must
+// not be broken by the fix, so it stays in the set.
+const recordedTrustDialogOlder = "Do you trust the files in this folder?\n" +
+	"/private/var/tmp/hdis-trust49/x5312\n" +
+	"Claude Code may read, edit, and execute files here.\n" +
+	"  1. Yes, proceed\n  2. No, exit"
+
+// Both wordings are answered: the one claude renders today, and the one it
+// rendered before. Each drives the whole pipeline, so what is proved is the
+// Enter, not just a substring.
+func TestTheTrustDialogIsAnsweredInTodaysWordingAndTheOlderOne(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		screen string
+	}{
+		{"claude 2.1.239", recordedTrustDialog2_1_239},
+		{"the older wording", recordedTrustDialogOlder},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, []string{tc.screen, goalActive}, startRegistered)
+
+			if _, err := h.pipe.Run(context.Background(), req(claudeProfile())); err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			keys := 0
+			for _, argv := range h.Argv(t) {
+				if len(argv) >= 2 && argv[0] == "pane" && argv[1] == "send-keys" {
+					keys++
+					if got, want := strings.Join(argv, " "), "pane send-keys wM:p9 enter"; got != want {
+						t.Fatalf("keys: got %q, want %q", got, want)
+					}
+				}
+			}
+			if keys != 1 {
+				t.Fatalf("want exactly one Enter for this dialog, got %d", keys)
+			}
+		})
+	}
+}
+
+// The readable-column floor is derived from the markers, never restated
+// beside them. Claude renders its body at the pane's columns minus three and
+// word-wraps, so the longest phrase the detector matches needs its own length
+// plus three columns to land on one line, and one that wraps never matches.
+// Change the marker set and this test moves the floor with it.
+func TestTheReadableColumnFloorIsDerivedFromTheLongestMarker(t *testing.T) {
+	const inset = 3
+
+	longest, phrase := 0, ""
+	for _, m := range append(append([]string{}, TrustDialogMarkers...), GoalMarkers...) {
+		if len(m) > longest {
+			longest, phrase = len(m), m
+		}
+	}
+	if want := longest + inset; config.MeasuredReadableColumns != want {
+		t.Fatalf("the floor must follow the longest marker %q (%d chars + %d inset = %d), "+
+			"but config.MeasuredReadableColumns is %d",
+			phrase, longest, inset, want, config.MeasuredReadableColumns)
+	}
+}

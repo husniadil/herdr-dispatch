@@ -7,6 +7,21 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+The trust-folder dialog is answered again. `TrustDialogMarkers` held one
+phrase, `"do you trust the files in this folder"`, and claude 2.1.239 reworded
+that dialog, so `answerStartupDialog` matched nothing at any pane width and
+never pressed the Enter it exists to press. Since every worker worktree is a
+fresh untrusted directory and `herdr agent start` there returns
+`agent_not_ready` with the dialog still on screen, that Enter is the only
+thing that lets a goal be delivered. The markers are now a SET, matching the
+new dialog's selectable option `"yes, i trust this folder"` alongside the
+older phrase, so an operator on either claude build is answered. Nothing a
+caller passes changes: the CLI, the MCP tool list, the JSON shapes and the
+error codes are untouched. `config.MeasuredReadableColumns` stays 40 — the new
+phrase is 24 characters against the older one's 37, so the longest marker the
+floor derives from did not move — and a test now derives that floor from the
+marker set instead of restating it.
+
 The daemon now opens its own log at `$XDG_STATE_HOME/hdis/hdis.log` and
 appends to it, instead of leaving the log to whatever the shell line that
 started it redirected — a restart that dropped the redirect used to throw the

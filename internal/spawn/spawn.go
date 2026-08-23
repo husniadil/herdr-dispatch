@@ -212,7 +212,22 @@ func shellQuote(s string) string {
 
 // TrustDialogMarkers are the phrases Claude Code's trust-folder dialog puts
 // on screen. Seeing one is the only thing that earns an Enter.
-var TrustDialogMarkers = []string{"do you trust the files in this folder"}
+//
+// It is a SET, the way GoalMarkers is, because claude rewords this dialog
+// between builds and a single phrase expires with the build it was read from.
+// claude 2.1.239 dropped "do you trust the files in this folder" for "Quick
+// safety check: Is this a project you created or one you trust?", which left
+// the detector matching nothing at any pane width; keeping both means an
+// operator on either build is answered. The phrase taken from the newer
+// dialog is its selectable option rather than its prose, because the option
+// is what the dialog is FOR and the sentence around it is what churns.
+//
+// Adding a longer phrase here raises config.MeasuredReadableColumns, which is
+// derived from the longest marker; the test that derives it will say so.
+var TrustDialogMarkers = []string{
+	"yes, i trust this folder",
+	"do you trust the files in this folder",
+}
 
 // GoalMarkers are what a registered /goal leaves on screen: the echo of the
 // condition, or the status line that says it is driving.
