@@ -821,10 +821,14 @@ func TestARereadRequestIsNotASelfReviewCondition(t *testing.T) {
 		// about what the worker may DO with a gap it just proved. Two workers
 		// in a row had to invent that rule; the third must be told it.
 		"no rule for findings": "Task 23 is submitted and not yet judged. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to $" + DispatcherPaneVar + ".",
-		// And each boundary alone is not the pair: keeping the fix rule while
-		// dropping the line that holds it to proven gaps is how "keep fixing"
-		// turns into "keep building".
-		"no boundary on the fix": "Task 23 is submitted. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to $" + DispatcherPaneVar + ". KEEP FIXING what a mutation proved unpinned and name the new head in the first line of that message. Send everything you have before your pane closes with the task; nothing waits for later.",
+		// And each boundary alone is not the pair. Both of these carry every
+		// other ask, so each isolates exactly one: drop only the ask it
+		// targets from the guard and only that near-miss stops being caught.
+		// Without the line holding it to proven gaps, "keep fixing" reads as
+		// "keep building"; without a route for everything else, a worker with
+		// a second thought has nowhere to put it but the branch.
+		"no boundary on the fix": "Task 23 is submitted. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to $" + DispatcherPaneVar + ". KEEP FIXING what a mutation proved unpinned, and name the new head in the first line of that message. Send anything else as a proposal that waits for a verdict. Send everything you have before your pane closes with the task; nothing waits for later.",
+		"no route for anything else": "Task 23 is submitted. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to $" + DispatcherPaneVar + ". KEEP FIXING what a mutation proved unpinned, and name the new head in the first line of that message. Fix only a gap a mutation proved or something the operator named. Send everything you have before your pane closes with the task; nothing waits for later.",
 	} {
 		if missing := mechanicalAsks(text); len(missing) == 0 {
 			t.Errorf("%q passes as a self-review condition: %s", name, text)
