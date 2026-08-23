@@ -85,8 +85,8 @@ hdis doctor
 
 `doctor` **says why a dispatch would refuse** before one is tried: the
 daemon's version, the base pane it splits workers off, whether the board and
-Herdr are reachable, and whether the verification lane is on and which profile
-it uses. Run it first — a refusal is usually one of those four.
+Herdr are reachable, and whether the verification lane is on — a submission
+earning one self-review shot in the worker's own pane. Run it first — a refusal is usually one of those four.
 
 ## Through MCP instead of the CLI
 

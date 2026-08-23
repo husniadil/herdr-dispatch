@@ -321,7 +321,7 @@ type DoctorReport struct {
 	Log   string      `json:"log,omitempty"`
 	Board BoardHealth `json:"board"`
 	// Verify is the verification lane: whether a submission earns a
-	// verifier, and which profile that verifier launches with.
+	// self-review shot in the pane that produced it.
 	Verify VerifyHealth `json:"verify"`
 	// MinPaneColumns is the width a worker's pane must be readable at, and
 	// the reason every worker gets a tab of its own. Herdr reports no column
@@ -335,10 +335,11 @@ type DoctorReport struct {
 	MaxPanesPerTab int `json:"max_panes_per_tab"`
 }
 
-// VerifyHealth is the verification lane as doctor reports it.
+// VerifyHealth is the verification lane as doctor reports it. There is
+// nothing to name beside the switch: the shot lands in a pane that is
+// already up.
 type VerifyHealth struct {
-	Enabled bool   `json:"enabled"`
-	Profile string `json:"profile,omitempty"`
+	Enabled bool `json:"enabled"`
 }
 
 // BoardHealth is the board's own report of itself, or why it gave none.
@@ -367,10 +368,7 @@ func (d *Daemon) doctor(ctx context.Context) (DoctorReport, error) {
 		Bindings:       d.Loop.BindingsPath(),
 		Log:            d.LogPath,
 		Readopted:      d.Loop.Readopted(),
-		Verify: VerifyHealth{
-			Enabled: d.Loop.Config.Verify.Enabled,
-			Profile: d.Loop.Config.Verify.Profile,
-		},
+		Verify:         VerifyHealth{Enabled: d.Loop.Config.Verify.Enabled},
 		MinPaneColumns: d.Loop.Config.Layout.MinPaneColumns,
 		MaxPanesPerTab: d.Loop.Config.Layout.MaxPanesPerTab,
 	}

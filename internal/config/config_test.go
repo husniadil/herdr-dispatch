@@ -162,35 +162,37 @@ func TestTheVerificationLaneIsOffUnlessTheDocumentTurnsItOn(t *testing.T) {
 	if c.Verify.Enabled {
 		t.Fatal("the lane came on without being asked for")
 	}
-	if _, err := c.VerifyProfile(); err == nil {
-		t.Fatal("a profile was resolved for a lane that is off")
+}
+
+// On, it needs nothing else. The shot goes into the pane that did the work,
+// which was launched from the worker's own profile, so there is no second
+// launch for a document to configure.
+func TestTheVerificationLaneNeedsNoProfileOfItsOwn(t *testing.T) {
+	c, err := Parse([]byte(`{"default":"w","profiles":{"w":{"provider":"claude"}},"verify":{"enabled":true}}`))
+	if err != nil {
+		t.Fatalf("a lane with nothing to configure was refused: %v", err)
+	}
+	if !c.Verify.Enabled {
+		t.Fatal("the lane did not come on")
 	}
 }
 
-// On, the lane names a profile of the same shape a worker's is.
-func TestTheVerificationLaneNamesItsOwnProfile(t *testing.T) {
-	c, err := Parse([]byte(`{"default":"w","profiles":{"w":{"provider":"claude"},"v":{"provider":"claude","model":"sonnet","effort":"high"}},"verify":{"enabled":true,"profile":"v"}}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	p, err := c.VerifyProfile()
-	if err != nil {
-		t.Fatalf("verify profile: %v", err)
-	}
-	if p.Model != "sonnet" || p.Effort != "high" {
-		t.Fatalf("verifier profile: %+v", p)
-	}
-}
-
-// A lane turned on with nothing to launch is refused at parse, not at the
-// first review that would have needed it.
-func TestAVerificationLaneWithNoProfileIsRefused(t *testing.T) {
+// CRITERION 6. A document written for the verifier pane still names the
+// profile that pane launched from. Nothing launches now, so the field has
+// nothing left to name, and it is refused rather than accepted as a no-op:
+// an operator who set it believes a verifier is running.
+func TestAConfigCarryingVerifyProfileIsRefusedByName(t *testing.T) {
 	for _, doc := range []string{
-		`{"default":"w","profiles":{"w":{"provider":"claude"}},"verify":{"enabled":true}}`,
-		`{"default":"w","profiles":{"w":{"provider":"claude"}},"verify":{"enabled":true,"profile":"nope"}}`,
+		`{"default":"w","profiles":{"w":{"provider":"claude"}},"verify":{"enabled":true,"profile":"v"}}`,
+		`{"default":"w","profiles":{"w":{"provider":"claude"}},"verify":{"enabled":false,"profile":"v"}}`,
+		`{"default":"w","profiles":{"w":{"provider":"claude"}},"verify":{"profile":""}}`,
 	} {
-		if _, err := Parse([]byte(doc)); err == nil {
+		_, err := Parse([]byte(doc))
+		if err == nil {
 			t.Fatalf("accepted %s", doc)
+		}
+		if !strings.Contains(err.Error(), "verify.profile") {
+			t.Fatalf("the refusal does not name verify.profile: %v", err)
 		}
 	}
 }

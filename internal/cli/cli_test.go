@@ -175,19 +175,23 @@ func TestStopPrintsWhatItStopped(t *testing.T) {
 	}
 }
 
-// README says doctor reports whether the verification lane is on and which
-// profile it uses. The prose report is what an operator reads, so the lane
-// has to be named there and not only in the JSON.
-func TestDoctorNamesTheVerificationLaneWhenItIsOn(t *testing.T) {
-	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/hdis.sock","base_pane":"wM:p1","max_workers":2,"interval":"15s","verify":{"enabled":true,"profile":"checker"},"board":{"reachable":true}}`)
+// CRITERION 6. README says doctor reports the verification lane, and what the
+// lane IS is now a self-review shot in the worker's own pane. The prose report
+// is what an operator reads, so it has to say that there and not only in the
+// JSON — an operator told "on" alone would still be looking for a second pane.
+func TestDoctorSaysTheLaneIsASelfReviewShotInTheWorkersOwnPane(t *testing.T) {
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/hdis.sock","base_pane":"wM:p1","max_workers":2,"interval":"15s","verify":{"enabled":true},"board":{"reachable":true}}`)
 	var out strings.Builder
 	if err := Write("doctor", raw, false, &out); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	for _, want := range []string{"verify", "on", "checker"} {
+	for _, want := range []string{"verify", "on", "self-review", "own pane"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("want %q in doctor prose %q", want, out.String())
 		}
+	}
+	if strings.Contains(out.String(), "profile") {
+		t.Errorf("the lane still names a profile it no longer launches: %q", out.String())
 	}
 }
 
@@ -208,12 +212,12 @@ func TestDoctorSaysTheVerificationLaneIsOffWhenItIsOff(t *testing.T) {
 // dispatcher's own config and is known either way, so it is printed before
 // the board line rather than lost behind it.
 func TestDoctorNamesTheLaneEvenWhenTheBoardIsDown(t *testing.T) {
-	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/hdis.sock","base_pane":"wM:p1","max_workers":2,"interval":"15s","verify":{"enabled":true,"profile":"checker"},"board":{"reachable":false,"error":"dial: no socket"}}`)
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/hdis.sock","base_pane":"wM:p1","max_workers":2,"interval":"15s","verify":{"enabled":true},"board":{"reachable":false,"error":"dial: no socket"}}`)
 	var out strings.Builder
 	if err := Write("doctor", raw, false, &out); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if !strings.Contains(out.String(), "checker") {
+	if !strings.Contains(out.String(), "self-review") {
 		t.Fatalf("doctor printed %q", out.String())
 	}
 }

@@ -692,8 +692,8 @@ func doctorOf(t *testing.T, d *Daemon) DoctorReport {
 	return rep
 }
 
-// Doctor says whether the verification lane is on, and with which profile.
-// An operator asking why a submission earned no verifier reads it here.
+// Doctor says whether the verification lane is on. An operator asking why a
+// submission earned no self-review shot reads it here.
 func TestDoctorReportsTheVerificationLane(t *testing.T) {
 	d, _ := newDaemon(t)
 	rep := doctorOf(t, d)
@@ -701,13 +701,13 @@ func TestDoctorReportsTheVerificationLane(t *testing.T) {
 		t.Fatalf("the lane reads as on: %+v", rep.Verify)
 	}
 
-	cfg, err := config.Parse([]byte(`{"default":"w","profiles":{"w":{"provider":"claude"},"v":{"provider":"claude","model":"sonnet"}},"verify":{"enabled":true,"profile":"v"}}`))
+	cfg, err := config.Parse([]byte(`{"default":"w","profiles":{"w":{"provider":"claude"}},"verify":{"enabled":true}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	d.Loop.Config = cfg
 	rep = doctorOf(t, d)
-	if !rep.Verify.Enabled || rep.Verify.Profile != "v" {
+	if !rep.Verify.Enabled {
 		t.Fatalf("the lane reads as %+v", rep.Verify)
 	}
 }

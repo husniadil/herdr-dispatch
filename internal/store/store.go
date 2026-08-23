@@ -77,17 +77,17 @@ type record struct {
 	PromptedAtMS int64  `json:"prompted_at_ms"`
 	Prompts      int    `json:"prompts"`
 	Notified     bool   `json:"notified"`
-	// Kind is which lane the pane was brought up for. It is omitted for a
-	// worker, so a document this binary writes stays readable to one that
-	// predates the verification lane.
+	// Kind is the lane the pane was brought up for. It is omitted for a
+	// worker, which is the only lane there is; a document written while the
+	// verifier lane existed may still carry one, and Load drops it.
 	Kind string `json:"kind,omitempty"`
-	// Verified says a verifier has already been brought up for the
-	// submission a worker's binding is holding.
+	// Verified says the submission this binding is holding has had its
+	// self-review shot.
 	Verified bool `json:"verified,omitempty"`
-	// Worktree is the checkout a verifier works in. The binding is the only
+	// Worktree is the checkout the pane works in. The binding is the only
 	// record of where it is, so a binding that comes back without it leaves
-	// a live verifier's tree with nothing naming it: the retire cannot
-	// remove it, and a startup reap would take it while the verifier is
+	// a live worker's tree with nothing naming it: the retire cannot
+	// remove it, and a startup reap would take it while the worker is
 	// still working in it.
 	Worktree string `json:"worktree,omitempty"`
 	// Tab is the tab the pane was opened in, so a restart can close it when
@@ -95,8 +95,7 @@ type record struct {
 	Tab string `json:"tab,omitempty"`
 	// Branch is where a worker's commits are. The checkout is removed when
 	// the pane is retired and the branch is not, so a binding that comes
-	// back without it leaves an operator with no name for the work and a
-	// verifier with no way to say which commit was submitted.
+	// back without it leaves an operator with no name for the work.
 	Branch string `json:"branch,omitempty"`
 }
 
@@ -121,6 +120,12 @@ func (b *Bindings) Load() (State, error) {
 	}
 	out := make([]decide.Binding, 0, len(doc.Bindings))
 	for _, r := range doc.Bindings {
+		// A document written while the verifier lane existed may name a
+		// verifier pane. Nothing drives one now, so the record is debris
+		// rather than a binding this daemon can honour.
+		if r.Kind != "" && r.Kind != decide.KindWorker {
+			continue
+		}
 		out = append(out, decide.Binding{
 			TaskID:     r.TaskID,
 			Pane:       r.Pane,
@@ -145,15 +150,6 @@ func (b *Bindings) Load() (State, error) {
 	return State{Bindings: out, Reservations: held}, nil
 }
 
-// kindOf writes a verifier's kind and leaves a worker's off: an absent kind
-// is a worker, which is what every binding was before the lane existed.
-func kindOf(b decide.Binding) string {
-	if b.IsVerifier() {
-		return decide.KindVerifier
-	}
-	return ""
-}
-
 // Save writes the whole set, atomically: a temp file in the same directory,
 // flushed, then renamed over the old one. A reader sees the previous
 // document or the new one and never half of either, and a crash mid-write
@@ -167,11 +163,12 @@ func (b *Bindings) Save(state State) error {
 			PromptedAtMS: x.PromptedAt.UnixMilli(),
 			Prompts:      x.Prompts,
 			Notified:     x.Notified,
-			Kind:         kindOf(x),
-			Verified:     x.Verified,
-			Worktree:     x.Worktree,
-			Tab:          x.Tab,
-			Branch:       x.Branch,
+			// A worker's kind is left off: an absent kind reads as one,
+			// which is what every binding is.
+			Verified: x.Verified,
+			Worktree: x.Worktree,
+			Tab:      x.Tab,
+			Branch:   x.Branch,
 		})
 	}
 	for _, x := range state.Reservations {

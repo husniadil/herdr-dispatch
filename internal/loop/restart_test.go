@@ -416,8 +416,8 @@ func TestARestartTouchesNothingThatIsNotItsOwn(t *testing.T) {
 		root := t.TempDir()
 		l.Worktrees = &worktree.Manager{Root: root, Git: filepath.Join(f.Dir, "git")}
 		removingGit(t, f)
-		theirs := filepath.Join(outside, "hdis-verify-9-elsewhere")
-		stranded := filepath.Join(root, "hdis-verify-7-gone")
+		theirs := filepath.Join(outside, "hdis-work-9-elsewhere")
+		stranded := filepath.Join(root, "hdis-work-7-gone")
 		for _, d := range []string{theirs, stranded} {
 			if err := os.MkdirAll(d, 0o700); err != nil {
 				t.Fatal(err)
@@ -475,13 +475,12 @@ func TestARestartReadsTheRowOfAPaneNoBindingNames(t *testing.T) {
 	}
 }
 
-// The three shapes a pane's checkout can have, all named the same way: git
+// The two shapes a pane's checkout can have, both named the same way: git
 // is asked which repository the directory belongs to, and a worktree answers
 // with the repository it was cut from rather than with itself.
 func TestAPanesProjectIsReadFromItsCheckoutWhateverShapeItHas(t *testing.T) {
 	for _, tc := range []struct{ name, cwd string }{
 		{"a worker in its worktree", "/state/hdis/worktrees/hdis-work-7-abc"},
-		{"a verifier in a detached worktree", "/state/hdis/worktrees/hdis-verify-7-abc"},
 		{"a pane opened before worktrees, sitting in the project", "/src/p"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

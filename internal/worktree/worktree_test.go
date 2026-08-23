@@ -37,10 +37,10 @@ func head(t *testing.T, dir string) string {
 }
 
 // A worktree is its own checkout of the project's commit, somewhere else.
-func TestCreateGivesAWorktreeOfItsOwnAtTheProjectCommit(t *testing.T) {
+func TestACheckoutIsItsOwnDirectoryAtTheProjectCommit(t *testing.T) {
 	src := repo(t)
 	m := &Manager{Root: t.TempDir()}
-	path, err := m.Verifier(context.Background(), src, 7, "HEAD")
+	path, _, err := m.Worker(context.Background(), src, 7)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -50,23 +50,26 @@ func TestCreateGivesAWorktreeOfItsOwnAtTheProjectCommit(t *testing.T) {
 	if got, want := head(t, path), head(t, src); got != want {
 		t.Fatalf("worktree is at %s, project is at %s", got, want)
 	}
-	// Detached, so nothing in it can move the project's branch.
-	out, err := exec.Command("git", "-C", path, "symbolic-ref", "-q", "HEAD").Output()
-	if err == nil {
-		t.Fatalf("the worktree is on a branch: %s", out)
+	// On its own branch, so nothing in it can move the project's.
+	out, err := exec.Command("git", "-C", path, "symbolic-ref", "--short", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("symbolic-ref: %v", err)
+	}
+	if got, want := strings.TrimSpace(string(out)), Branch(7); got != want {
+		t.Fatalf("the checkout is on %q, want %q", got, want)
 	}
 }
 
 // Uncommitted work in the project stays in the project. This is the whole
-// reason the lane moved out of the shared tree.
-func TestCreateDoesNotCarryOrDisturbTheProjectsUncommittedWork(t *testing.T) {
+// reason a worker moved out of the shared tree.
+func TestACheckoutDoesNotCarryOrDisturbTheProjectsUncommittedWork(t *testing.T) {
 	src := repo(t)
 	debris := filepath.Join(src, "mutation.go")
 	if err := os.WriteFile(debris, []byte("package p\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	m := &Manager{Root: t.TempDir()}
-	path, err := m.Verifier(context.Background(), src, 7, "HEAD")
+	path, _, err := m.Worker(context.Background(), src, 7)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -78,28 +81,28 @@ func TestCreateDoesNotCarryOrDisturbTheProjectsUncommittedWork(t *testing.T) {
 	}
 }
 
-// Two verifiers at once are two worktrees, never one shared between them.
-func TestTwoCreatesDoNotShareADirectory(t *testing.T) {
+// Two workers at once are two worktrees, never one shared between them.
+func TestTwoCheckoutsDoNotShareADirectory(t *testing.T) {
 	src := repo(t)
 	m := &Manager{Root: t.TempDir()}
-	a, err := m.Verifier(context.Background(), src, 7, "HEAD")
+	a, _, err := m.Worker(context.Background(), src, 7)
 	if err != nil {
 		t.Fatalf("first create: %v", err)
 	}
-	b, err := m.Verifier(context.Background(), src, 7, "HEAD")
+	b, _, err := m.Worker(context.Background(), src, 8)
 	if err != nil {
 		t.Fatalf("second create: %v", err)
 	}
 	if a == b {
-		t.Fatalf("both verifiers were given %s", a)
+		t.Fatalf("both workers were given %s", a)
 	}
 }
 
 // A directory that is not a git repository earns a refusal that names it.
-func TestCreateRefusesADirectoryThatIsNotARepository(t *testing.T) {
+func TestACheckoutRefusesADirectoryThatIsNotARepository(t *testing.T) {
 	m := &Manager{Root: t.TempDir()}
 	plain := t.TempDir()
-	path, err := m.Verifier(context.Background(), plain, 7, "HEAD")
+	path, _, err := m.Worker(context.Background(), plain, 7)
 	if err == nil {
 		t.Fatalf("created %s from a directory that is not a repository", path)
 	}
@@ -112,7 +115,7 @@ func TestCreateRefusesADirectoryThatIsNotARepository(t *testing.T) {
 func TestRemoveLeavesNeitherDirectoryNorRecord(t *testing.T) {
 	src := repo(t)
 	m := &Manager{Root: t.TempDir()}
-	path, err := m.Verifier(context.Background(), src, 7, "HEAD")
+	path, _, err := m.Worker(context.Background(), src, 7)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -131,12 +134,12 @@ func TestRemoveLeavesNeitherDirectoryNorRecord(t *testing.T) {
 	}
 }
 
-// A verifier that left work behind is still removed: the whole point is that
-// nothing in it is worth keeping.
+// A checkout with uncommitted debris in it is still removed: what is worth
+// keeping is committed on the branch, which the removal leaves behind.
 func TestRemoveTakesAWorktreeWithChangesInIt(t *testing.T) {
 	src := repo(t)
 	m := &Manager{Root: t.TempDir()}
-	path, err := m.Verifier(context.Background(), src, 7, "HEAD")
+	path, _, err := m.Worker(context.Background(), src, 7)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -222,60 +225,6 @@ func TestRemovingAWorkersWorktreeLeavesTheBranchAndItsCommitsReachable(t *testin
 	}
 }
 
-// A verifier reads the commit that was SUBMITTED. Now that a worker commits
-// on a branch of its own, the project's HEAD is not that commit and reading
-// it verifies the wrong tree.
-func TestAVerifierDetachesAtTheCommitItIsGivenNotTheProjectsHead(t *testing.T) {
-	src := repo(t)
-	m := &Manager{Root: t.TempDir()}
-	work, branch, err := m.Worker(context.Background(), src, 7)
-	if err != nil {
-		t.Fatalf("worker: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(work, "work.go"), []byte("package p\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{{"add", "-A"}, {"commit", "-q", "-m", "the work"}} {
-		cmd := exec.Command("git", append([]string{"-C", work}, args...)...)
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
-			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
-		}
-	}
-	submitted := head(t, work)
-	if submitted == head(t, src) {
-		t.Fatalf("the project moved with the worker, so this test proves nothing")
-	}
-
-	path, err := m.Verifier(context.Background(), src, 7, branch)
-	if err != nil {
-		t.Fatalf("verifier: %v", err)
-	}
-	if got := head(t, path); got != submitted {
-		t.Fatalf("the verifier reads %s; the submitted commit is %s", got, submitted)
-	}
-	if _, err := os.Stat(filepath.Join(path, "work.go")); err != nil {
-		t.Fatalf("the submitted work is not in the verifier's checkout: %v", err)
-	}
-	// Detached, so nothing the verifier does can move the worker's branch.
-	if out, err := exec.Command("git", "-C", path, "symbolic-ref", "-q", "HEAD").Output(); err == nil {
-		t.Fatalf("the verifier's checkout is on a branch: %s", out)
-	}
-}
-
-// No commit to read is no verifier: falling back to the project's HEAD is
-// the bug this lane exists to avoid.
-func TestVerifierRefusesWhenItIsGivenNoCommitToRead(t *testing.T) {
-	src := repo(t)
-	m := &Manager{Root: t.TempDir()}
-	path, err := m.Verifier(context.Background(), src, 7, "")
-	if err == nil {
-		t.Fatalf("a verifier was given %s with no commit to read", path)
-	}
-}
-
 // Which project a directory belongs to is git's own answer, and a worktree
 // answers with the repository it was cut from rather than with itself. That
 // is what lets a pane be named on the board by the number its agent carries:
@@ -287,11 +236,7 @@ func TestProjectNamesTheRepositoryACheckoutWasCutFrom(t *testing.T) {
 	if err != nil {
 		t.Fatalf("worker: %v", err)
 	}
-	verify, err := m.Verifier(context.Background(), project, 7, head(t, project))
-	if err != nil {
-		t.Fatalf("verifier: %v", err)
-	}
-	for _, dir := range []string{work, verify, project, filepath.Join(project, ".git")} {
+	for _, dir := range []string{work, project, filepath.Join(project, ".git")} {
 		got, err := m.Project(context.Background(), dir)
 		if err != nil {
 			t.Fatalf("project of %s: %v", dir, err)

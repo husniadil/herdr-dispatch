@@ -130,45 +130,36 @@ func PointerGoal(seq int) string {
 		"Reach the dispatcher at $"+DispatcherPaneVar+".", seq, seq, seq, seq)
 }
 
-// VerifierGoal composes the /goal condition a VERIFIER boots with. It is a
-// pointer for the same reason a worker's is: the line is typed into the pane,
-// and nothing long survives it.
+// SelfReviewCondition composes the second condition a worker is prompted with
+// when its own task reaches review. It is the whole of the verification lane:
+// nothing separate launches, and the pane that produced the work is the pane
+// that checks it.
 //
-// What it points at is the whole of the verifier's job — reread what was
-// submitted, run the project's gate with nothing cached, check the report
-// against the code, prove the gate can still fail, and send what it found.
-// The last sentence is the boundary this binary does not cross: verification
-// is delegated to a worker, judgment is not delegated at all.
+// It does not say "review your work", and that is the point. Five rejections
+// in a row — tasks 42, 48, 51, 73 and the earlier 40 — were the same shape: a
+// guard the report documented with no test behind it. Both the worker and an
+// INDEPENDENT verifier read past all five, so rereading is not what catches
+// them; a compiling mutation is. Delete the guard, run the named tests, read
+// the exit code. Believing the work is finished does not change it, which is
+// why a reader who knows the work is not disqualified from running it.
 //
-// NOTHING it names of ours is a command to be found on PATH. A verifier's pane
-// is opened in a detached worktree under the state directory, so a plugin
-// binary that lives in the project's own bin/ is not on its PATH there: the
-// first live verifier hit exactly that and reported through the mail MCP door
-// instead, and the fallback the condition carried at the time, `htask note
-// add`, was a second binary with the same problem. An MCP door is configured
-// for the agent rather than resolved from the working directory, so it is the
-// route that survives the worktree, so the board READ goes through
-// mcp__herdr-tasks__get for the same reason the report routes do: htask
-// happening to be go-installed on one machine is not something the lane
-// guarantees. It names no command at all, of ours or of anyone's: the gate is
-// asked for by what it is for, and the project's own CLAUDE.md says which
-// command delivers it. hdis takes ready tasks off every project's board on
-// the machine and nothing about a board says the project is Go, so a verifier
-// on a Rust board was once told to run `go clean -testcache` and reached the
-// right outcome only by ignoring the instruction. The fallback is the board's note tool
-// because there is no task-scoped note verb: htask carries `task release`,
-// which takes a note and hands the task back, and a separate `note` group for
-// the board. A verifier holds nothing to hand back, so the board note fits.
+// The last clause is not decoration either. A mutation that does not bite is
+// ambiguous — a missing test, or aim that never touched the guard — and
+// silence about it hides exactly the case the operator has to judge, so the
+// worker is asked which one it thinks it is.
 //
-// Rendered with a codex settings path and a profile of --agent claude --model
-// sonnet --effort high, the whole typed line is 493 of the 512 budgeted for a
-// two-digit task; TestTheVerifierLineFitsTheTypedBudget holds it there.
-func VerifierGoal(seq int) string {
-	return fmt.Sprintf("verify task %d: read its report: mcp__herdr-tasks__get, run "+
-		"the gate CLAUDE.md names, uncached, check two claims against the "+
-		"code, write one COMPILING mutation, show it caught, send findings with "+
-		"the mail MCP send to $"+DispatcherPaneVar+", else mcp__herdr-tasks__note_add. "+
-		"Never run task approve or task reject: you report, the operator judges.", seq)
+// It travels through `herdr agent prompt` rather than the typed spawn line,
+// so TypedLineBudget does not bound it; it is kept near a nudge's length
+// anyway, because everything hdis puts into a pane goes through a terminal.
+//
+// Recusal is untouched: this produces no verdict. The task stays in review
+// and the operator still approves or rejects.
+func SelfReviewCondition(seq int) string {
+	return fmt.Sprintf("Task %d is submitted and not yet judged. For every guard, refusal or "+
+		"invariant your report claims, write a COMPILING mutation that removes it, run the "+
+		"tests your report names, and confirm they FAIL. Revert each one. Then report which "+
+		"mutations bit and which did not, and for each that did not, say whether you believe "+
+		"it is a missing test or bad aim.", seq)
 }
 
 // TypedLineBudget bounds the whole line herdr types into a worker's pane.

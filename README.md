@@ -194,21 +194,22 @@ provider's launcher, `"pane"` names the base pane a daemon uses when it was
 not started inside a Herdr pane and was given no `-pane`, and `"verify"` is
 the verification lane.
 
-The lane is off unless the document turns it on. On, it names one of the
-profiles above, and every task a worker of this daemon's submits earns a
-verifier launched from it:
+The lane is off unless the document turns it on. On, every task a worker of
+this daemon's submits earns one self-review shot in that worker's OWN pane:
 
 ```json
 {
-  "verify": { "enabled": true, "profile": "checker" }
+  "verify": { "enabled": true }
 }
 ```
 
-A lane that is on and names no defined profile is refused at parse, not at
-the first review that would have needed it. `hdis doctor` reports whether the
-lane is on and which profile it uses, and `hdis status` marks each pane
-`worker` or `verifier`. What a verifier is for, and the line it does not
-cross, is under [The boundary](#the-boundary).
+It names no profile, because nothing separate launches: the shot lands in a
+pane that is already up, running the profile its worker was launched from. A
+document still carrying `verify.profile` is refused at parse with the field
+named, rather than accepted as a no-op — an operator who set it believes a
+verifier is running. `hdis doctor` reports whether the lane is on and says
+what it buys. What the shot asks for, and the line it does not cross, is
+under [The boundary](#the-boundary).
 
 The `codex` provider's launcher is named by an optional top-level `"proxy"`
 key, and defaults to the literal `proxenos`. It lives in the config rather
@@ -347,9 +348,7 @@ placement is a comparison rather than new state: a worker goes in the tab
 opened for ITS OWN task, or a new tab is opened for it. A tab this daemon
 opened for a DIFFERENT task is not a candidate however much room it has,
 because a tab holding two tasks names only one of them and the label stops
-being the signpost half of its job. A verifier belongs with the worker it
-verifies, which is the same task, so the same comparison puts it in the same
-tab with no special case.
+being the signpost half of its job.
 
 **Inside that tab the panes make a grid.** Panes are added in generations,
 each twice the size of the one before, and every pane in a generation splits
@@ -363,9 +362,9 @@ column of two, six give three and three.
 
 A tab already holding `layout.max_panes_per_tab` panes takes no more: the next
 worker opens another tab, in the same workspace. Because a tab holds one task,
-that cap bounds the panes ONE task may have — a worker and its verifier, two
-today — and it is the readability floor guard and nothing else. It is not what
-keeps two tasks apart.
+that cap bounds the panes ONE task may have — one today — and it is the
+readability floor guard and nothing else. It is not what keeps two tasks
+apart.
 
 **The cap is measured, not guessed.** See
 [The readable width and height](#the-readable-width-and-height).
@@ -548,14 +547,14 @@ spawn. Deleting the matcher was considered and rejected on that evidence.
 
 ## The dispatcher's address
 
-Every pane this daemon opens — worker and verifier alike — is launched with
+Every pane this daemon opens is launched with
 
 ```
 HDIS_DISPATCHER_PANE=<the report address>
 ```
 
-in its environment, and both conditions tell the agent to answer there rather
-than at a pane id written into their text. An agent that comes up in one of
+in its environment, and the worker's condition tells the agent to answer there
+rather than at a pane id written into its text. An agent that comes up in one of
 these panes may read the variable to find out where to report; the text stays
 valid whatever pane that turns out to be.
 
@@ -567,8 +566,7 @@ The address is the desk that owns the work, found in three rungs:
 
 A report belongs to whoever wanted the work, and this daemon is not scoped to
 one repository: it takes ready tasks off every project's board, so the
-operator who started it is routinely not the operator who filed the task. The
-verification lane follows the same rule.
+operator who started it is routinely not the operator who filed the task.
 
 The middle rung exists because a task an operator filed at a terminal has no
 pane of origin — nothing with a pane created it — and the first two rungs
@@ -672,8 +670,7 @@ that question, not a case added to a list.
 
 The two facts are read now, and neither is guessed at. Herdr says which panes
 are alive and which agent name each one registered under, and this daemon's
-names — `hdis-<task>` for a worker, `hdis-v-<task>` for a verifier — carry the
-task number, so the name says a live pane is its own and which row to read.
+names — `hdis-<task>` for a worker — carry the task number, so the name says a live pane is its own and which row to read.
 
 **The name is a label and never the only ownership test**, because Herdr does
 not keep it. Measured on wM:p4E, 2026-08-23: at 00:39 `herdr agent get`
@@ -684,9 +681,9 @@ nothing retired it, and it sat live with its task already finished.
 
 The durable signal is the CHECKOUT. Every agent this dispatcher brings up is
 given a directory of its own under `<state_dir>/worktrees`, named
-`hdis-work-<task>-…` or `hdis-verify-<task>-…`. Nothing else on the machine
-writes there, so a pane whose cwd is one of those is a pane this daemon
-opened, and the directory's own name says which task and which lane. It is
+`hdis-work-<task>-…`. Nothing else on the machine writes there, so a pane whose
+cwd is one of those is a pane this daemon opened, and the directory's own name
+says which task. It is
 Herdr's word about the pane's CWD and never Herdr's word about an agent, which
 is the field that was measured going missing. It is the exact mirror of the
 reap, which already removes a checkout under that root that no binding names.
@@ -709,8 +706,8 @@ under them, and the pane is retired as a pane. The operator is told, and
 halves. A number is unique only inside a project, so it is not a task's address
 on its own: the project comes from the checkout the pane is working in, which
 git names by way of the repository a worktree was cut from. A worker in its
-worktree, a verifier in its detached one, and a pane opened before either
-existed and still sitting in the project all answer the same way, and the row
+worktree, and a pane opened before worktrees existed and still sitting in the
+project, both answer the same way, and the row
 is then read as `task get <number> --project <project>`. A read by ID stays
 board-agnostic and keeps `--all-projects`, because an ID belongs to no
 project; the board refuses a bare number across projects by design, and
@@ -728,10 +725,6 @@ The answers, all of them consequences of the one question:
   under this daemon's principal names it — is bound from what is read now.
 - The row is done or cancelled: the pane is retired. Nothing else will ever
   close a pane this daemon opened for work that is over.
-- The pane is a verifier and the row has left review: the pane is retired.
-  A rejection is enough; the submission it was reading is what it was for. The
-  retire is also what keeps the worktree reap safe, since an unbound checkout
-  would otherwise be removed out from under a running verifier.
 - The row is claimed by a pane that is not this one: the pane is let go
   unbound and left alone. Whose worker the task is now is the board's answer,
   and not a restart's to act on.
@@ -753,8 +746,8 @@ is still keeping for this daemon that no adopted pane is working is stale by
 construction: it is handed back with `task release` and a note saying the
 dispatcher went down before a worker came up, so the task returns to the ready
 list instead of sitting reserved forever. And a checkout under
-`<state_dir>/worktrees` that no binding names is removed, a worker's as
-readily as a verifier's: the binding is the only record of where a checkout
+`<state_dir>/worktrees` that no binding names is removed: the binding is the
+only record of where a checkout
 is, so one lost while the daemon was down leaves the directory with nothing to
 remove it. A worker's commits are on its branch, and the branch outlives the
 directory, so reaping one strands no work. Every one is
@@ -766,8 +759,8 @@ never adopted and never closed. A hold carrying another daemon's principal is
 never released: `task list --mine` is scoped to the principal, so a peer's row
 is not even in the answer, and a reservation record naming a peer is left for
 it. Anything outside `<state_dir>/worktrees` is never removed, and inside it
-only entries carrying the `hdis-` prefix hdis names its own with —
-`hdis-work-` for a worker's checkout, `hdis-verify-` for a verifier's.
+only entries carrying the `hdis-` prefix hdis names its own with,
+`hdis-work-` for a worker's checkout.
 Lease release stays htask's own — a single stale hold this daemon itself is
 named on is handed back, and the pane-gone sweep and the lease timer are never
 reimplemented here.
@@ -805,46 +798,51 @@ The dispatcher stops at review. It never runs `task approve`, `task reject`,
 or any note verb.
 
 The verification lane does not move that line, it works up against it. With
-`"verify"` on, a task one of this dispatcher's own workers submitted earns a
-VERIFIER worker: a fresh pane, the same spawn path, a binding of its own with
-a verifier kind on it. Its condition tells it to reread the report through
-the board's `get` MCP door, run the gate with nothing cached, check the
-report's claims against the code, prove the gate still bites, and send what it
-found through the mail MCP door, or the board's note tool when that door is
-not there — and never to run `task approve` or `task reject`. Nothing of ours
-that the condition names is a command to be looked up on PATH: the pane is
-opened in a worktree where a plugin binary kept in the project's own `bin/` is
-not found, which is how the first live verifier lost `hmail`, and a board read
-resolved from PATH is the same shape of bet. The one command it does name as a
-command is the project's own gate, which is the project's toolchain rather
-than one of our plugins.
-`TestEveryFleetInstructionInTheVerifierConditionNamesADoor` pins the whole
-condition, not only the routes findings leave by. One
-submission earns one verifier; a re-submission after a rejection earns
-another. Verification is delegated. Judgment is not: a verifier reports, the
-operator decides, and the board's review gate is still the only thing that
-moves the task. `TestTheBoardAdapterCarriesNoReviewVerb` and
+`"verify"` on, a task one of this dispatcher's own workers submitted earns one
+SELF-REVIEW SHOT: a second condition prompted into the worker's own pane. No
+pane is opened for it and no agent launches, so it costs a prompt.
+
+The shot lands on a warm prefix. Task 33 put every worker on
+`FORCE_PROMPT_CACHING_5M=1`, so a worker's cache TTL is five minutes, and the
+gap between a submission and the next tick is seconds — the one moment in a
+worker's life when its accumulated context is cheap to reuse. An independent
+verifier spent its whole budget rebuilding what that prefix already held.
+
+**What the condition asks for is the point.** It does not say "review your
+work". Five rejections in a row — tasks 42, 48, 51, 73 and the earlier 40 —
+were the same shape: a guard the report documented with no test behind it, and
+both the worker and an independent verifier read past all five. What caught
+them every time was a compiling mutation: delete the guard, run the named
+tests, read the exit code. That is mechanical, and believing the work is
+finished does not change an exit code, which is why a reader who knows the
+work is not disqualified from running it. So the condition asks for exactly
+that — a mutation per claimed guard, refusal or invariant, the tests the
+report names, the failure confirmed, each mutation reverted — and then for the
+worker's own reading of every mutation that did NOT bite, because that case is
+ambiguous between a missing test and bad aim and the operator needs the
+worker's judgment of it rather than silence.
+`TestTheSelfReviewConditionAsksForAMutationPerClaim` pins each of those asks,
+and `TestARereadRequestIsNotASelfReviewCondition` is what makes the pin worth
+having.
+
+One submission earns one shot, and a re-submission after a rejection earns
+another: `Binding.Verified` remembers it and `Rearm` clears it when the task
+leaves review. The shot produces no verdict — the task stays in review and the
+operator still approves or rejects — so recusal is untouched: it is work done
+before a verdict, not a verdict. `TestTheBoardAdapterCarriesNoReviewVerb` and
 `TestNoSourceFilePassesAReviewVerbAsAnArgument` pin that from both sides.
 
-Every pane this dispatcher opens works in a checkout of its own, and never in
-the project directory. Both are made under `<state_dir>/worktrees` and removed
-when the binding that owns them is dropped, and they differ in what they are
-for:
+The fix after an operator rejection stays a prompt into the same pane, and
+that prefix IS cold by then. Note 30 weighed retiring at submit and kept the
+warm pane on purpose, because a rejection needs the conversation.
 
-- A **worker** gets a `git worktree` on a branch named for its task,
-  `hdis/task-<seq>`, created at the project's current HEAD. It commits, so it
-  needs somewhere its commits can live. Removing the directory later leaves
-  the branch and every commit on it reachable from the project, which is what
-  makes reaping a worker's checkout safe.
-- A **verifier** gets a detached checkout at the commit that was SUBMITTED,
-  which is the tip of the branch its worker committed on. The project's own
-  HEAD is not that commit now that a worker no longer commits to it, and a
-  gate run means nothing when the tree is not the commit under review. When
-  no binding names a branch — a restart rebinds a live pane from what the
-  board says now, and the board does not know which branch the work is on —
-  there is nothing to read and no verifier is spawned. `Loop.Worktrees` is an
-  interface so that choice can be pinned where it is MADE: a pin one layer
-  down only proves the manager honours whatever commit it is handed.
+Every pane this dispatcher opens works in a checkout of its own, and never in
+the project directory. It is made under `<state_dir>/worktrees` and removed
+when the binding that owns it is dropped: a `git worktree` on a branch named
+for the task, `hdis/task-<seq>`, created at the project's current HEAD. A
+worker commits, so it needs somewhere its commits can live. Removing the
+directory later leaves the branch and every commit on it reachable from the
+project, which is what makes reaping a checkout safe.
 
 **hdis integrates nothing.** It creates a branch and it removes checkouts.
 Bringing the work home — fast-forward, merge, cherry-pick, push — and deleting
@@ -856,21 +854,17 @@ The split is not tidiness. It has bitten twice. Two workers sharing the
 project directory is how one task's commit swept up another task's
 uncommitted prose: nothing was lost that night only because both changes were
 wanted, and the next collision would have been two workers editing one file.
-And the verification lane's first live run had the verifier, the worker and
-the operator all mutating one tree: the verifier restored it from
-HEAD and destroyed the operator's uncommitted work, then reported a gate
-result it had measured over that debris rather than over the commit under
-review. A gate run means nothing when the tree is not the commit. So the
-worktree is a precondition rather than a convenience: when it cannot be made
+And the verification lane's first live run, back when it opened a pane of its
+own, had that pane, the worker and the operator all mutating one tree: it
+restored the tree from HEAD, destroyed the operator's uncommitted work, and
+then reported a gate result it had measured over that debris rather than over
+the commit under review. A gate run means nothing when the tree is not the
+commit. So the worktree is a precondition rather than a convenience: when it cannot be made
 — the project is not a git repository, or git refuses — nothing is spawned at
 all, the reason is logged, and the task simply stays where it is for a tick
 that can hand out a checkout. Working in the shared tree is worse than not
-working. `TestAVerifierIsGivenAWorktreeAndNeverTheProjectDirectory`,
-`TestTheWorkerIsGivenAWorktreeOfItsOwnOnItsOwnBranch`,
+working. `TestTheWorkerIsGivenAWorktreeOfItsOwnOnItsOwnBranch`,
 `TestAWorkerIsSpawnedInItsOwnWorktreeNeverTheProjectDirectory`,
-`TestAVerifierDetachesAtTheCommitItIsGivenNotTheProjectsHead`,
-`TestTheVerifierIsSentToTheWorkersBranchAndNeverToHead`,
-`TestNoVerifierIsSpawnedForAWorkerBindingThatNamesNoBranch`,
 `TestWithoutAWorktreeNothingIsSpawned` and `TestARunLeavesNoWorktreeBehind`
 pin each half.
 

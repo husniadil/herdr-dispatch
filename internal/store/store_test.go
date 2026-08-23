@@ -147,14 +147,14 @@ func contains(s, sub string) bool {
 	return false
 }
 
-// A verifier binding comes back a verifier, and the flag that says a
-// submission already had one comes back with it. Without the kind, a restart
-// would re-adopt a verifier as a worker and start nudging it to claim.
-func TestTheBindingKindAndVerificationRoundTrip(t *testing.T) {
+// The flag that says a submission has had its self-review shot comes back
+// with the binding. Without it a restart would shoot the same submission
+// again, and one submission earns exactly one.
+func TestTheVerificationFlagRoundTrips(t *testing.T) {
 	b := &Bindings{Path: filepath.Join(t.TempDir(), "bindings.json")}
 	held := []decide.Binding{
 		{TaskID: "t1", Pane: "wM:p9", PromptedAt: time.UnixMilli(1_700_000_000_000).UTC(), Prompts: 1, Notified: true, Verified: true, Kind: decide.KindWorker},
-		{TaskID: "t1", Pane: "wM:p10", PromptedAt: time.UnixMilli(1_700_000_001_000).UTC(), Prompts: 1, Kind: decide.KindVerifier},
+		{TaskID: "t2", Pane: "wM:p10", PromptedAt: time.UnixMilli(1_700_000_001_000).UTC(), Prompts: 1},
 	}
 	if err := b.Save(State{Bindings: held}); err != nil {
 		t.Fatalf("save: %v", err)
@@ -166,11 +166,31 @@ func TestTheBindingKindAndVerificationRoundTrip(t *testing.T) {
 	if len(got.Bindings) != 2 {
 		t.Fatalf("loaded %d bindings", len(got.Bindings))
 	}
-	if !got.Bindings[0].Verified || got.Bindings[0].IsVerifier() {
-		t.Fatalf("the worker binding came back as %+v", got.Bindings[0])
+	if !got.Bindings[0].Verified {
+		t.Fatalf("the shot was forgotten: %+v", got.Bindings[0])
 	}
-	if !got.Bindings[1].IsVerifier() || got.Bindings[1].Verified {
-		t.Fatalf("the verifier binding came back as %+v", got.Bindings[1])
+	if got.Bindings[1].Verified {
+		t.Fatalf("a shot was invented: %+v", got.Bindings[1])
+	}
+}
+
+// A document written while the verifier lane existed still names verifier
+// panes. Nothing drives one now, so the record is debris and comes back as
+// nothing rather than as a worker this daemon would start nudging to claim.
+func TestAVerifierRecordFromTheOldLaneIsDropped(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bindings.json")
+	raw := `{"version":1,"bindings":[` +
+		`{"task":"t1","pane":"wM:p9","prompted_at_ms":1700000000000,"prompts":1},` +
+		`{"task":"t1","pane":"wM:p10","prompted_at_ms":1700000001000,"prompts":1,"kind":"verifier"}]}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := (&Bindings{Path: path}).Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(got.Bindings) != 1 || got.Bindings[0].Pane != "wM:p9" {
+		t.Fatalf("read back as %+v", got.Bindings)
 	}
 }
 
@@ -186,7 +206,7 @@ func TestABindingWrittenBeforeTheLaneReadsAsAWorker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(got.Bindings) != 1 || got.Bindings[0].IsVerifier() {
+	if len(got.Bindings) != 1 || got.Bindings[0].Kind != "" {
 		t.Fatalf("read back as %+v", got)
 	}
 }
@@ -235,15 +255,15 @@ func TestSavingBindingsKeepsTheReservationsBesideThem(t *testing.T) {
 	}
 }
 
-// A verifier's checkout is named by its binding and nowhere else. A binding
-// that comes back without it leaves the tree with nothing to remove it: the
-// retire cannot, and a startup reap would take it while the verifier is
-// still working in it.
-func TestAVerifiersWorktreeSurvivesARoundTrip(t *testing.T) {
+// A checkout is named by its binding and nowhere else. A binding that comes
+// back without it leaves the tree with nothing to remove it: the retire
+// cannot, and a startup reap would take it while the worker is still
+// working in it.
+func TestACheckoutSurvivesARoundTrip(t *testing.T) {
 	s := tempStore(t)
 	held := []decide.Binding{{
-		TaskID: "01AAA", Pane: "wM:p9", Kind: decide.KindVerifier,
-		Worktree: "/state/hdis/worktrees/hdis-verify-7-abc", PromptedAt: time.Now().UTC(), Prompts: 1,
+		TaskID: "01AAA", Pane: "wM:p9", Kind: decide.KindWorker,
+		Worktree: "/state/hdis/worktrees/hdis-work-7-abc", PromptedAt: time.Now().UTC(), Prompts: 1,
 	}}
 	if err := s.Save(State{Bindings: held}); err != nil {
 		t.Fatalf("save: %v", err)

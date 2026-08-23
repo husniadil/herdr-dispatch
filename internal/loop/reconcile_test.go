@@ -183,14 +183,14 @@ exit 0`)
 }
 
 // A worktree under this daemon's own state dir that no binding names is a
-// verifier's checkout whose binding went before the retire could run. The
-// next start takes it.
+// checkout whose binding went before the retire could run. The next start
+// takes it.
 func TestARestartReapsAWorktreeNoBindingNames(t *testing.T) {
 	l, f := newLoop(t)
 	root := t.TempDir()
 	l.Worktrees = &worktree.Manager{Root: root, Git: filepath.Join(f.Dir, "git")}
 	removingGit(t, f)
-	stranded := filepath.Join(root, "hdis-verify-7-abc")
+	stranded := filepath.Join(root, "hdis-work-7-abc")
 	if err := os.MkdirAll(stranded, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestARestartReapsAWorktreeNoBindingNames(t *testing.T) {
 	if _, err := os.Stat(stranded); !os.IsNotExist(err) {
 		t.Fatalf("the stranded worktree is still there: %v", err)
 	}
-	if !strings.Contains(said.String(), "hdis-verify-7-abc") {
+	if !strings.Contains(said.String(), "hdis-work-7-abc") {
 		t.Fatalf("the operator was not told what was reaped: %q", said.String())
 	}
 }
@@ -215,12 +215,12 @@ func TestARestartKeepsWhatItDidNotStrand(t *testing.T) {
 	root := t.TempDir()
 	l.Worktrees = &worktree.Manager{Root: root, Git: filepath.Join(f.Dir, "git")}
 	removingGit(t, f)
-	bound := filepath.Join(root, "hdis-verify-7-live")
+	bound := filepath.Join(root, "hdis-work-7-live")
 	foreign := filepath.Join(root, "notes")
 	// A directory that IS this daemon's to reap, so the reap is known to have
 	// run and to really remove. Without it the two survivors below prove
 	// nothing: a reap that removed nothing at all would leave them too.
-	stranded := filepath.Join(root, "hdis-verify-9-gone")
+	stranded := filepath.Join(root, "hdis-work-9-gone")
 	for _, d := range []string{bound, foreign, stranded} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatal(err)
@@ -230,7 +230,7 @@ func TestARestartKeepsWhatItDidNotStrand(t *testing.T) {
 	f.Write(t, "tabs.json", `{"id":"x","result":{"type":"tab_list","tabs":[]}}`)
 	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"review"},"ready":false,"dependents":[]}`)
 	if err := l.Store.Save(store.State{Bindings: []decide.Binding{
-		{TaskID: "01AAA", Pane: "wM:p9", Kind: decide.KindVerifier, Worktree: bound, PromptedAt: clock, Prompts: 1},
+		{TaskID: "01AAA", Pane: "wM:p9", Kind: decide.KindWorker, Worktree: bound, PromptedAt: clock, Prompts: 1},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -249,9 +249,9 @@ func TestARestartKeepsWhatItDidNotStrand(t *testing.T) {
 	}
 }
 
-// A worker's checkout is reaped by the same rule as a verifier's: under this
-// daemon's own root, carrying the prefix this daemon names them with, and
-// named by no binding. A directory hdis did not make is left where it is.
+// A worker's checkout is reaped by one rule: under this daemon's own root,
+// carrying the prefix this daemon names them with, and named by no binding.
+// A directory hdis did not make is left where it is.
 func TestARestartReapsAWorkerCheckoutAndLeavesWhatItDidNotMake(t *testing.T) {
 	l, f := newLoop(t)
 	root := t.TempDir()

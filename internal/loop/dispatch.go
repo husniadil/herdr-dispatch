@@ -210,11 +210,11 @@ func (l *Loop) Status(ctx context.Context) (Status, error) {
 }
 
 // behind asks git whether a worker's branch can still be fast-forwarded into
-// the project. A verifier has no branch and nothing to be behind; a git that
-// cannot answer leaves the fact unsaid rather than asserting either way,
-// because status is a report and a guess here is a wrong one.
+// the project. A git that cannot answer leaves the fact unsaid rather than
+// asserting either way, because status is a report and a guess here is a
+// wrong one.
 func (l *Loop) behind(ctx context.Context, project string, b decide.Binding) bool {
-	if b.Branch == "" || b.IsVerifier() || project == "" || l.Worktrees == nil {
+	if b.Branch == "" || project == "" || l.Worktrees == nil {
 		return false
 	}
 	behind, err := l.Worktrees.Behind(ctx, project, b.Branch)
@@ -225,11 +225,9 @@ func (l *Loop) behind(ctx context.Context, project string, b decide.Binding) boo
 	return behind
 }
 
-// awaitingReview reports a worker holding its slot while a human decides. A
-// verifier is not one: it holds no claim and is retired when the submission
-// it was reading settles.
-func awaitingReview(b decide.Binding, status string) bool {
-	return !b.IsVerifier() && status == "review"
+// awaitingReview reports a worker holding its slot while a human decides.
+func awaitingReview(_ decide.Binding, status string) bool {
+	return status == "review"
 }
 
 // AwaitingReview is how many worker slots are spent on panes that have
@@ -247,14 +245,9 @@ func (l *Loop) AwaitingReview() int {
 	return held
 }
 
-// kindOf names a binding's lane for a caller. A binding written before the
-// lane existed carries no kind and is a worker.
-func kindOf(b decide.Binding) string {
-	if b.IsVerifier() {
-		return decide.KindVerifier
-	}
-	return decide.KindWorker
-}
+// kindOf names a binding's lane for a caller. There is one, and a binding
+// written before the kind existed reads as it.
+func kindOf(decide.Binding) string { return decide.KindWorker }
 
 // Pending reports the task ids reserved by a dispatch and not yet spawned.
 func (l *Loop) Pending() []string {

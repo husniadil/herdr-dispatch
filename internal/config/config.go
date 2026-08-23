@@ -46,14 +46,15 @@ type Profile struct {
 }
 
 // Verify is the verification lane's own policy: whether a task that reaches
-// review earns a VERIFIER worker, and which profile that worker launches
-// with. The lane is execution policy like every other profile choice here,
-// and the board carries no trace of it.
+// review earns a self-review shot in the pane that produced it. The lane is
+// execution policy like every other choice here, and the board carries no
+// trace of it.
+//
+// It names no profile. The shot lands in the worker's own pane, which was
+// launched from the worker's own profile, so there is no second launch to
+// configure.
 type Verify struct {
 	Enabled bool `json:"enabled"`
-	// Profile is the name of one of Profiles. It is the verifier's agent
-	// kind, model and effort, in the same shape a worker's is.
-	Profile string `json:"profile"`
 }
 
 // MeasuredReadableColumns is the narrowest pane whose detection text this
@@ -446,6 +447,20 @@ type Config struct {
 
 // Parse reads a config document and refuses one it could not resolve later.
 func Parse(b []byte) (Config, error) {
+	// A document written for the verifier pane still names the profile that
+	// pane launched from. Nothing launches separately now, so the field has
+	// nothing left to name, and an operator who set it believes a verifier
+	// is running. DisallowUnknownFields would refuse it as a bare "profile",
+	// which does not say which one, so it is named here before the decode.
+	var probe struct {
+		Verify struct {
+			Profile *string `json:"profile"`
+		} `json:"verify"`
+	}
+	if err := json.Unmarshal(b, &probe); err == nil && probe.Verify.Profile != nil {
+		return Config{}, fmt.Errorf("hdis config: verify.profile names a verifier pane that no longer launches; the verification lane is a self-review shot in the worker's own pane, so remove the field")
+	}
+
 	var c Config
 	dec := json.NewDecoder(strings.NewReader(string(b)))
 	dec.DisallowUnknownFields()
@@ -482,14 +497,6 @@ func Parse(b []byte) (Config, error) {
 	}
 	if _, ok := c.Profiles[c.Default]; !ok {
 		return Config{}, fmt.Errorf("hdis config: default profile %q is not defined", c.Default)
-	}
-	if c.Verify.Enabled {
-		if c.Verify.Profile == "" {
-			return Config{}, fmt.Errorf("hdis config: the verification lane is on and names no profile")
-		}
-		if _, ok := c.Profiles[c.Verify.Profile]; !ok {
-			return Config{}, fmt.Errorf("hdis config: the verification lane names profile %q, which is not defined", c.Verify.Profile)
-		}
 	}
 	if c.Layout.MinPaneColumns == 0 {
 		c.Layout.MinPaneColumns = MeasuredReadableColumns
@@ -541,20 +548,6 @@ func (c Config) ProfileFor(project string) (Profile, error) {
 	p, ok := c.Profiles[name]
 	if !ok {
 		return Profile{}, fmt.Errorf("hdis config: profile %q is not defined", name)
-	}
-	return p, nil
-}
-
-// VerifyProfile resolves the profile a verifier launches with. A lane that is
-// off has none, and asking for one is the caller's mistake rather than a
-// default to guess at.
-func (c Config) VerifyProfile() (Profile, error) {
-	if !c.Verify.Enabled {
-		return Profile{}, fmt.Errorf("hdis config: the verification lane is off")
-	}
-	p, ok := c.Profiles[c.Verify.Profile]
-	if !ok {
-		return Profile{}, fmt.Errorf("hdis config: the verifier profile %q is not defined", c.Verify.Profile)
 	}
 	return p, nil
 }

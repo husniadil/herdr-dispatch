@@ -1,16 +1,11 @@
 // Package worktree is the checkout an agent this dispatcher spawns works in.
 //
-// The verification lane used to run in the project directory itself, the one
-// its worker still holds and the operator reviews in, and the first live run
-// of the lane broke both ways at once: the verifier restored the tree from
-// HEAD and destroyed the operator's uncommitted mutation, then reported a
-// gate result it had measured on that mutation rather than on the commit
-// under review. A gate run means nothing when the tree is not the commit.
-//
-// So a verifier gets a checkout nobody else is holding: a detached git
-// worktree of the project at its committed HEAD, outside the project
-// directory, removed when the binding that owns it is dropped. Uncommitted
-// work stays where it was, because a worktree carries none of it.
+// A worker gets a checkout nobody else is holding: a git worktree of the
+// project on a branch named for the task, outside the project directory,
+// removed when the binding that owns it is dropped. The project directory —
+// the one the operator sits in and every other worker would otherwise hold —
+// is the one place a worker must never run: two workers in that tree is how
+// one task's commit swept up another task's uncommitted work.
 package worktree
 
 import (
@@ -28,18 +23,15 @@ import (
 // made, and anything else under there is not hdis's to remove.
 const Prefix = "hdis-"
 
-// WorkPrefix names a worker's checkout and VerifyPrefix a verifier's. Both
-// carry Prefix, so one reap covers both lanes.
-const (
-	WorkPrefix   = Prefix + "work-"
-	VerifyPrefix = Prefix + "verify-"
-)
+// WorkPrefix names a worker's checkout. It carries Prefix, so the reap covers
+// it.
+const WorkPrefix = Prefix + "work-"
 
 // Branch is the branch a worker's checkout is put on: named for the task, so
 // an operator reading `git branch` sees which task each one carries.
 func Branch(seq int) string { return fmt.Sprintf("hdis/task-%d", seq) }
 
-// Manager creates and removes the worktrees verifiers work in.
+// Manager creates and removes the worktrees workers work in.
 type Manager struct {
 	// Root is the directory worktrees are created under; empty means the
 	// system temp directory. It is never inside a project.
@@ -85,29 +77,6 @@ func (m *Manager) Worker(ctx context.Context, project string, seq int) (string, 
 		return "", "", fmt.Errorf("no worktree for %s: %w", project, err)
 	}
 	return dir, branch, nil
-}
-
-// Verifier checks the SUBMITTED commit out in a directory of its own and
-// returns it. The commit is named by the caller — the branch the worker
-// committed on — because the project's own HEAD is not what was submitted
-// once a worker stopped committing to it, and a gate run means nothing when
-// the tree is not the commit under review.
-//
-// The checkout is detached on purpose: nothing done in it can move the
-// branch the worker's commits live on.
-func (m *Manager) Verifier(ctx context.Context, project string, seq int, commit string) (string, error) {
-	if commit == "" {
-		return "", fmt.Errorf("no worktree for %s: nothing names the commit that was submitted", project)
-	}
-	root, dir, err := m.prepare(ctx, project, VerifyPrefix, seq)
-	if err != nil {
-		return "", err
-	}
-	if _, err := m.run(ctx, root, "worktree", "add", "--detach", dir, commit); err != nil {
-		os.RemoveAll(dir)
-		return "", fmt.Errorf("no worktree for %s: %w", project, err)
-	}
-	return dir, nil
 }
 
 // Behind reports whether the project's HEAD has moved past the branch: true

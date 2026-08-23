@@ -36,9 +36,6 @@ type Trees interface {
 	// Worker checks the project out on a branch named for the task and
 	// returns the directory and the branch.
 	Worker(ctx context.Context, project string, seq int) (string, string, error)
-	// Verifier checks the given commit out, detached, and returns the
-	// directory. An empty commit is refused rather than read as HEAD.
-	Verifier(ctx context.Context, project string, seq int, commit string) (string, error)
 	// Behind reports whether the project's HEAD has moved past the branch,
 	// which is the state that refuses a fast-forward merge.
 	Behind(ctx context.Context, project, branch string) (bool, error)
@@ -403,27 +400,20 @@ func (l *Loop) nameFor(row herdr.Agent, label string) string {
 }
 
 // nameOfCheckout reads one of this daemon's own checkout directory names —
-// `hdis-work-<seq>-<random>` or `hdis-verify-<seq>-<random>` — back into the
-// agent name that lane and task would have registered under. It is the
-// mirror of the reap, which already removes a checkout under this root that
-// no binding names; this recognises the pane sitting in one.
+// `hdis-work-<seq>-<random>` — back into the agent name that task would have
+// registered under. It is the mirror of the reap, which already removes a
+// checkout under this root that no binding names; this recognises the pane
+// sitting in one.
 func nameOfCheckout(rel string) (string, bool) {
 	dir, _, _ := strings.Cut(rel, string(filepath.Separator))
-	verifier := false
 	rest, ok := strings.CutPrefix(dir, worktree.WorkPrefix)
 	if !ok {
-		if rest, ok = strings.CutPrefix(dir, worktree.VerifyPrefix); !ok {
-			return "", false
-		}
-		verifier = true
+		return "", false
 	}
 	digits, _, _ := strings.Cut(rest, "-")
 	seq, err := strconv.Atoi(digits)
 	if err != nil || seq <= 0 {
 		return "", false
-	}
-	if verifier {
-		return verifierName(seq), true
 	}
 	return workerName(seq), true
 }
@@ -458,18 +448,6 @@ func (l *Loop) reconcile(ctx context.Context, p ourPane) (decide.Binding, htask.
 		l.logf("task %s is %s, retiring the pane %s this daemon opened for it", row.ID, row.Status, p.pane)
 		l.retirePane(ctx, p.pane)
 		return decide.Binding{}, htask.Task{}, false
-	case p.kind == decide.KindVerifier:
-		// A verifier holds no claim, so a claim is not what says its pane is
-		// still real. What it was brought up to read is: the submission it
-		// was checking has to still be in review. The pane goes with it
-		// otherwise — a verifier with nothing left to read is retired on a
-		// live daemon the moment the submission settles, and leaving it open
-		// here would let the reap remove the tree out from under it.
-		if row.Status != "review" {
-			l.logf("task %s is %s, retiring the verifier pane %s with nothing left to read", row.ID, row.Status, p.pane)
-			l.retirePane(ctx, p.pane)
-			return decide.Binding{}, htask.Task{}, false
-		}
 	default:
 		if claimed := row.Pane(); claimed != "" && claimed != p.pane {
 			// Whose worker the task is now is the board's answer, not a
@@ -525,14 +503,9 @@ func (l *Loop) project(ctx context.Context, cwd string) (string, error) {
 	return l.Worktrees.Project(ctx, cwd)
 }
 
-// bindingKind is the lane a binding names, with the empty kind of a binding
-// written before the verification lane existed reading as a worker.
-func bindingKind(b decide.Binding) string {
-	if b.IsVerifier() {
-		return decide.KindVerifier
-	}
-	return decide.KindWorker
-}
+// bindingKind is the lane a binding names. There is one, and a binding
+// written before the kind existed reads as it.
+func bindingKind(decide.Binding) string { return decide.KindWorker }
 
 // lane reads one of this daemon's own agent names: which lane the pane was
 // opened for and which task number it was opened on. A name this daemon does
@@ -542,15 +515,11 @@ func lane(name string) (string, int, bool) {
 	if !ok {
 		return "", 0, false
 	}
-	kind := decide.KindWorker
-	if v, isVerifier := strings.CutPrefix(rest, "v-"); isVerifier {
-		kind, rest = decide.KindVerifier, v
-	}
 	seq, err := strconv.Atoi(rest)
 	if err != nil || seq <= 0 {
 		return "", 0, false
 	}
-	return kind, seq, true
+	return decide.KindWorker, seq, true
 }
 
 // retirePane closes a pane a dropped binding named, through the same pipeline
@@ -791,8 +760,6 @@ func (l *Loop) apply(ctx context.Context, actions []decide.Action) {
 		switch a.Kind {
 		case decide.Spawn:
 			err = l.spawn(ctx, a)
-		case decide.SpawnVerifier:
-			err = l.spawnVerifier(ctx, a)
 		case decide.Rearm:
 			// The submission the announcement and the verification belonged
 			// to has left review. If it comes back, both are due again.
@@ -891,102 +858,13 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 	return err
 }
 
-// spawnVerifier brings up a VERIFIER for a task one of this dispatcher's own
-// workers submitted: a fresh pane, the same spawn path, its own binding with
-// the verifier's kind on it.
-//
-// The verifier's own condition is what keeps this inside the boundary. It
-// rereads, reruns and reports; it never approves and never rejects, and this
-// binary still runs no review verb of its own. Delegating the reading is not
-// delegating the judgment.
-func (l *Loop) spawnVerifier(ctx context.Context, a decide.Action) error {
-	row, ok := l.row(a.TaskID)
-	if !ok {
-		return fmt.Errorf("no board row to verify")
-	}
-	profile, err := l.Config.VerifyProfile()
-	if err != nil {
-		return err
-	}
-	// The checkout comes first, and no checkout means no verifier. A
-	// verifier reads and mutates the tree it is put in, so the project's own
-	// directory — which the operator reviews in — is the one place it must
-	// never run: the lane's first live run restored that tree from HEAD,
-	// destroyed the operator's uncommitted work, and then reported a gate
-	// result measured on it. Not verifying is the better failure, and the
-	// next tick may try again.
-	if l.Worktrees == nil {
-		return fmt.Errorf("no worktree manager, so nothing verifies task %s in a tree of its own", row.Project)
-	}
-	// And it reads the commit that was SUBMITTED, which is the tip of the
-	// branch its worker committed on. The project's own HEAD is not that
-	// commit now that a worker no longer commits to it, and a gate run means
-	// nothing when the tree is not the commit under review.
-	tree, err := l.Worktrees.Verifier(ctx, row.Project, row.Seq, l.branchFor(row.ID))
-	if err != nil {
-		return err
-	}
-	pane, err := l.Spawn.Run(ctx, spawn.Request{
-		Name:       verifierName(row.Seq),
-		Label:      spawn.TabLabel(row.Seq),
-		BasePane:   l.BasePane,
-		OriginPane: row.PaneID,
-		Project:    row.Project,
-		Cwd:        tree,
-		Profile:    profile,
-		Goal:       spawn.VerifierGoal(row.Seq),
-	})
-	if pane == "" {
-		// Nothing came up, so the submission has not had its verifier and
-		// the next tick may try again. The checkout it would have worked in
-		// goes with it.
-		if rmErr := l.Worktrees.Remove(ctx, tree); rmErr != nil {
-			l.logf("task %s: %v", row.ID, rmErr)
-		}
-		return err
-	}
-	l.mu.Lock()
-	l.bindings = append(l.bindings, decide.Binding{
-		TaskID:     row.ID,
-		Pane:       pane,
-		Kind:       decide.KindVerifier,
-		Worktree:   tree,
-		Tab:        l.Spawn.TabOf(pane),
-		PromptedAt: l.now(),
-		Prompts:    1,
-	})
-	// The worker's binding is where "this submission has had its verifier"
-	// is remembered, and Rearm is what clears it.
-	for i := range l.bindings {
-		if l.bindings[i].TaskID == row.ID && !l.bindings[i].IsVerifier() {
-			l.bindings[i].Verified = true
-		}
-	}
-	l.saveLocked()
-	l.mu.Unlock()
-	return err
-}
-
-// branchFor is the branch the worker of a task committed on, or empty when
-// no worker binding of this daemon's names one.
-func (l *Loop) branchFor(taskID string) string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	for _, b := range l.bindings {
-		if b.TaskID == taskID && !b.IsVerifier() {
-			return b.Branch
-		}
-	}
-	return ""
-}
-
-// rearm forgets the announcement and the verification on a task's worker
-// binding, because the submission they belonged to is no longer in review.
+// rearm forgets the announcement and the verification on a task's binding,
+// because the submission they belonged to is no longer in review.
 func (l *Loop) rearm(taskID string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for i := range l.bindings {
-		if l.bindings[i].TaskID == taskID && !l.bindings[i].IsVerifier() {
+		if l.bindings[i].TaskID == taskID {
 			l.bindings[i].Notified = false
 			l.bindings[i].Verified = false
 		}
@@ -1007,6 +885,11 @@ func (l *Loop) prompt(ctx context.Context, a decide.Action) error {
 		if l.bindings[i].TaskID == a.TaskID {
 			l.bindings[i].Prompts++
 			l.bindings[i].PromptedAt = l.now()
+			// The binding is where "this submission has had its shot" is
+			// remembered, and Rearm is what clears it.
+			if a.Reason == decide.ReasonSelfReview {
+				l.bindings[i].Verified = true
+			}
 		}
 	}
 	l.saveLocked()
@@ -1015,6 +898,11 @@ func (l *Loop) prompt(ctx context.Context, a decide.Action) error {
 
 func (l *Loop) nudge(a decide.Action) string {
 	name := l.taskName(a.TaskID)
+	if a.Reason == decide.ReasonSelfReview {
+		// Not a nudge at all: the worker submitted and is owed a second
+		// condition, composed beside the one it booted with.
+		return spawn.SelfReviewCondition(l.seqFor(a.TaskID))
+	}
 	if a.Reason == decide.ReasonRejected {
 		// Naming the rejection is the whole point: a worker told only to
 		// carry on carries on with work it believes finished, instead of
@@ -1063,12 +951,10 @@ func (l *Loop) retire(ctx context.Context, a decide.Action) error {
 }
 
 // drop forgets one binding, by the pane it names, and takes the worktree the
-// binding owned with it. The pane is what a binding is unique by: a task in
-// review can hold a worker's binding and its verifier's at once, and dropping
-// by task would take both.
+// binding owned with it. The pane is what a binding is unique by.
 //
-// The binding is the only record of where a verifier's checkout is, so
-// removing it here is the one place that record is spent. It is written to
+// The binding is the only record of where a checkout is, so removing it here
+// is the one place that record is spent. It is written to
 // the store, so a restart inherits the removal rather than leaking it.
 func (l *Loop) drop(ctx context.Context, pane string) {
 	l.mu.Lock()
@@ -1137,11 +1023,6 @@ func (l *Loop) taskNumber(taskID string) string {
 // [a-z][a-z0-9_-]{0,31} and to be unique among live agents; one worker per
 // task number is both.
 func workerName(seq int) string { return fmt.Sprintf("hdis-%d", seq) }
-
-// verifierName is the agent name a verifier registers under, apart from the
-// worker's: herdr requires the name to be unique among live agents, and both
-// panes are live at once.
-func verifierName(seq int) string { return fmt.Sprintf("hdis-v-%d", seq) }
 
 func (l *Loop) now() time.Time {
 	if l.Now != nil {

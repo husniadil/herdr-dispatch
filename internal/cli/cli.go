@@ -199,13 +199,13 @@ func Usage() string {
 	return b.String()
 }
 
-// verifyLane is the verification lane in a line: on names the profile a
-// verifier launches from, off says so rather than leaving it to be inferred.
+// verifyLane is the verification lane in a line: on says what a submission
+// buys and where it lands, off says so rather than leaving it to be inferred.
 func verifyLane(v daemon.VerifyHealth) string {
 	if !v.Enabled {
-		return "off: a submission earns no verifier"
+		return "off: a submission earns no self-review shot"
 	}
-	return fmt.Sprintf("on, verifiers launch from profile %q", v.Profile)
+	return "on: a submission earns one self-review shot in the worker's own pane"
 }
 
 func or(s, fallback string) string {

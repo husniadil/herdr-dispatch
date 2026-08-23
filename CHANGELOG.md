@@ -7,6 +7,35 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+The verification lane is now a self-review shot in the worker's OWN pane. A
+task reaching review no longer earns a VERIFIER: no second pane, no second
+agent, no throwaway checkout. It earns one prompt into the pane that produced
+the work, carrying a second condition. `verify.enabled` keeps its meaning — a
+submission earns a verification pass — and now buys that shot.
+
+`verify.profile` is GONE, and a config document still carrying it is refused
+at parse with the field named. There is nothing left for it to name: the shot
+lands in a pane already running the worker's own profile. Callers remove the
+field.
+
+`doctor`'s `verify` block loses `profile` and keeps `enabled`; its prose line
+now says the lane is a self-review shot in the worker's own pane. `status`
+keeps `kind` on each worker row, and `worker` is the only value it takes — the
+`verifier` value is gone with the lane. A bindings document naming a verifier
+pane still loads, and those records are dropped as debris rather than driven.
+
+What the second condition asks for is the whole point of the change. Not
+"review your work": the blind spot that produced the work survives rereading
+it, and an independent verifier read past the same five rejections the worker
+did. It asks for the mechanical thing — for every guard, refusal or invariant
+the report claims, write a COMPILING mutation that removes it, run the tests
+the report names, confirm they FAIL, revert — and then for which mutations bit,
+which did not, and whether the worker reads each miss as a missing test or bad
+aim.
+
+Nothing about review authority moves. The shot produces no verdict: the task
+stays in review and the operator still approves or rejects.
+
 The pane cap is now derived from a measured HEIGHT as well as a measured
 width. `max_panes_per_tab` stays 16, but for the first time that number is an
 answer to both axes rather than to one of them with the other unexamined. Only

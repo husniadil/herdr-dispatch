@@ -788,84 +788,66 @@ func TestTheClaudeProviderWritesNoSettingsFile(t *testing.T) {
 	}
 }
 
-// The verifier's condition says in one line what it must never do. It is the
-// only place in this repo that names approve or reject at all, and it names
-// them to forbid them.
-func TestTheVerifierGoalForbidsApprovingAndRejecting(t *testing.T) {
-	goal := VerifierGoal(23)
-	for _, want := range []string{"never run", "task approve", "task reject"} {
-		if !strings.Contains(strings.ToLower(goal), want) {
-			t.Fatalf("the verifier goal does not carry %q: %s", want, goal)
+// CRITERION 4. The second condition a submission earns must ask for the
+// MECHANICAL thing. What it asks for is pinned here piece by piece, so that
+// rewording it into "review your work" fails.
+func TestTheSelfReviewConditionAsksForAMutationPerClaim(t *testing.T) {
+	goal := SelfReviewCondition(23)
+	if missing := mechanicalAsks(goal); len(missing) > 0 {
+		t.Fatalf("the self-review condition does not ask for %v: %s", missing, goal)
+	}
+	if !strings.Contains(goal, "task 23") && !strings.Contains(goal, "Task 23") {
+		t.Fatalf("the self-review condition does not name the task: %s", goal)
+	}
+}
+
+// And the guard is only worth what it catches. A reread request, however
+// earnestly worded, is what the lane exists to not be.
+func TestARereadRequestIsNotASelfReviewCondition(t *testing.T) {
+	for name, text := range map[string]string{
+		"review your work": "Task 23 is submitted. Review your work and fix anything wrong before the operator reads it.",
+		"reread the diff":  "Task 23 is submitted. Reread the whole diff and check your report against the code.",
+		"no failure asked": "Task 23 is submitted. For every guard your report claims, write a COMPILING mutation that removes it, run the tests your report names, and revert each one. Then report which mutations bit and which did not, and whether it is a missing test or bad aim.",
+		"no bite report":   "Task 23 is submitted. For every guard your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one.",
+		"no revert":        "Task 23 is submitted. For every guard your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Then report which mutations bit and which did not, and whether it is a missing test or bad aim.",
+		"no mutation":      "Task 23 is submitted. For every guard your report claims, run the tests your report names and confirm they FAIL. Then report which checks bit and which did not, and whether it is a missing test or bad aim.",
+	} {
+		if missing := mechanicalAsks(text); len(missing) == 0 {
+			t.Errorf("%q passes as a self-review condition: %s", name, text)
 		}
 	}
 }
 
-// It is a pointer, like the worker's: it names the task, where the report is
-// read from, and how findings leave. None of the criteria travel on it.
-func TestTheVerifierGoalPointsAtTheBoardAndAtItsMailDoor(t *testing.T) {
-	goal := VerifierGoal(23)
-	for _, want := range []string{"mcp__herdr-tasks__get", "the gate CLAUDE.md names", "mail MCP", "mcp__herdr-tasks__note_add"} {
-		if !strings.Contains(goal, want) {
-			t.Fatalf("the verifier goal does not carry %q: %s", want, goal)
+// mechanicalAsks names the parts of the second condition that are missing
+// from a text. Each is one step of the check the operator has been running by
+// hand: a mutation per claim, the tests the report named, the failure
+// confirmed, the mutation reverted, and the worker's own reading of every
+// mutation that did not bite.
+func mechanicalAsks(goal string) []string {
+	lower := strings.ToLower(goal)
+	var missing []string
+	for ask, phrases := range map[string][]string{
+		"a mutation per claimed guard":       {"mutation"},
+		"every claim in the report":          {"for every guard"},
+		"a mutation that compiles":           {"compiling"},
+		"the tests the report names":         {"run the tests your report names"},
+		"the failure confirmed":              {"confirm they fail"},
+		"the mutation reverted":              {"revert"},
+		"which mutations bit":                {"which mutations bit and which did not"},
+		"a reading of the ones that did not": {"missing test or bad aim"},
+	} {
+		found := false
+		for _, phrase := range phrases {
+			if strings.Contains(lower, phrase) {
+				found = true
+			}
+		}
+		if !found {
+			missing = append(missing, ask)
 		}
 	}
-}
-
-// The first route a verifier is told to report through has to be one the pane
-// it was spawned into actually has. A pane is opened in a detached worktree
-// under the state directory, so a binary that lives in the project's own bin/
-// is not on its PATH there; the first live verifier proved it, reporting
-// through the mail MCP door because `hmail` was not found. An MCP door is
-// configured for the agent, not resolved from the working directory, so it is
-// the route that survives the worktree. This pins the reasoning: whatever the
-// condition names first must not be a command to be found on PATH.
-func TestTheVerifierReportsThroughADoorAndNotAPathLookup(t *testing.T) {
-	goal := VerifierGoal(23)
-	first := strings.Index(goal, "send findings with ")
-	if first < 0 {
-		t.Fatalf("the verifier goal names no reporting route: %s", goal)
-	}
-	route := goal[first:]
-	door := strings.Index(route, "MCP")
-	if door < 0 {
-		t.Fatalf("the first reporting route is not an MCP door: %s", route)
-	}
-	for _, cli := range []string{"hmail", "htask note add"} {
-		if at := strings.Index(route, cli); at >= 0 && at < door {
-			t.Fatalf("the first reporting route is %q, a binary the pane may not have: %s", cli, route)
-		}
-	}
-}
-
-// A verifier that cannot use the first route needs a second one, and a second
-// route is worth nothing if it needs the same binary the first one avoided.
-// Both routes this condition names are MCP doors; neither is a CLI this
-// dispatcher installs into the worktree it opens.
-func TestNeitherVerifierReportRouteNeedsABinaryOnPath(t *testing.T) {
-	goal := VerifierGoal(23)
-	routes := goal[strings.Index(goal, "send findings with "):]
-	routes = routes[:strings.Index(routes, ". ")]
-	if strings.Count(strings.ToLower(routes), "mcp") < 2 {
-		t.Fatalf("the verifier is given fewer than two MCP doors to report through: %s", routes)
-	}
-	for _, cli := range []string{"hmail", "htask note add", "htask task note"} {
-		if strings.Contains(routes, cli) {
-			t.Fatalf("a reporting route falls back to %q, a binary the pane may not have: %s", cli, routes)
-		}
-	}
-}
-
-// The verifier's line is typed into its pane exactly as a worker's is, so it
-// answers to the same budget.
-func TestTheVerifierLineFitsTheTypedBudget(t *testing.T) {
-	p := config.Profile{Provider: config.ProviderCodex, Agent: "claude", Model: "sonnet", Effort: "high"}
-	args := append(p.AgentArgs(), GoalPrefix+VerifierGoal(23))
-	args = append([]string{"--settings", "/var/folders/ab/cdefghij0k1lmnop2qrstuvw0000gn/T/hdis-settings-1234567890.json"}, args...)
-	line := TypedLine(args)
-	t.Logf("verifier line: %d of %d budgeted, on %q", len(line), TypedLineBudget, line)
-	if len(line) > TypedLineBudget {
-		t.Fatalf("the verifier line is %d characters and the budget is %d: %s", len(line), TypedLineBudget, line)
-	}
+	sort.Strings(missing)
+	return missing
 }
 
 // A worker needs an address for the dispatcher that spawned it, and the one
@@ -904,17 +886,18 @@ func TestTheDispatcherPaneEnvNamesTheBasePaneAndNotTheWorkersOwn(t *testing.T) {
 	t.Fatalf("the split carries no %s pair: %v", DispatcherPaneVar, split)
 }
 
-// Both conditions hand the agent the variable rather than a pane id baked
-// into their text: the text is composed once per task, and the address is
-// whatever the daemon is running on this time.
-func TestBothConditionsAddressTheDispatcherThroughTheEnvVar(t *testing.T) {
-	for name, goal := range map[string]string{"worker": PointerGoal(23), "verifier": VerifierGoal(23)} {
-		if !strings.Contains(goal, "$"+DispatcherPaneVar) {
-			t.Errorf("the %s condition does not name $%s: %s", name, DispatcherPaneVar, goal)
-		}
+// The condition hands the agent the variable rather than a pane id baked into
+// its text: the text is composed once per task, and the address is whatever
+// the daemon is running on this time. No condition may carry a pane id, and
+// the one that names a route to the dispatcher must name it as the variable.
+func TestNoConditionWritesAPaneIDIntoItsText(t *testing.T) {
+	for name, goal := range map[string]string{"worker": PointerGoal(23), "self-review": SelfReviewCondition(23)} {
 		if paneID.MatchString(goal) {
 			t.Errorf("the %s condition writes a pane id into its text: %s", name, goal)
 		}
+	}
+	if !strings.Contains(PointerGoal(23), "$"+DispatcherPaneVar) {
+		t.Errorf("the worker condition does not name $%s: %s", DispatcherPaneVar, PointerGoal(23))
 	}
 }
 
@@ -941,67 +924,6 @@ func hasPair(argv []string, flag, value string) bool {
 		}
 	}
 	return false
-}
-
-// fleetCLIs finds every place a condition tells an agent to run one of THIS
-// fleet's own binaries. Each of them is resolved from PATH, and a verifier's
-// pane is opened in a detached worktree where a plugin's own bin/ is not on
-// it. The project's own gate is deliberately not in this set: it is the
-// project's toolchain, not one of our plugins, and a verifier that cannot run
-// it has nothing to verify. Which command that is comes from the project's
-// own CLAUDE.md; see toolchainCommands for why this binary never names one.
-func fleetCLIs(goal string) []string {
-	var found []string
-	for _, cli := range []string{"htask ", "hmail ", "hdis "} {
-		if strings.Contains(goal, cli) {
-			found = append(found, strings.TrimSpace(cli))
-		}
-	}
-	return found
-}
-
-// Task 29 moved the two REPORT routes onto MCP doors and left the read as
-// `htask task get`, which is the same shape that broke the report route: a
-// binary hoped for on PATH. It survives only because htask happens to be
-// installed globally on one machine. This pins the WHOLE condition rather
-// than its report routes: every instruction that reaches one of this fleet's
-// own plugins names a door.
-func TestEveryFleetInstructionInTheVerifierConditionNamesADoor(t *testing.T) {
-	goal := VerifierGoal(23)
-	if got := fleetCLIs(goal); len(got) > 0 {
-		t.Fatalf("the verifier condition tells a verifier to run %v, binaries its worktree may not have: %s", got, goal)
-	}
-	if !strings.Contains(goal, "mcp__herdr-tasks__get") {
-		t.Fatalf("the verifier reads the board through no door: %s", goal)
-	}
-}
-
-// And the guard above is only worth what it catches. Put any one of those
-// instructions back as a CLI invocation and it has to fail.
-func TestTheDoorGuardCatchesAnInstructionPutBackAsACLI(t *testing.T) {
-	for name, mutant := range map[string]string{
-		"the board read":    strings.Replace(VerifierGoal(23), "mcp__herdr-tasks__get", "htask task get 23", 1),
-		"the report route":  strings.Replace(VerifierGoal(23), "the mail MCP send", "hmail send", 1),
-		"the note fallback": strings.Replace(VerifierGoal(23), "mcp__herdr-tasks__note_add", "htask note add", 1),
-	} {
-		if got := fleetCLIs(mutant); len(got) == 0 {
-			t.Errorf("%s put back as a CLI is not caught: %s", name, mutant)
-		}
-	}
-}
-
-// The gate is the other side of the same line. What a verifier is told to run
-// is the PROJECT's own gate, and no door of ours stands in front of it.
-func TestTheVerifierGateCommandIsTheProjectsOwn(t *testing.T) {
-	goal := VerifierGoal(23)
-	for _, want := range []string{"the gate CLAUDE.md names", "uncached"} {
-		if !strings.Contains(goal, want) {
-			t.Fatalf("the verifier is not told to run the project's own gate (%q missing): %s", want, goal)
-		}
-	}
-	if got := fleetCLIs("the gate CLAUDE.md names"); len(got) > 0 {
-		t.Fatalf("the guard mistakes the project's own gate for one of our plugins: %v", got)
-	}
 }
 
 // A worker is short-lived and disposable, so its pane is launched asking the
@@ -1286,27 +1208,6 @@ func TestAWorkerJoinsOnlyTheTabOpenedForItsOwnTask(t *testing.T) {
 	}
 }
 
-// A verifier belongs with the worker it verifies, which is the same task, so
-// it needs no special case: the same comparison puts it in that task's tab.
-func TestAVerifierLandsInTheTabOfTheTaskItVerifies(t *testing.T) {
-	h := newHarness(t, []string{goalActive}, startRegistered)
-	ownTab(t, h, "wM:p9")
-
-	r := req(claudeProfile())
-	r.Name = "hdis-verify-7"
-	r.Goal = VerifierGoal(7)
-	if _, err := h.pipe.Run(context.Background(), r); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-	if n := count(h.verbs(t), "tab create"); n != 0 {
-		t.Errorf("the verifier opened %d tab(s) of its own instead of joining its worker's", n)
-	}
-	argv := splitArgvOf(t, h)
-	if !hasPair(argv, "--pane", "wM:p9") {
-		t.Errorf("the verifier was not split into its worker's tab: %v", argv)
-	}
-}
-
 // CRITERION 4. Four panes in one tab are a 2x2 grid, and the reason is the
 // split TARGET rather than the direction alone: the third goes DOWN off the
 // FIRST, not off the last pane in the tab.
@@ -1405,20 +1306,19 @@ func sortedKeys(m map[string][]string) []string {
 	return keys
 }
 
-// A verifier for a Rust project was told to run `go clean -testcache` and
-// skipped it, which is the right outcome reached by ignoring an instruction.
-// The condition must not put an agent in that position: the gate is named by
-// what it is for, and the project's own CLAUDE.md names the command.
-func TestTheVerifierConditionNamesNoToolchainCommand(t *testing.T) {
-	goal := VerifierGoal(23)
+// An agent on a Rust board was once told to run `go clean -testcache` and
+// reached the right outcome only by ignoring the instruction. No condition
+// this binary composes may put an agent in that position: hdis takes ready
+// tasks off every board on the machine, and nothing about a board says which
+// toolchain the project has. The self-review condition names the tests the
+// REPORT names, which is the project's own vocabulary rather than ours.
+func TestTheSelfReviewConditionNamesNoToolchainCommand(t *testing.T) {
+	goal := SelfReviewCondition(23)
 	if got := toolchainCommands(goal); len(got) > 0 {
-		t.Fatalf("the verifier condition names %v, a toolchain no board promises: %s", got, goal)
+		t.Fatalf("the self-review condition names %v, a toolchain no board promises: %s", got, goal)
 	}
-	if !strings.Contains(goal, "the gate CLAUDE.md names") {
-		t.Fatalf("the verifier is not sent to the gate CLAUDE.md names: %s", goal)
-	}
-	if !strings.Contains(goal, "uncached") {
-		t.Fatalf("the verifier is not told to run the gate uncached: %s", goal)
+	if !strings.Contains(goal, "run the tests your report names") {
+		t.Fatalf("the self-review condition does not send the worker to the tests its report named: %s", goal)
 	}
 }
 
@@ -1426,15 +1326,15 @@ func TestTheVerifierConditionNamesNoToolchainCommand(t *testing.T) {
 // toolchains back into the condition as a literal and it has to fail.
 func TestTheToolchainGuardCatchesEachToolchainPutBack(t *testing.T) {
 	for _, mutation := range []string{
-		"go clean -testcache then the gate CLAUDE.md names",
-		"cargo test after the gate CLAUDE.md names",
-		"npm ci then the gate CLAUDE.md names",
-		"make test-full, the gate CLAUDE.md names",
-		"just gate, the gate CLAUDE.md names",
-		"gradle build then the gate CLAUDE.md names",
-		"mvn verify, the gate CLAUDE.md names",
+		"go clean -testcache then run the tests your report names",
+		"cargo test after the tests your report names",
+		"npm ci then run the tests your report names",
+		"make test-full, and the tests your report names",
+		"just gate, and the tests your report names",
+		"gradle build then the tests your report names",
+		"mvn verify, and the tests your report names",
 	} {
-		mutant := strings.Replace(VerifierGoal(23), "the gate CLAUDE.md names, uncached", mutation, 1)
+		mutant := strings.Replace(SelfReviewCondition(23), "run the tests your report names", mutation, 1)
 		if got := toolchainCommands(mutant); len(got) == 0 {
 			t.Errorf("%q put back into the condition is not caught: %s", mutation, mutant)
 		}
@@ -1453,18 +1353,17 @@ func TestTheToolchainGuardDoesNotFireOnOrdinaryEnglish(t *testing.T) {
 		"the run has to go green",
 		"cargo cult the previous fix",
 	} {
-		mutant := strings.Replace(VerifierGoal(23), "check two claims against the code", phrase, 1)
+		mutant := strings.Replace(SelfReviewCondition(23), "run the tests your report names", phrase, 1)
 		if got := toolchainCommands(mutant); len(got) > 0 {
 			t.Errorf("%q is ordinary English and the guard reports %v: %s", phrase, got, mutant)
 		}
 	}
 }
 
-// The rule task 46 chose was that hdis names no toolchain command at all, and
-// the guard was only ever pointed at the verifier's condition. Every condition
-// this binary hands an agent is covered by the same rule.
+// The rule task 46 chose was that hdis names no toolchain command at all.
+// Every condition this binary hands an agent is covered by it.
 func TestNoDispatchedConditionNamesAToolchainCommand(t *testing.T) {
-	for name, goal := range map[string]string{"worker": PointerGoal(23), "verifier": VerifierGoal(23)} {
+	for name, goal := range map[string]string{"worker": PointerGoal(23), "self-review": SelfReviewCondition(23)} {
 		if got := toolchainCommands(goal); len(got) > 0 {
 			t.Errorf("the %s condition names %v, a toolchain no board promises: %s", name, got, goal)
 		}
