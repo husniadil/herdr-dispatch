@@ -277,6 +277,25 @@ func match(rows []htask.Task, ref string) (htask.Task, bool) {
 	return htask.Task{}, false
 }
 
+// attempt takes the slot for a spawn about to run.
+//
+// It is what a tick calls before every spawn, and it is idempotent in the
+// only sense that matters: a task reserved by a dispatch keeps that
+// reservation and its owner, and nothing about it moves.
+func (l *Loop) attempt(taskID string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, held := range l.pending {
+		if held.TaskID == taskID {
+			return
+		}
+	}
+	l.pending = append(l.pending, store.Reservation{
+		TaskID: taskID, Owner: l.principal(), At: l.now(),
+	})
+	l.saveLocked()
+}
+
 // unreserve drops a reservation, whether it was spent on a spawn or taken
 // back by the board.
 func (l *Loop) unreserve(taskID string) {

@@ -803,6 +803,14 @@ func (l *Loop) apply(ctx context.Context, actions []decide.Action) {
 		var err error
 		switch a.Kind {
 		case decide.Spawn:
+			// The reservation goes in BEFORE the spawn, because the spawn
+			// runs with mu released and takes minutes. Without it that
+			// window is invisible: a dispatch arriving inside it sees a free
+			// slot and a task nothing holds, so it reserves a task already
+			// being spawned for and the fleet ends up one worker over
+			// MaxWorkers — after which every later tick reads live >=
+			// MaxWorkers and dispatches nothing at all.
+			l.attempt(a.TaskID)
 			err = l.spawn(ctx, a)
 		case decide.Rearm:
 			// The submission the announcement and the verification belonged

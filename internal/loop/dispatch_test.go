@@ -536,3 +536,52 @@ func gitFailingAt(t *testing.T, verb string) string {
 	}
 	return path
 }
+
+// duringWorker is the worktree manager with a hook on the one call a spawn
+// makes before it starts opening panes. It is how a test gets inside the
+// minutes-long window a spawn runs in with the lock released.
+type duringWorker struct {
+	Trees
+	hook func()
+}
+
+func (d duringWorker) Worker(ctx context.Context, project string, seq int) (string, string, error) {
+	d.hook()
+	return d.Trees.Worker(ctx, project, seq)
+}
+
+// A spawn started by a tick runs for minutes with mu released. For that whole
+// window the task it is bringing a worker up for had no binding and no
+// reservation, so a `dispatch` arriving inside it was told the task was free
+// and a slot was free, and reserved a task that already had a worker coming.
+// The fleet then ran one worker over max-workers, and every later tick read
+// live >= max-workers and dispatched nothing at all.
+func TestATickSpawnHoldsItsSlotWhileItRuns(t *testing.T) {
+	l, _ := newLoop(t)
+	l.Policy.MaxWorkers = 1
+
+	var inside error
+	var seen []string
+	l.Worktrees = duringWorker{Trees: l.Worktrees, hook: func() {
+		seen = l.Pending()
+		_, inside = l.Dispatch(context.Background(), "7")
+	}}
+
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if len(seen) != 1 || seen[0] != "01AAA" {
+		t.Errorf("the in-flight spawn was invisible to anything else: pending %v", seen)
+	}
+	if inside == nil {
+		t.Fatal("a dispatch inside the spawn window was accepted for a task already being spawned for")
+	}
+	if got := codes.ReasonOf(inside); got != codes.AlreadyDispatched {
+		t.Errorf("the dispatch was refused with %s: %v", got, inside)
+	}
+	// And the slot is not held past the spawn: the binding is what holds it
+	// now.
+	if got := l.Pending(); len(got) != 0 {
+		t.Errorf("the reservation outlived the spawn: %v", got)
+	}
+}
