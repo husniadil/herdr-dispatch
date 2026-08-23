@@ -83,3 +83,54 @@ func TestNoSourceFilePassesAReviewVerbAsAnArgument(t *testing.T) {
 		t.Fatalf("the walk read %d source files, so it guarded nothing", read)
 	}
 }
+
+// Every board call is spawned in one place, and that place scrubs the pane.
+//
+// The method-set pin above forces a human decision when a new board verb
+// arrives, but it says nothing about HOW the new verb spawns: a second
+// exec site added the obvious way inherits the daemon's environment, and
+// the call goes back to declaring a plugin principal while carrying a pane.
+// Pinning that there is exactly ONE spawn, and that it sets cmd.Env, is what
+// makes the scrub cover verbs nobody has written yet.
+func TestEveryBoardCallGoesThroughTheOneScrubbedSpawn(t *testing.T) {
+	var spawns int
+	var scrubbed bool
+	var read int
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read package dir: %v", err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		read++
+		lines := strings.Split(string(b), "\n")
+		for i, line := range lines {
+			if !strings.Contains(line, "exec.Command") {
+				continue
+			}
+			spawns++
+			// The scrub is the assignment that follows the spawn.
+			for _, next := range lines[i+1 : min(i+4, len(lines))] {
+				if strings.Contains(next, "cmd.Env = envWithoutPane(") {
+					scrubbed = true
+				}
+			}
+		}
+	}
+	if read == 0 {
+		t.Fatal("scanned no source files; the scan is broken, not the boundary")
+	}
+	if spawns != 1 {
+		t.Fatalf("the board adapter spawns htask in %d places; every board call goes through one, so the pane is scrubbed once and for every verb", spawns)
+	}
+	if !scrubbed {
+		t.Fatal("the one spawn does not set cmd.Env = envWithoutPane(...); a board call that inherits the daemon's environment declares a plugin principal and carries a pane anyway")
+	}
+}

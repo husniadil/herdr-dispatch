@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -376,4 +377,43 @@ func childEnv(t *testing.T, f *fake.Fake) map[string]string {
 		}
 	}
 	return out
+}
+
+// The scrub removes three names and nothing else.
+//
+// A prefix match on HERDR_ would look equivalent and is not: htask dials
+// herdr itself - that is what `herdr_reachable` in its doctor report is - and
+// it finds it through HERDR_SOCKET_PATH and HERDR_BIN_PATH. Stripping those
+// would leave the board unable to reach herdr on every call the dispatcher
+// makes, so the list is exact names rather than a family.
+func TestTheScrubRemovesThreeNamesAndKeepsEveryOther(t *testing.T) {
+	in := []string{
+		"HERDR_PANE_ID=wM:p1",
+		"HERDR_TAB_ID=wM:t1",
+		"HERDR_WORKSPACE_ID=wM",
+		"HERDR_SOCKET_PATH=/run/herdr.sock",
+		"HERDR_BIN_PATH=/opt/herdr",
+		"HERDR_ENV=1",
+		"PATH=/usr/bin:/bin",
+		"HOME=/Users/x",
+	}
+	got := envWithoutPane(in)
+	want := []string{
+		"HERDR_SOCKET_PATH=/run/herdr.sock",
+		"HERDR_BIN_PATH=/opt/herdr",
+		"HERDR_ENV=1",
+		"PATH=/usr/bin:/bin",
+		"HOME=/Users/x",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("scrubbed environment:\n got %q\nwant %q", got, want)
+	}
+}
+
+// A name that merely starts the same is a different variable and stays.
+func TestOnlyAWholeNameMatchesTheScrub(t *testing.T) {
+	got := envWithoutPane([]string{"HERDR_PANE_ID_SUFFIX=keep", "HERDR_PANE_ID=drop"})
+	if want := []string{"HERDR_PANE_ID_SUFFIX=keep"}; !slices.Equal(got, want) {
+		t.Fatalf("got %q, want %q", got, want)
+	}
 }
