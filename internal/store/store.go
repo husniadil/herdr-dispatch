@@ -40,15 +40,15 @@ type Bindings struct{ Path string }
 // which carries that daemon's pane. A reservation with no owner recorded is
 // one no restart can attribute, which is the state this exists to end.
 type Reservation struct {
-	TaskID string
-	Owner  string
-	At     time.Time
+	TaskID string    `json:"task"`
+	Owner  string    `json:"owner"`
+	At     time.Time `json:"at"`
 	// Attempts is how often a tick has tried to turn this reservation into
 	// a worker and failed. It is what bounds a reservation whose spawn
 	// cannot succeed — a profile the config does not name, a checkout git
 	// will not make — which would otherwise be retried every tick forever
 	// while holding a worker slot nothing can ever use.
-	Attempts int
+	Attempts int `json:"attempts"`
 }
 
 // State is everything the dispatcher remembers across a restart: the

@@ -67,7 +67,8 @@ func TestByCLIMatchesTheSubcommandPath(t *testing.T) {
 // joined it because a daemon a door autostarted has no terminal to answer
 // SIGINT from and could only be killed by pid, and the two parked verbs
 // joined it with the §9 policy gate, which has nowhere to put a deferral an
-// operator cannot then read and resolve.
+// operator cannot then read and resolve; `dump` came with §5.8, which asks
+// that a plugin's data be readable without the plugin.
 // §9.1 with §9.2: a verb that changes the world passes the gate, and one that
 // changes the world without passing it says why. Neither half is inferable
 // from the code — a verb added with Mutates false is simply never checked, and
@@ -104,12 +105,12 @@ func TestTheGatedSetIsTheTwoWorldChangingVerbs(t *testing.T) {
 	}
 }
 
-func TestTheTableIsTheSixVerbsAndNoMore(t *testing.T) {
+func TestTheTableIsTheSevenVerbsAndNoMore(t *testing.T) {
 	var got []string
 	for _, v := range All {
 		got = append(got, v.Name)
 	}
-	want := []string{"doctor", "dispatch", "stop", "status", "parked_list", "parked_resolve"}
+	want := []string{"doctor", "dispatch", "stop", "status", "dump", "parked_list", "parked_resolve"}
 	if len(got) != len(want) {
 		t.Fatalf("verbs = %v, want %v", got, want)
 	}

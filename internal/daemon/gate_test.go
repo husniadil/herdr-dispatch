@@ -344,3 +344,57 @@ func contains(all []string, s string) bool {
 	}
 	return false
 }
+
+// §5.8: `<name> dump --json` prints the whole store, because a plugin whose
+// data cannot be read without the plugin is not acceptable. Here the store is
+// three things — the bindings, the reservations, and the parked actions — and
+// a dump that printed two of them would be exactly the half-answer the
+// section forbids.
+func TestDumpPrintsTheWholeStore(t *testing.T) {
+	stateDir(t)
+	d, _ := newDaemon(t)
+	gateScript(t, d, `echo '{"decision":"defer","reason":"ask the operator"}'`)
+	if _, err := call(t, d, protocol.Request{Verb: "dispatch", Args: map[string]any{"task": "7"}}); err == nil {
+		t.Fatal("a deferred dispatch succeeded")
+	}
+	// A reservation, made by letting the parked one through.
+	held := d.Loop.Parked()
+	if len(held) != 1 {
+		t.Fatalf("parked = %+v", held)
+	}
+	if _, err := call(t, d, protocol.Request{
+		Verb: "parked_resolve", Args: map[string]any{"id": held[0].ID}}); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	raw, err := call(t, d, protocol.Request{Verb: "dump"})
+	if err != nil {
+		t.Fatalf("dump: %v", err)
+	}
+	var got DumpReport
+	if uerr := json.Unmarshal(raw, &got); uerr != nil {
+		t.Fatal(uerr)
+	}
+	if got.Version != store.Version {
+		t.Errorf("dump names version %d, and the document is %d", got.Version, store.Version)
+	}
+	if got.Path != d.Loop.BindingsPath() {
+		t.Errorf("dump names %q as the file and the store is at %q", got.Path, d.Loop.BindingsPath())
+	}
+	if len(got.Reservations) != 1 || got.Reservations[0].TaskID == "" {
+		t.Errorf("dump does not carry the reservations: %+v", got.Reservations)
+	}
+	// The decided row too: a dump that showed only what is still waiting
+	// would be parked_list under another name.
+	if len(got.Parked) != 1 || got.Parked[0].State != store.ParkedResolved {
+		t.Errorf("dump does not carry the decided parked actions: %+v", got.Parked)
+	}
+	// Empty rather than null: a reader has to be able to tell "none" from
+	// "this daemon could not say".
+	if got.Bindings == nil {
+		t.Error("dump prints the bindings as null, which reads as unknown rather than none")
+	}
+	if !strings.Contains(string(raw), `"bindings":[]`) {
+		t.Errorf("dump does not carry an empty bindings list: %s", raw)
+	}
+}

@@ -111,8 +111,8 @@ first — a refusal is usually one of those four.
 ## Through MCP instead of the CLI
 
 Every verb this binary has is one of the `herdr-dispatch` server's MCP tools,
-named by the verb alone — six of them: `doctor`, `dispatch`, `status`, `stop`,
-`parked_list`, `parked_resolve`.
+named by the verb alone — seven of them: `doctor`, `dispatch`, `status`,
+`stop`, `dump`, `parked_list`, `parked_resolve`.
 Your client shows them under the server's own label, which is what tells you
 whose `dispatch` you are calling. Nothing is reachable by shell alone, so a
 harness with no terminal loses no verb.
@@ -148,9 +148,15 @@ row records that you were the one who let it through.
 
 ```sh
 hdis status --json                   hdis --help
+hdis dump --json
 ```
 
-`hdis --help` lists the same six verbs the door serves, for a caller with a
+`dump` prints everything the dispatcher remembers across restarts — the
+bindings, the reservations, the parked actions — in one document. It is a
+debugging read, not a source of board facts: task state, claims and leases are
+htask's, and `htask` is where you read them.
+
+`hdis --help` lists the same seven verbs the door serves, for a caller with a
 shell. Add `--json` to
 any verb for one machine-readable document, and those bytes are the same
 document the MCP tool hands its caller.

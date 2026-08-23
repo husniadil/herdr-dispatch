@@ -23,6 +23,7 @@ import (
 
 	"github.com/husniadil/herdr-dispatch/internal/codes"
 	"github.com/husniadil/herdr-dispatch/internal/config"
+	"github.com/husniadil/herdr-dispatch/internal/decide"
 	"github.com/husniadil/herdr-dispatch/internal/gate"
 	"github.com/husniadil/herdr-dispatch/internal/herdr"
 	"github.com/husniadil/herdr-dispatch/internal/htask"
@@ -274,6 +275,21 @@ func (d *Daemon) serve(ctx context.Context, v verbs.Verb, req protocol.Request) 
 	case "status":
 		st, err := d.Loop.Status(ctx)
 		return encode(st, err)
+	case "dump":
+		// One read of the set, not three: three would let a tick land
+		// between them and print a document no process ever held. And empty
+		// lists rather than nulls — a reader has to be able to tell "none"
+		// from "this daemon could not say", and a JSON null says the second
+		// while meaning the first.
+		held := d.Loop.Dump()
+		rep := DumpReport{
+			Version:      store.Version,
+			Path:         d.Loop.BindingsPath(),
+			Bindings:     append([]decide.Binding{}, held.Bindings...),
+			Reservations: append([]store.Reservation{}, held.Reservations...),
+			Parked:       append([]store.Parked{}, held.Parked...),
+		}
+		return encode(rep, nil)
 	case "parked_list":
 		held := d.Loop.Parked()
 		return encode(ParkedReport{Parked: held, Count: len(held)}, nil)
@@ -638,6 +654,17 @@ func (d *Daemon) pass(v verbs.Verb, req protocol.Request) error {
 		return codes.Parked(id, "the policy gate parked %s for the operator: %s", v.Gated, res.Reason)
 	}
 	return nil
+}
+
+// DumpReport is §5.8: the whole store in one document, with the file it is
+// written to named, so a reader who wants it without this binary knows where
+// to look.
+type DumpReport struct {
+	Version      int                 `json:"version"`
+	Path         string              `json:"path"`
+	Bindings     []decide.Binding    `json:"bindings"`
+	Reservations []store.Reservation `json:"reservations"`
+	Parked       []store.Parked      `json:"parked"`
 }
 
 // ParkedReport is what parked_list answers with.

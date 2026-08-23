@@ -7,6 +7,11 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+**`hdis dump --json` / the `dump` MCP tool** print the whole store in one
+document (§5.8): the bindings, the reservations, and the parked actions
+including the decided ones, with the file they are written to named. It is a
+read; nothing about it changes what the dispatcher does.
+
 **Herdr is feature-detected at daemon start (§11.2).** `herdr api schema
 --json` is read once, in either of the two document shapes the section names,
 and `tab create`, `pane run`, `pane read` and `agent get` refuse with

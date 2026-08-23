@@ -799,6 +799,21 @@ func (l *Loop) FailParked(id, message string) {
 	}
 }
 
+// Dump is the whole store as this daemon holds it (§5.8): the bindings, the
+// reservations, and the parked actions, including the ones already decided.
+// It is the live set rather than a re-read of the file, so it is what the next
+// save will write — which is the honest answer to "what does this daemon
+// remember", and the only one that cannot disagree with itself.
+func (l *Loop) Dump() store.State {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return store.State{
+		Bindings:     append([]decide.Binding(nil), l.bindings...),
+		Reservations: append([]store.Reservation(nil), l.pending...),
+		Parked:       append([]store.Parked(nil), l.parked...),
+	}
+}
+
 // Bindings reports what the dispatcher currently believes it is driving.
 func (l *Loop) Bindings() []decide.Binding {
 	l.mu.Lock()

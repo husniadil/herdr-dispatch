@@ -122,6 +122,17 @@ var All = []Verb{
 			"past that branch, which is what makes a fast-forward merge refuse.",
 	},
 	{
+		Name: "dump", CLI: []string{"dump"},
+		Short: "Print the whole store as JSON",
+		Long: "Everything this daemon remembers across restarts, in one " +
+			"document (§5.8): the bindings, the reservations no tick has " +
+			"spawned for yet, and the actions the policy gate parked. It is " +
+			"the daemon's own live set rather than a re-read of the file, so " +
+			"it is what the next save will write. Nothing here is a board " +
+			"fact — task state, claims and leases are htask's and are read " +
+			"from htask.",
+	},
+	{
 		Name: "parked_list", CLI: []string{"parked", "list"},
 		Short: "List the actions the policy gate deferred to the operator",
 		Long: "A gate that answers defer parks the call instead of performing " +

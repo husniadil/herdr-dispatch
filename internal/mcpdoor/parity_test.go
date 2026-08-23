@@ -36,6 +36,7 @@ var pinnedTools = []string{
 	"dispatch",
 	"status",
 	"stop",
+	"dump",
 	"parked_list",
 	"parked_resolve",
 }

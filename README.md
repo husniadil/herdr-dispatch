@@ -142,6 +142,7 @@ unreachable to a harness that has no shell.
 | `hdis dispatch <task>`| `dispatch`       | Reserve one ready task for the next tick         |
 | `hdis stop`           | `stop`           | Ask the running daemon to shut down              |
 | `hdis status`         | `status`         | What the dispatcher is driving now               |
+| `hdis dump`           | `dump`           | The whole store as JSON (§5.8)                   |
 | `hdis parked list`    | `parked_list`    | Calls the policy gate deferred to the operator   |
 | `hdis parked resolve <id>` | `parked_resolve` | Let one through, or close it unrun          |
 
@@ -228,6 +229,20 @@ is tried:
 
 A Herdr that could not be asked is not a Herdr that offers nothing, so the
 answer is not cached and the next verb asks again.
+
+## Reading the store
+
+`hdis dump --json` prints everything this daemon remembers across restarts in
+one document (§5.8): the bindings, the reservations no tick has spawned for
+yet, and the parked actions, decided ones included. It is the daemon's own
+live set rather than a re-read of the file, so it is what the next save will
+write, and the document names the file so a reader who wants it without this
+binary knows where to look.
+
+Every list is `[]` when it is empty rather than `null`: a reader has to be
+able to tell "none" from "this daemon could not say". Nothing in it is a board
+fact — task state, claims, leases and evidence are htask's, and `htask` is
+where they are read.
 
 ## The policy gate
 
