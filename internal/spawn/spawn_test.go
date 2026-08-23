@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -1351,14 +1352,57 @@ func TestFourPanesInOneTabAreATwoByTwoGrid(t *testing.T) {
 // so this binary names no toolchain at all: it says what it wants and lets
 // the project's own CLAUDE.md say which command delivers it. That is the
 // same rule the worker's condition already follows.
+//
+// What is matched is a COMMAND, not a word. Four of these tools are also
+// ordinary English — "go through the diff", "just read the report", "make one
+// mutation", "cargo cult" — so naming one of them is only a finding when a
+// subcommand or a flag follows it, which is what an instruction to run a
+// toolchain looks like and what prose is not. The rest are not English words,
+// so the bare name is enough and the list can grow without costing the author
+// of the condition a word. "make one COMPILING mutation" now passes the guard;
+// the verifier's condition keeps "write" anyway, because the sentence sits two
+// clauses after "run the gate" and "make" there reads as a build step rather
+// than as authorship. The word is a choice now, not a concession.
 func toolchainCommands(goal string) []string {
+	// A tool whose name is also an English word: reported only as a command.
+	ambiguous := map[string][]string{
+		"go":    {"clean", "test", "build", "vet", "run", "mod", "generate", "install", "fmt", "get"},
+		"make":  {"test", "test-full", "build", "install", "check", "all", "lint", "gate", "fmt", "ci"},
+		"just":  {"test", "gate", "build", "check", "lint", "ci", "fmt", "all"},
+		"cargo": {"test", "build", "check", "clippy", "run", "fmt", "nextest", "bench"},
+	}
+	// A tool whose name is nobody's English: the bare name is the finding.
+	plain := []string{
+		"npm", "pnpm", "yarn", "bun", "gradle", "gradlew", "mvn", "bazel",
+		"uv", "dotnet", "poetry", "pip", "cmake", "ninja", "sbt", "tox",
+		"pytest", "rake", "composer", "swift", "zig",
+	}
+
 	var found []string
-	for _, tool := range []string{"go", "cargo", "npm", "make", "just"} {
+	for _, tool := range sortedKeys(ambiguous) {
+		// The tool name, then either a flag or one of its own subcommands.
+		next := `(-{1,2}[A-Za-z0-9]` + `|` + strings.Join(ambiguous[tool], "|") + `)\b`
+		if regexp.MustCompile(`(?i)\b` + tool + `\s+` + next).MatchString(goal) {
+			found = append(found, tool)
+		}
+	}
+	for _, tool := range plain {
 		if regexp.MustCompile(`(?i)\b` + tool + `\b`).MatchString(goal) {
 			found = append(found, tool)
 		}
 	}
 	return found
+}
+
+// sortedKeys keeps the guard's finding list stable across runs, so a failure
+// message names the same tools in the same order every time.
+func sortedKeys(m map[string][]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // A verifier for a Rust project was told to run `go clean -testcache` and
@@ -1387,10 +1431,42 @@ func TestTheToolchainGuardCatchesEachToolchainPutBack(t *testing.T) {
 		"npm ci then the gate CLAUDE.md names",
 		"make test-full, the gate CLAUDE.md names",
 		"just gate, the gate CLAUDE.md names",
+		"gradle build then the gate CLAUDE.md names",
+		"mvn verify, the gate CLAUDE.md names",
 	} {
 		mutant := strings.Replace(VerifierGoal(23), "the gate CLAUDE.md names, uncached", mutation, 1)
 		if got := toolchainCommands(mutant); len(got) == 0 {
 			t.Errorf("%q put back into the condition is not caught: %s", mutation, mutant)
+		}
+	}
+}
+
+// The other half of the guard's worth: it must not fire on the same words
+// used as English. A condition is prose, and prose says "go through the diff"
+// and "just read the report" without naming a toolchain. A guard that bans
+// the words rather than the commands makes a test the author of the prose.
+func TestTheToolchainGuardDoesNotFireOnOrdinaryEnglish(t *testing.T) {
+	for _, phrase := range []string{
+		"go through the diff",
+		"just read the report",
+		"make one COMPILING mutation",
+		"the run has to go green",
+		"cargo cult the previous fix",
+	} {
+		mutant := strings.Replace(VerifierGoal(23), "check two claims against the code", phrase, 1)
+		if got := toolchainCommands(mutant); len(got) > 0 {
+			t.Errorf("%q is ordinary English and the guard reports %v: %s", phrase, got, mutant)
+		}
+	}
+}
+
+// The rule task 46 chose was that hdis names no toolchain command at all, and
+// the guard was only ever pointed at the verifier's condition. Every condition
+// this binary hands an agent is covered by the same rule.
+func TestNoDispatchedConditionNamesAToolchainCommand(t *testing.T) {
+	for name, goal := range map[string]string{"worker": PointerGoal(23), "verifier": VerifierGoal(23)} {
+		if got := toolchainCommands(goal); len(got) > 0 {
+			t.Errorf("the %s condition names %v, a toolchain no board promises: %s", name, got, goal)
 		}
 	}
 }
