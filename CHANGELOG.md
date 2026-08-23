@@ -31,7 +31,10 @@ did. It asks for the mechanical thing — for every guard, refusal or invariant
 the report claims, write a COMPILING mutation that removes it, run the tests
 the report names, confirm they FAIL, revert — and then for which mutations bit,
 which did not, and whether the worker reads each miss as a missing test or bad
-aim.
+aim. It names where that goes: the mail door at `$HDIS_DISPATCHER_PANE`. A
+worker whose task is in review cannot amend its own report, because `htask`
+refuses a submit on a row that is not `doing`, so findings with no route named
+die in the pane.
 
 Nothing about review authority moves. The shot produces no verdict: the task
 stays in review and the operator still approves or rejects.

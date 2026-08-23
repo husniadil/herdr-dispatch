@@ -821,9 +821,27 @@ report names, the failure confirmed, each mutation reverted — and then for the
 worker's own reading of every mutation that did NOT bite, because that case is
 ambiguous between a missing test and bad aim and the operator needs the
 worker's judgment of it rather than silence.
+
+**And it names where the findings go**, because asking for a report and naming
+no route is how a lane built to catch undelivered claims makes one of its own.
+`htask` refuses `task submit` on a row that is not `doing`, so a worker whose
+task is in review cannot amend the report it already sent; findings with
+nowhere to go die in the pane while the board stays green. The route is the
+mail door at `$HDIS_DISPATCHER_PANE`, the desk that owns the work. It beats a
+board note on three counts: the address is already in the pane's environment
+and already named by the condition the worker booted with, so nothing new is
+introduced to look at; `htask` has no task-scoped note verb, so a note would
+land on the notes board detached from the row under review; and durability,
+the one real argument for the note, is already the mail store's, since `inbox`
+lists what was sent whether or not the pane marker arrived. It names the DOOR
+and never `hmail` — a dispatched pane works in a worktree where a plugin
+binary kept in a project's own `bin/` is not on PATH, measured live on
+2026-08-23 with `hmail` answering `command not found` while the door answered.
+
 `TestTheSelfReviewConditionAsksForAMutationPerClaim` pins each of those asks,
 and `TestARereadRequestIsNotASelfReviewCondition` is what makes the pin worth
-having.
+having — including a near-miss with every mechanical step intact and no
+destination, which is the shape this lane was rejected for once.
 
 One submission earns one shot, and a re-submission after a rejection earns
 another: `Binding.Verified` remembers it and `Rearm` clears it when the task

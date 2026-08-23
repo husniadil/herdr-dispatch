@@ -811,6 +811,11 @@ func TestARereadRequestIsNotASelfReviewCondition(t *testing.T) {
 		"no bite report":   "Task 23 is submitted. For every guard your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one.",
 		"no revert":        "Task 23 is submitted. For every guard your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Then report which mutations bit and which did not, and whether it is a missing test or bad aim.",
 		"no mutation":      "Task 23 is submitted. For every guard your report claims, run the tests your report names and confirm they FAIL. Then report which checks bit and which did not, and whether it is a missing test or bad aim.",
+		// The rejected shape: every mechanical step intact and the findings
+		// with nowhere to go. htask refuses a submit on a row in review, so a
+		// worker cannot amend its own report; findings with no route named
+		// die in the pane, and the board goes green having bought nothing.
+		"no destination": "Task 23 is submitted. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim.",
 	} {
 		if missing := mechanicalAsks(text); len(missing) == 0 {
 			t.Errorf("%q passes as a self-review condition: %s", name, text)
@@ -835,6 +840,7 @@ func mechanicalAsks(goal string) []string {
 		"the mutation reverted":              {"revert"},
 		"which mutations bit":                {"which mutations bit and which did not"},
 		"a reading of the ones that did not": {"missing test or bad aim"},
+		"somewhere for the findings to go":   {strings.ToLower("the mail MCP send to $" + DispatcherPaneVar)},
 	} {
 		found := false
 		for _, phrase := range phrases {

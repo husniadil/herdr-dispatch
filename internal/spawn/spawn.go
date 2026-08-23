@@ -148,6 +148,32 @@ func PointerGoal(seq int) string {
 // silence about it hides exactly the case the operator has to judge, so the
 // worker is asked which one it thinks it is.
 //
+// It names WHERE the findings go, and that is not decoration either. Asking
+// for a report and naming no route is how a lane built to catch undelivered
+// claims makes one of its own: htask refuses `task submit` on a row that is
+// not doing, so a worker whose task is in review cannot amend the report it
+// already sent, and findings with nowhere to go die in the pane while the
+// board stays green.
+//
+// The route is the mail door at $HDIS_DISPATCHER_PANE, which is the desk that
+// owns the work — the pane the task was created from, not whoever started the
+// daemon. Three reasons it beats a board note. The address is already in the
+// pane's environment and already named by the condition the worker booted
+// with, so shot two reuses an address the conversation is holding rather than
+// introducing a second place to look. A board note is not task-scoped: htask
+// has no task-scoped note verb, so the findings would land on the notes board
+// as a pre-decision idea, detached from the row the operator is about to
+// judge. And durability, the one real argument for the note, is already the
+// mail store's: `inbox` lists what was sent whether or not the pane marker
+// ever arrived, so an unread notify sits there rather than evaporating.
+//
+// It is the DOOR and never `hmail`, for the reason the verifier's condition
+// recorded before it: a dispatched pane is opened in a worktree under the
+// state directory, where a plugin binary kept in a project's own bin/ is not
+// on PATH. Measured from a live worker pane on 2026-08-23: `hmail` came back
+// `command not found` while the mail MCP door answered. An MCP door is
+// configured for the agent rather than resolved from the working directory.
+//
 // It travels through `herdr agent prompt` rather than the typed spawn line,
 // so TypedLineBudget does not bound it; it is kept near a nudge's length
 // anyway, because everything hdis puts into a pane goes through a terminal.
@@ -159,7 +185,7 @@ func SelfReviewCondition(seq int) string {
 		"invariant your report claims, write a COMPILING mutation that removes it, run the "+
 		"tests your report names, and confirm they FAIL. Revert each one. Then report which "+
 		"mutations bit and which did not, and for each that did not, say whether you believe "+
-		"it is a missing test or bad aim.", seq)
+		"it is a missing test or bad aim, with the mail MCP send to $"+DispatcherPaneVar+".", seq)
 }
 
 // TypedLineBudget bounds the whole line herdr types into a worker's pane.
