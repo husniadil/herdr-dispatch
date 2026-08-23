@@ -181,7 +181,7 @@ func TestTheVerificationLaneNeedsNoProfileOfItsOwn(t *testing.T) {
 // profile that pane launched from. Nothing launches now, so the field has
 // nothing left to name, and it is refused rather than accepted as a no-op:
 // an operator who set it believes a verifier is running.
-func TestAConfigCarryingVerifyProfileIsRefusedByName(t *testing.T) {
+func TestAConfigStillNamingTheOldVerifierProfileIsRefusedByField(t *testing.T) {
 	for _, doc := range []string{
 		`{"default":"w","profiles":{"w":{"provider":"claude"}},"verify":{"enabled":true,"profile":"v"}}`,
 		`{"default":"w","profiles":{"w":{"provider":"claude"}},"verify":{"enabled":false,"profile":"v"}}`,
