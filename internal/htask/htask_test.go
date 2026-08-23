@@ -3,6 +3,7 @@ package htask
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -280,4 +281,99 @@ EOF2`)
 	if got, want := f.Calls(t)[0], "task get 7 --project /src/p --json --as plugin:hdis"; got != want {
 		t.Fatalf("argv: got %q, want %q", got, want)
 	}
+}
+
+// The board call declares a plugin principal, and a principal is what it
+// declares INSTEAD of a pane. Leaving cmd.Env nil hands the child the
+// daemon's environment verbatim, so every call arrives carrying both a
+// declared principal and the daemon's pane id, and the board cannot tell a
+// worker claiming as plugin:hdis apart from the dispatcher itself.
+func TestABoardCallCarriesNoPaneIntoTheSubprocess(t *testing.T) {
+	c, f := client(t)
+	t.Setenv("HERDR_PANE_ID", "wM:p1")
+	t.Setenv("HERDR_TAB_ID", "wM:t1")
+	t.Setenv("HERDR_WORKSPACE_ID", "wM")
+	f.Bin(t, "htask", `env > "$HDIS_FAKE_DIR/env.txt"
+echo '{"version":"0.1.0"}'`)
+
+	if _, err := c.Doctor(context.Background()); err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+	child := childEnv(t, f)
+	for _, name := range []string{"HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID"} {
+		if v, ok := child[name]; ok {
+			t.Fatalf("%s reached the board call as %q; a plugin principal carries no pane", name, v)
+		}
+	}
+	// The scrub removes three names, not the environment: a child with no
+	// PATH cannot find the binaries the board itself shells out to.
+	if child["PATH"] == "" {
+		t.Fatalf("the subprocess lost PATH; want the daemon's environment minus the three pane names")
+	}
+}
+
+// The daemon still reads those names for its own purposes: cmd/hdis/main.go
+// defaults --pane from HERDR_PANE_ID, and the base pane is what every split
+// comes off. The scrub is scoped to the subprocess and must not reach it.
+func TestScrubbingThePaneLeavesTheDaemonsOwnEnvironmentAlone(t *testing.T) {
+	c, f := client(t)
+	t.Setenv("HERDR_PANE_ID", "wM:p1")
+	t.Setenv("HERDR_TAB_ID", "wM:t1")
+	t.Setenv("HERDR_WORKSPACE_ID", "wM")
+	f.Bin(t, "htask", `echo '{"version":"0.1.0"}'`)
+
+	if _, err := c.Doctor(context.Background()); err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+	for name, want := range map[string]string{
+		"HERDR_PANE_ID":      "wM:p1",
+		"HERDR_TAB_ID":       "wM:t1",
+		"HERDR_WORKSPACE_ID": "wM",
+	} {
+		if got := os.Getenv(name); got != want {
+			t.Fatalf("daemon's own %s is %q after a board call, want %q", name, got, want)
+		}
+	}
+}
+
+// The point is a plugin principal WITHOUT a pane, not a call with neither.
+// A call that lost its --as would be attributed to nobody at all.
+func TestTheCallStillDeclaresThePluginPrincipalWithoutAPane(t *testing.T) {
+	c, f := client(t)
+	c.Principal = PrincipalFor("wM:p1")
+	t.Setenv("HERDR_PANE_ID", "wM:p1")
+	f.Bin(t, "htask", `env > "$HDIS_FAKE_DIR/env.txt"
+echo '{"tasks":[{"id":"01AAA","seq":7,"project":"/src/a","title":"first","status":"todo"}],"count":1}'`)
+
+	tasks, err := c.Ready(context.Background())
+	if err != nil {
+		t.Fatalf("ready: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].ID != "01AAA" {
+		t.Fatalf("got %+v", tasks)
+	}
+	want := "task list --ready --all-projects --json --as plugin:hdis@wM:p1"
+	if got := f.Calls(t)[0]; got != want {
+		t.Fatalf("argv: got %q, want %q", got, want)
+	}
+	if v, ok := childEnv(t, f)["HERDR_PANE_ID"]; ok {
+		t.Fatalf("the call declares a principal and still carried HERDR_PANE_ID=%q", v)
+	}
+}
+
+// childEnv reads the environment the fake binary saw, as name to value.
+func childEnv(t *testing.T, f *fake.Fake) map[string]string {
+	t.Helper()
+	b, err := os.ReadFile(f.Path("env.txt"))
+	if err != nil {
+		t.Fatalf("read child env: %v", err)
+	}
+	out := map[string]string{}
+	for _, line := range strings.Split(strings.TrimRight(string(b), "\n"), "\n") {
+		name, value, ok := strings.Cut(line, "=")
+		if ok {
+			out[name] = value
+		}
+	}
+	return out
 }

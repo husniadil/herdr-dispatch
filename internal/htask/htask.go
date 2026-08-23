@@ -9,7 +9,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"slices"
 	"strings"
 )
 
@@ -209,6 +211,7 @@ func (c *Client) json(ctx context.Context, into any, args ...string) error {
 func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
 	args = append(append([]string{}, args...), "--as", c.principal())
 	cmd := exec.CommandContext(ctx, c.bin(), args...)
+	cmd.Env = envWithoutPane(os.Environ())
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
@@ -222,6 +225,32 @@ func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
 		return nil, fmt.Errorf("%s: %w", line, err)
 	}
 	return stdout.Bytes(), nil
+}
+
+// paneNames are the variables htask reads a caller's pane id out of. They
+// travel in the environment rather than in argv, so a child that inherits
+// the daemon's environment arrives claiming to be the daemon's pane no
+// matter what `--as` declares.
+var paneNames = []string{"HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID"}
+
+// envWithoutPane is the daemon's environment minus the pane it runs in.
+//
+// Every call here declares a plugin principal, and a principal is what it
+// declares INSTEAD of a pane: a call that carries both leaves the board
+// unable to tell the dispatcher from an agent that claimed as plugin:hdis.
+// The daemon keeps reading these names for its own purposes - the base pane
+// it splits workers off - it just stops handing them to a child speaking as
+// a plugin.
+func envWithoutPane(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		name, _, _ := strings.Cut(kv, "=")
+		if slices.Contains(paneNames, name) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }
 
 // refusalIn reads the board's error envelope out of a failed call's stdout.
