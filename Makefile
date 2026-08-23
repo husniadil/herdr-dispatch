@@ -27,6 +27,15 @@ test-full: test
 	GOOS=darwin GOARCH=arm64 go vet ./...
 	go test -race ./...
 
+# Layer 3, and deliberately OUT of the gate above: it drives the shipped
+# binary against a REAL `htask` built from the sibling herdr-tasks checkout,
+# which CI does not have. A machine without that checkout gets a loud skip
+# naming what was missing, never a silent pass. Run it before a release tag,
+# and whenever the board adapter or the `htask <verb> --json` surface moves.
+.PHONY: e2e
+e2e: build
+	go test -tags e2e -count=1 -v ./internal/e2e/...
+
 # `go install`, not a copy into $GOPATH/bin. GOBIN is what decides where an
 # installed binary lands, and a toolchain manager sets it away from GOPATH:
 # measured on this machine, GOBIN was the mise toolchain's bin (on PATH) while

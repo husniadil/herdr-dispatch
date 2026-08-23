@@ -7,6 +7,13 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+**`make e2e` is layer 3**, out of the gate on purpose: the built binary
+against a REAL `htask` compiled from the sibling `herdr-tasks` checkout, over
+a real socket, with a fake `herdr`. It skips loudly on a machine with no such
+checkout. Nothing a consumer reads changes; it is where the `htask <verb>
+--json` integration surface is proved against the real binary rather than
+against a script written to agree with this code.
+
 **Board calls no longer carry `HERDR_PLUGIN_CONTEXT_JSON`.** htask resolves
 which project it is scoped to from that document before falling back to the
 working directory, and Herdr fills it in for the commands it spawns itself —

@@ -1178,12 +1178,29 @@ make test        # the fast loop: the pure decision core and the payload shapes
 make test-full   # the gate: the above, plus every case that shells out to a
                  # fake htask or a fake herdr on PATH, with -race and a
                  # cross-compile vet of the other supported platform
+make e2e         # layer 3, OUT of the gate: the built binary against a REAL
+                 # htask, over a real socket, with a fake herdr
 make build       # bin/hdis
 ```
 
-No test reaches a real board, a real Herdr server or a real proxy daemon:
-every case that shells out answers its own calls with a stand-in binary on
-`PATH`. A green `make test` is not a green gate.
+Layers 1 and 2 reach no real board, no real Herdr server and no real proxy
+daemon: every case that shells out answers its own calls with a stand-in
+binary on `PATH`. A green `make test` is not a green gate.
+
+`make e2e` is layer 3 and is deliberately outside `make test-full`. It builds
+`htask` from the sibling `herdr-tasks` checkout — beside this repository, or
+wherever `DISPATCH_E2E_HTASK_SRC` names — and drives the shipped `hdis` against it
+over a real socket: a task filed through the real board's own CLI, and a
+dispatch taking it. CI has no such checkout, so a gate that ran this would be
+red everywhere but one machine; without it the layer SKIPS, loudly, naming
+what was missing. Run it before a release tag and whenever the board adapter
+or the `htask <verb> --json` surface moves.
+
+Herdr is faked there where the board's own layer 3 uses a real headless
+server, because the boundary this layer exists to prove is the one between the
+two PLUGINS. `HOME`, both XDG bases, both plugins' state and config dirs, and
+`PATH` are all temporary, and each daemon is stopped with that environment —
+a stop run with the ambient one would reach for the operator's own socket.
 
 ## Dependencies
 
