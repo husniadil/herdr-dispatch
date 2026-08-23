@@ -9,6 +9,27 @@ reads." Before this sweep hdis carried five § citations across 33 test files
 and roughly 350 tests. The tests were there; the mapping was not, so the
 declared revision rested on nobody having checked.
 
+## The vendored contract
+
+[`docs/contract.md`](contract.md) is a **byte copy** of herdr-tasks'
+`docs/contract.md` at revision 0.10.0, taken on 2026-08-24. herdr-tasks' copy
+is the source of truth; this one is here so that a reader who has only this
+repository can open every § the code cites, and so that the citations can be
+checked against a document rather than against a memory of one.
+
+That makes two things testable that were not before.
+`TestContractCitationsResolve` reads every tracked file towards the contract
+and fails on a § that resolves to nothing — before this, every citation in
+the repository pointed at a document living somewhere else.
+`TestTheDeclaredRevisionIsTheVendoredOne` reads `version.Contract` and the
+document's own `Status:` line together: the declaration may lag the vendored
+text, never lead it, and a lag only while a single entry in this document
+names both revisions. They are equal today, so there is no gap to record.
+
+Re-vendoring is a copy and nothing else. An amendment is written in
+herdr-tasks' copy, cited there the way a test cites the § it enforces, and
+arrives here byte for byte.
+
 ## Method
 
 A MUST is NOT counted as pinned by reading its test. For each one the
@@ -78,7 +99,8 @@ reason it stands.
 | §6.3 | The code is one of the nine, the exit status is the one fixed for it, and a finer name is a sub-reason inside `message` | `TestEverySubReasonAnswersUnderAContractCode`, `TestTheSubReasonsMapOntoTheCodesTheContractFixes`, `TestExitIsTheStatusTheContractFixes`, `TestAFailureExitsWithTheStatusTheContractFixes` |
 | §10.3 | `doctor` prints the state dir and the config dir | `TestDoctorNamesTheDirectoriesItResolved` |
 | §11.1 | Herdr is reached through `HERDR_BIN_PATH` | `TestTheHerdrBinaryComesFromTheVariableTheContractNames` |
-| §12.2 | A test cites the section it enforces | `TestEveryTestThisDocumentNamesExists` |
+| §12.2 | A test cites the section it enforces | `TestEveryTestThisDocumentNamesExists`, `TestContractCitationsResolve` |
+| §13.4 | The declared revision is the vendored one, and the README states it | `TestTheDeclaredRevisionIsTheVendoredOne`, `TestTheChangelogHasALineForTheDeclaredContractRevision` |
 | §13.2 | The short name is `dispatch` | `TestTheManifestNamesThisPluginAtThisVersion` |
 
 ## What the sweep found
