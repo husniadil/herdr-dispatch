@@ -43,6 +43,10 @@ type Daemon struct {
 	// Version is this binary's version, for doctor.
 	Version string
 	Log     *log.Logger
+	// Lock is the one-daemon lock this daemon holds, as Lock opened it.
+	// Teardown removes that file and no other: the path is what was
+	// opened, never what the state dir names by the time teardown runs.
+	Lock *os.File
 
 	// kick wakes the tick early, so an accepted dispatch does not wait out
 	// the interval before its worker comes up.
@@ -133,7 +137,7 @@ func (d *Daemon) Serve(ctx context.Context, ln net.Listener) error {
 				default:
 				}
 				<-ticking
-				d.Cleanup()
+				d.Cleanup(ln)
 				return nil
 			}
 			return fmt.Errorf("accept: %w", err)
@@ -142,12 +146,27 @@ func (d *Daemon) Serve(ctx context.Context, ln net.Listener) error {
 	}
 }
 
-// Cleanup removes what a running daemon owns in the state dir. The lock is
-// released by the kernel when the process ends either way; removing the file
-// as well keeps a stopped daemon from leaving a path behind that says one is
-// still here.
-func (d *Daemon) Cleanup() {
-	for _, path := range []string{config.SocketPath(), config.LockPath()} {
+// Cleanup removes the socket this daemon is listening on and the lock it
+// holds. The lock is released by the kernel when the process ends either
+// way; removing the file as well keeps a stopped daemon from leaving a path
+// behind that says one is still here.
+//
+// Both paths come from what was opened — the listener's own address, the
+// lock file's own name — and never from the state dir read again here. A
+// daemon that resolves them at teardown deletes whatever that dir holds by
+// then, which is another daemon's socket the moment the dir has moved
+// underneath it.
+func (d *Daemon) Cleanup(ln net.Listener) {
+	paths := []string{}
+	if ln != nil {
+		if addr, ok := ln.Addr().(*net.UnixAddr); ok && addr.Name != "" {
+			paths = append(paths, addr.Name)
+		}
+	}
+	if d.Lock != nil {
+		paths = append(paths, d.Lock.Name())
+	}
+	for _, path := range paths {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			d.logf("remove %s: %v", path, err)
 		}

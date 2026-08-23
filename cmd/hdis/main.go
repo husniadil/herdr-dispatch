@@ -187,6 +187,7 @@ func serve(argv []string) error {
 		Interval: *interval,
 		Version:  version.Version,
 		Log:      log.Default(),
+		Lock:     lock,
 	}
 	err = d.Serve(ctx, ln)
 	log.Print("stopping")

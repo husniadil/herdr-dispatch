@@ -3,6 +3,9 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"log"
 	"net"
@@ -392,8 +395,7 @@ func TestServeAnswersOnTheSocketAndStopsWithItsContext(t *testing.T) {
 		t.Fatalf("listen: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	served := make(chan error, 1)
-	go func() { served <- d.Serve(ctx, ln) }()
+	served := serve(t, d, ctx, ln)
 
 	conn, err := net.Dial("unix", config.SocketPath())
 	if err != nil {
@@ -441,7 +443,7 @@ func TestARefusalTravelsAsANamedCode(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go d.Serve(ctx, ln)
+	serve(t, d, ctx, ln)
 
 	conn, err := net.Dial("unix", config.SocketPath())
 	if err != nil {
@@ -469,8 +471,7 @@ func TestADaemonWithNoBasePaneDoesNotTick(t *testing.T) {
 		t.Fatalf("listen: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	served := make(chan struct{})
-	go func() { defer close(served); d.Serve(ctx, ln) }()
+	served := serve(t, d, ctx, ln)
 
 	// One round trip is enough to know the daemon is up and the tick has had
 	// its chance to run.
@@ -539,14 +540,14 @@ func TestStopShutsTheDaemonDownCleanly(t *testing.T) {
 		t.Fatalf("lock: %v", err)
 	}
 	defer lock.Close()
+	d.Lock = lock
 	ln, err := Listen()
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	served := make(chan error, 1)
-	go func() { served <- d.Serve(ctx, ln) }()
+	served := serve(t, d, ctx, ln)
 
 	// Daemon.tick runs the loop before it ever reaches its ticker, so a
 	// daemon that starts serving always ticks once. That tick is the
@@ -621,8 +622,7 @@ func TestStopEndsTheTick(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	served := make(chan error, 1)
-	go func() { served <- d.Serve(ctx, ln) }()
+	served := serve(t, d, ctx, ln)
 
 	conn, err := net.Dial("unix", config.SocketPath())
 	if err != nil {
@@ -723,5 +723,187 @@ func TestDoctorReportsTheMaxPanesPerTab(t *testing.T) {
 	d.Loop.Config = cfg
 	if rep := doctorOf(t, d); rep.MaxPanesPerTab != 2 {
 		t.Fatalf("doctor reports max_panes_per_tab %d, want 2", rep.MaxPanesPerTab)
+	}
+}
+
+// serve starts the daemon and holds the test open until Serve has returned.
+// A Serve nobody waits on outlives the test that started it: when it finally
+// wakes, cancelled, it tears down against whatever state dir the environment
+// names by then, which is the NEXT test's.
+func serve(t *testing.T, d *Daemon, ctx context.Context, ln net.Listener) <-chan error {
+	t.Helper()
+	served := make(chan error, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		served <- d.Serve(ctx, ln)
+	}()
+	t.Cleanup(func() {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("a Serve goroutine outlived its test")
+		}
+	})
+	return served
+}
+
+// Teardown removes the socket and the lock this daemon itself opened. It
+// resolves neither from the environment: a daemon that reads the state dir
+// again on the way out deletes whatever that dir holds by then, which is
+// somebody else's socket the moment the dir has changed underneath it.
+func TestCleanupRemovesWhatTheDaemonOpenedNotWhatTheStateDirNamesNow(t *testing.T) {
+	opened := stateDir(t)
+	lock, err := Lock()
+	if err != nil {
+		t.Fatalf("lock: %v", err)
+	}
+	defer lock.Close()
+	ln, err := Listen()
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	d, _ := newDaemon(t)
+	d.Lock = lock
+
+	// The state dir moves under the daemon, exactly as a t.Setenv in the
+	// next test moves it. The new dir holds a live daemon's files.
+	moved := stateDir(t)
+	for _, name := range []string{"hdis.sock", "hdis.lock"} {
+		if err := os.WriteFile(filepath.Join(moved, name), []byte("live"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	d.Cleanup(ln)
+
+	for _, name := range []string{"hdis.sock", "hdis.lock"} {
+		if _, err := os.Stat(filepath.Join(opened, name)); !os.IsNotExist(err) {
+			t.Errorf("%s the daemon opened outlived its teardown: %v", name, err)
+		}
+		if _, err := os.Stat(filepath.Join(moved, name)); err != nil {
+			t.Errorf("teardown removed %s in a state dir it never opened: %v", name, err)
+		}
+	}
+}
+
+// The same defect, driven through Serve on purpose rather than waited for.
+// The tick is held inside the fake htask, so Serve cannot reach its teardown
+// until this test lets it: the state dir is moved while Serve is pinned
+// short of Cleanup, and the daemon still removes only its own files.
+func TestAServeThatTearsDownLateLeavesTheNewStateDirAlone(t *testing.T) {
+	opened := stateDir(t)
+	d, f := newDaemon(t)
+	// A tick that blocks until this test says so, which is what pins Serve
+	// short of its teardown: Serve waits for the tick before it cleans up.
+	f.Bin(t, "htask", `if [ "$1 $2" = "task list" ]; then
+  : > "$HDIS_FAKE_DIR/ticking"
+  n=0
+  while [ ! -f "$HDIS_FAKE_DIR/release" ] && [ $n -lt 400 ]; do sleep 0.05; n=$((n+1)); done
+fi
+`+htaskScript)
+	lock, err := Lock()
+	if err != nil {
+		t.Fatalf("lock: %v", err)
+	}
+	defer lock.Close()
+	ln, err := Listen()
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	d.Lock = lock
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	served := serve(t, d, ctx, ln)
+
+	await(t, filepath.Join(f.Dir, "ticking"), "the tick to start")
+	cancel()
+
+	// Serve is now past its listener and blocked on the tick, so the state
+	// dir can move with no race about where it is when teardown runs.
+	moved := stateDir(t)
+	for _, name := range []string{"hdis.sock", "hdis.lock"} {
+		if err := os.WriteFile(filepath.Join(moved, name), []byte("live"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(f.Dir, "release"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case err := <-served:
+		if err != nil {
+			t.Fatalf("serve: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("serve did not return once its tick was let go")
+	}
+
+	for _, name := range []string{"hdis.sock", "hdis.lock"} {
+		if _, err := os.Stat(filepath.Join(moved, name)); err != nil {
+			t.Errorf("a late teardown removed %s in a state dir it never opened: %v", name, err)
+		}
+		if _, err := os.Stat(filepath.Join(opened, name)); !os.IsNotExist(err) {
+			t.Errorf("%s the daemon opened outlived its late teardown: %v", name, err)
+		}
+	}
+}
+
+// await waits for a file the fake writes, so an ordering this package needs
+// is a fact the test observed rather than a sleep it hoped was long enough.
+func await(t *testing.T, path, what string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+// Every Serve this package starts is started through serve, which is what
+// waits for it. A test that fires one and forgets it is the ordering defect
+// this file already carries a case for, so the rule is checked in the source
+// rather than left to whoever writes the next case.
+func TestNoTestStartsAServeItNeverWaitsFor(t *testing.T) {
+	names, err := filepath.Glob("*_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) == 0 {
+		t.Fatal("no test files found to check")
+	}
+	found := 0
+	for _, name := range names {
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			ast.Inspect(fn, func(n ast.Node) bool {
+				sel, ok := n.(*ast.SelectorExpr)
+				if !ok || sel.Sel.Name != "Serve" {
+					return true
+				}
+				found++
+				if fn.Name.Name != "serve" {
+					t.Errorf("%s calls Serve directly; start it through serve, which waits for it",
+						fn.Name.Name)
+				}
+				return true
+			})
+		}
+	}
+	if found == 0 {
+		t.Fatal("no Serve call found in this package's tests; the check proves nothing")
 	}
 }
