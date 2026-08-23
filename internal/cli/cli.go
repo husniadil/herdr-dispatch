@@ -196,6 +196,7 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 		fmt.Fprintf(out, "  log         %s\n", or(rep.Log, "stdout only: no file could be opened"))
 		fmt.Fprintf(out, "  verify      %s\n", verifyLane(rep.Verify))
 		fmt.Fprintf(out, "  gate        %s\n", gateLane(rep.Gate))
+		fmt.Fprintf(out, "  herdr api   %s\n", herdrLane(rep.Herdr))
 		fmt.Fprintf(out, "  layout      min_pane_columns %d, max_panes_per_tab %d per task\n",
 			rep.MinPaneColumns, rep.MaxPanesPerTab)
 		if rep.Board.Error != "" {
@@ -345,6 +346,20 @@ func gateLane(g daemon.GateHealth) string {
 		line += fmt.Sprintf(", %d parked for you (hdis parked list)", g.Parked)
 	}
 	return line
+}
+
+// herdrLane is §11.2's feature detection in one line. A capability Herdr does
+// not offer is what an operator needs BEFORE a verb refuses with UNSUPPORTED,
+// which is the whole reason §10.3 puts the schema in doctor.
+func herdrLane(h daemon.HerdrHealth) string {
+	if !h.Detected {
+		return "not read: " + or(h.Error, "nothing has asked herdr what it offers yet")
+	}
+	line := fmt.Sprintf("protocol %d, %d requests, %d events", h.Protocol, h.Requests, h.Events)
+	if len(h.Missing) > 0 {
+		return line + ", MISSING " + strings.Join(h.Missing, " ") + ": the verbs that need one refuse UNSUPPORTED"
+	}
+	return line + ", every capability this binary needs"
 }
 
 func or(s, fallback string) string {

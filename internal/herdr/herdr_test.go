@@ -62,7 +62,9 @@ esac`)
 		t.Fatalf("close: %v", err)
 	}
 
-	argv := f.Argv(t)
+	// The §11.2 schema read comes first and is cached, so it happens once
+	// however many verbs follow it. What this asserts is the verbs.
+	argv := withoutSchemaArgv(f.Argv(t))
 	if got, want := argv[0], []string{"pane", "run", "wM:p9", `eval "$(proxenos env)"`}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("run argv: got %v, want %v", got, want)
 	}
@@ -71,8 +73,9 @@ esac`)
 		"pane send-keys wM:p9 enter",
 		"pane close wM:p9",
 	}
+	calls := withoutSchema(f.Calls(t))
 	for i, want := range rest {
-		if got := f.Calls(t)[i+1]; got != want {
+		if got := calls[i+1]; got != want {
 			t.Fatalf("call %d: got %q, want %q", i+1, got, want)
 		}
 	}
@@ -201,9 +204,35 @@ func TestAgentGetReadsOneWorker(t *testing.T) {
 	if a.Name != "hdis-7" || a.Status != StatusWorking || a.PaneID != "wM:p9" {
 		t.Fatalf("got %+v", a)
 	}
-	if got, want := f.Calls(t)[0], "agent get wM:p9"; got != want {
+	if got, want := withoutSchema(f.Calls(t))[0], "agent get wM:p9"; got != want {
 		t.Fatalf("argv: got %q, want %q", got, want)
 	}
+}
+
+// withoutSchema drops the §11.2 feature-detection read, which every verb that
+// needs a capability makes once before its own call. It is not what these
+// cases are about, and a test that hard-coded its position would break again
+// the next time a verb learned to check one.
+func withoutSchema(calls []string) []string {
+	out := []string{}
+	for _, c := range calls {
+		if strings.HasPrefix(c, "api schema") {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+func withoutSchemaArgv(argv [][]string) [][]string {
+	out := [][]string{}
+	for _, a := range argv {
+		if len(a) >= 2 && a[0] == "api" && a[1] == "schema" {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
 }
 
 // `herdr pane read` is the one verb that answers with the terminal's own

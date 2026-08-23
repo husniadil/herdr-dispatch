@@ -7,6 +7,16 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+**Herdr is feature-detected at daemon start (§11.2).** `herdr api schema
+--json` is read once, in either of the two document shapes the section names,
+and `tab create`, `pane run`, `pane read` and `agent get` refuse with
+`UNSUPPORTED` naming the capability when this Herdr does not list it — instead
+of calling it and reading whatever came back. `hdis doctor` gains a `herdr`
+object: whether the schema was read, the protocol number (reported and decided
+on by nothing), how many requests and events were listed, and every capability
+this binary needs that was missing. Nothing changes against a Herdr that
+offers everything, which is every released Herdr this plugin supports.
+
 **Breaking: the config, the directories and the environment prefix moved to
 the plugin's short name, and the config is TOML.** §10.1 puts a plugin's
 config at `<config_dir>/<name>.toml` under its SHORT NAME, which §13.2 fixes

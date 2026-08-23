@@ -29,11 +29,45 @@ func New(t *testing.T) *Fake {
 	return &Fake{Dir: dir}
 }
 
+// HerdrSchemaFile is where a test writes the schema its fake `herdr` should
+// answer `api schema --json` with, to stand up a Herdr that is missing a
+// capability. Without it the fake answers DefaultHerdrSchema.
+const HerdrSchemaFile = "schema.json"
+
+// DefaultHerdrSchema is every request this binary asks Herdr for, in the flat
+// form §11.2 requires a reader to accept. It is the fake's answer unless a
+// test writes HerdrSchemaFile, so a case that is not about feature detection
+// does not have to know feature detection exists.
+const DefaultHerdrSchema = `{"protocol":1,"requests":[` +
+	`"tab.create","tab.list","tab.close",` +
+	`"pane.split","pane.run","pane.read","pane.list","pane.close","pane.send_keys",` +
+	`"agent.start","agent.get","agent.list","agent.prompt",` +
+	`"notification.show"],"events":["pane_exited"]}`
+
+// herdrSchemaPrelude answers `herdr api schema --json` ahead of whatever the
+// test's own script does. §11.2 makes that read part of every Herdr client, so
+// every fake `herdr` has to answer it — writing the case into each of the
+// twenty-odd scripts by hand would mean a new script silently failing feature
+// detection instead of failing the thing it was written for.
+const herdrSchemaPrelude = `if [ "$1 $2" = "api schema" ] && [ -z "${HDIS_FAKE_NO_SCHEMA:-}" ]; then
+  if [ -f "$HDIS_FAKE_DIR/` + HerdrSchemaFile + `" ]; then cat "$HDIS_FAKE_DIR/` + HerdrSchemaFile + `"; else echo '` + DefaultHerdrSchema + `'; fi
+  exit 0
+fi
+`
+
+// NoHerdrSchema stops the fake `herdr` answering `api schema` ahead of the
+// test's own script, so a case can stand up a Herdr that cannot be asked what
+// it offers at all.
+func NoHerdrSchema(t *testing.T) { t.Setenv("HDIS_FAKE_NO_SCHEMA", "1") }
+
 // Bin writes an executable /bin/sh script under the given name. The script
 // runs with $HDIS_FAKE_DIR set, and "$@" carries the argv it was called with.
 func (f *Fake) Bin(t *testing.T, name, script string) {
 	t.Helper()
 	path := filepath.Join(f.Dir, name)
+	if name == "herdr" {
+		script = herdrSchemaPrelude + script
+	}
 	body := "#!/bin/sh\nprintf '%s\\037' \"$@\" >> \"$HDIS_FAKE_DIR/calls.log\"\nprintf '\\n' >> \"$HDIS_FAKE_DIR/calls.log\"\n" + script + "\n"
 	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
 		t.Fatalf("write fake %s: %v", name, err)

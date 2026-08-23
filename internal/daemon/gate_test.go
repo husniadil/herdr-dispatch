@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/husniadil/herdr-dispatch/internal/codes"
+	"github.com/husniadil/herdr-dispatch/internal/fake"
+	"github.com/husniadil/herdr-dispatch/internal/herdr"
 	"github.com/husniadil/herdr-dispatch/internal/protocol"
 	"github.com/husniadil/herdr-dispatch/internal/store"
 	"github.com/husniadil/herdr-dispatch/internal/verbs"
@@ -299,4 +301,46 @@ func TestDoctorSaysWhetherAGateIsConfigured(t *testing.T) {
 	if rep.Gate.Parked != 1 {
 		t.Errorf("doctor reports %d parked and one is waiting", rep.Gate.Parked)
 	}
+}
+
+// §10.3 with §11.2: doctor prints the Herdr schema it saw. It is the one
+// surface that can say "this Herdr does not offer tab.create" BEFORE a
+// dispatch refuses, which is the whole reason a plugin feature-detects at all
+// rather than finding out at the call.
+func TestDoctorReportsTheHerdrSchemaItSaw(t *testing.T) {
+	stateDir(t)
+	d, _ := newDaemon(t)
+	rep, err := d.doctor(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Herdr.Detected {
+		t.Fatalf("doctor read no herdr schema: %+v", rep.Herdr)
+	}
+	if len(rep.Herdr.Missing) != 0 {
+		t.Errorf("a herdr offering everything reports %v missing", rep.Herdr.Missing)
+	}
+	if rep.Herdr.Requests == 0 {
+		t.Error("doctor counted no requests")
+	}
+
+	// A Herdr missing one is named, by capability. It gets a daemon of its
+	// own because the schema is read once and cached, so the one above keeps
+	// the answer it already has.
+
+	lean, leanFake := newDaemon(t)
+	leanFake.Write(t, fake.HerdrSchemaFile, `{"protocol":1,"requests":["pane.list"]}`)
+	rep, _ = lean.doctor(context.Background())
+	if !contains(rep.Herdr.Missing, herdr.CapTabCreate) {
+		t.Errorf("doctor does not name the missing capability: %+v", rep.Herdr)
+	}
+}
+
+func contains(all []string, s string) bool {
+	for _, v := range all {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }

@@ -73,7 +73,6 @@ reason it stands.
 |---|---|---|
 | §5.8 | `<name> dump --json` prints the whole store | No `dump` verb. The whole store is one JSON document at `<state_dir>/dispatch-bindings.json`, already readable without this binary, which is the guarantee §5.8 exists for. A verb that only `cat`s it is on the list. |
 | §8.1, §8.2 | Events for every state change, and an `events` verb | No events and no `_events` table. Every state change here is a binding moving, and a binding is derivable from the board plus Herdr the moment a worker claims; the durable trail of what was dispatched is the board's own. Adding an event stream means adding the store §5.5 shapes it around. |
-| §11.2 | Feature-detect at daemon start with `herdr api schema --json` | Never read. Every Herdr verb this binary uses — `pane list`, `pane split`, `tab create`, `agent start`, `agent prompt`, `agent list` — has been in Herdr since before this plugin, and a missing one fails loud at the call with Herdr's own words. No request is gated on a capability, so there is nothing yet for the schema read to decide. |
 | §11.1 | Reach Herdr through `HERDR_BIN_PATH`, or the socket at `HERDR_SOCKET_PATH` | The binary path is now read (`TestTheHerdrBinaryComesFromTheVariableTheContractNames`). `HERDR_SOCKET_PATH` is not, and is a non-divergence in substance: this binary shells out to the CLI and opens no socket of its own, so it hard-codes no socket path — the CLI resolves that variable itself. |
 
 ## The MUSTs that do apply
@@ -103,6 +102,8 @@ reason it stands.
 | §6.3 | The code is one of the nine, the exit status is the one fixed for it, and a finer name is a sub-reason inside `message` | `TestEverySubReasonAnswersUnderAContractCode`, `TestTheSubReasonsMapOntoTheCodesTheContractFixes`, `TestExitIsTheStatusTheContractFixes`, `TestAFailureExitsWithTheStatusTheContractFixes` |
 | §10.3 | `doctor` prints the state dir and the config dir | `TestDoctorNamesTheDirectoriesItResolved` |
 | §11.1 | Herdr is reached through `HERDR_BIN_PATH` | `TestTheHerdrBinaryComesFromTheVariableTheContractNames` |
+| §11.2 | `herdr api schema --json` is read once, in both accepted document shapes, and a missing capability is UNSUPPORTED at the verb that needs it, naming it | `TestTheJSONSchemaShapeIsRead`, `TestTheFlatShapeIsAlsoRead`, `TestTheSchemaIsReadOnce`, `TestAMissingCapabilityIsUnsupportedAtTheVerbThatNeedsIt`, `TestEveryVerbThatNeedsACapabilityRefusesWithoutIt` |
+| §10.3, §11.2 | `doctor` reports the Herdr schema it saw and every capability it is missing | `TestDoctorReportsTheHerdrSchemaItSaw` |
 | §12.2 | A test cites the section it enforces | `TestEveryTestThisDocumentNamesExists`, `TestContractCitationsResolve` |
 | §13.4 | The declared revision is the vendored one, and the README states it | `TestTheDeclaredRevisionIsTheVendoredOne`, `TestTheChangelogHasALineForTheDeclaredContractRevision` |
 | §13.2 | The short name is `dispatch` | `TestTheManifestNamesThisPluginAtThisVersion` |

@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -22,6 +23,12 @@ import (
 type Client struct {
 	// Bin is the binary to run; empty means `herdr` off PATH.
 	Bin string
+
+	// mu guards the cached schema. One client is shared by the tick and by
+	// whichever door is answering, so the one read §11.2 asks for has to be
+	// one read however many callers arrive at once.
+	mu     sync.Mutex
+	schema *Schema
 }
 
 // New is the client a daemon drives Herdr with: §11.1 says call Herdr through
@@ -143,6 +150,9 @@ func (c *Client) PaneSplit(ctx context.Context, pane, direction, ratio, cwd stri
 // An empty workspace lets Herdr pick, which is what happens when nothing
 // alive could say where the tab belongs.
 func (c *Client) TabCreate(ctx context.Context, workspace, cwd, label string, env ...string) (Tab, string, error) {
+	if err := c.Require(ctx, CapTabCreate); err != nil {
+		return Tab{}, "", err
+	}
 	var res struct {
 		Tab      Tab `json:"tab"`
 		RootPane struct {
@@ -188,6 +198,9 @@ func (c *Client) Tabs(ctx context.Context) ([]Tab, error) {
 
 // PaneRun sends a command line and Enter to a pane's interactive shell.
 func (c *Client) PaneRun(ctx context.Context, pane, command string) error {
+	if err := c.Require(ctx, CapPaneRun); err != nil {
+		return err
+	}
 	return c.result(ctx, nil, "pane", "run", pane, command)
 }
 
@@ -199,6 +212,9 @@ func (c *Client) PaneRun(ctx context.Context, pane, command string) error {
 // so it is taken raw. Parsing it as JSON is what retired a live worker that
 // had already claimed its task.
 func (c *Client) PaneRead(ctx context.Context, pane string, lines int) (string, error) {
+	if err := c.Require(ctx, CapPaneRead); err != nil {
+		return "", err
+	}
 	return c.text(ctx, "pane", "read", pane, "--source", "detection", "--lines", strconv.Itoa(lines))
 }
 
@@ -245,6 +261,9 @@ func (c *Client) AgentStart(ctx context.Context, req StartRequest) (Agent, error
 
 // AgentGet reads one worker by pane id or by agent name.
 func (c *Client) AgentGet(ctx context.Context, target string) (Agent, error) {
+	if err := c.Require(ctx, CapAgentGet); err != nil {
+		return Agent{}, err
+	}
 	var res struct {
 		Agent Agent `json:"agent"`
 	}

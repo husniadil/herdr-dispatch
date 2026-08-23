@@ -206,6 +206,29 @@ it. Every caller here is the operator's own tooling reaching a socket only
 the operator can open, and the board only ever hears from this binary as
 `plugin:hdis` whoever asked.
 
+## What this Herdr can do
+
+At daemon start `herdr api schema --json` is read once, and what it says is
+what the verbs decide on (§11.2). Both document shapes the section names are
+accepted: the JSON Schema Herdr prints today, whose request methods are the
+`const` values under `schemas.request.oneOf[].properties.method` and whose
+event kinds are the enum at `schemas.event.$defs.EventKind`, and the flat
+`{"requests":[…],"events":[…]}` form a simpler future one might print. The
+protocol number is reported and decided on by nothing: §11.2 calls pinning one
+a contract violation.
+
+A capability this binary needs and Herdr does not list is `UNSUPPORTED` **at
+the verb that needs it, naming it** — never a refusal to start, and never a
+verb that runs anyway. `hdis doctor` says which are missing before a dispatch
+is tried:
+
+```
+  herdr api   protocol 1, 14 requests, 1 events, MISSING tab.create: the verbs that need one refuse UNSUPPORTED
+```
+
+A Herdr that could not be asked is not a Herdr that offers nothing, so the
+answer is not cached and the next verb asks again.
+
 ## The policy gate
 
 Every verb that changes the world passes one gate before anything happens

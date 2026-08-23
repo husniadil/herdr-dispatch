@@ -24,6 +24,7 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/codes"
 	"github.com/husniadil/herdr-dispatch/internal/config"
 	"github.com/husniadil/herdr-dispatch/internal/gate"
+	"github.com/husniadil/herdr-dispatch/internal/herdr"
 	"github.com/husniadil/herdr-dispatch/internal/htask"
 	"github.com/husniadil/herdr-dispatch/internal/loop"
 	"github.com/husniadil/herdr-dispatch/internal/protocol"
@@ -353,6 +354,12 @@ type DoctorReport struct {
 	// nobody has decided. An operator whose dispatch came back DENIED reads
 	// here first.
 	Gate GateHealth `json:"gate"`
+	// Herdr is what §11.2's feature detection found: the protocol Herdr
+	// reported, how many requests and events it listed, and any capability
+	// this binary needs that it did not. §10.3 makes doctor print the Herdr
+	// schema it saw, and it is the one place an operator can tell "this
+	// Herdr cannot do it" from "this plugin did not ask".
+	Herdr HerdrHealth `json:"herdr"`
 	// MinPaneColumns is the width a worker's pane must be readable at, and
 	// the reason every worker gets a tab of its own. Herdr reports no column
 	// count for a pane, so this is the one place an operator can see the
@@ -385,6 +392,32 @@ type GateHealth struct {
 	// Parked is how many deferrals are waiting on the operator, or were
 	// resolved and then failed. Both want a human.
 	Parked int `json:"parked"`
+}
+
+// HerdrHealth is the §11.2 schema read, as doctor reports it.
+type HerdrHealth struct {
+	// Detected says the schema was read. False with an empty Missing list
+	// means nothing has asked Herdr yet or the ask failed — which is not
+	// the same as a Herdr that offers nothing.
+	Detected bool `json:"detected"`
+	// Protocol is reported and decided on by nothing: §11.2 calls pinning
+	// an exact protocol number a contract violation.
+	Protocol int `json:"protocol,omitempty"`
+	Requests int `json:"requests,omitempty"`
+	Events   int `json:"events,omitempty"`
+	// Missing is every capability this binary needs that Herdr did not
+	// list. The verbs that need one refuse with UNSUPPORTED naming it.
+	Missing []string `json:"missing"`
+	Error   string   `json:"error,omitempty"`
+}
+
+// needs is every Herdr request this binary asks for, which is what doctor
+// checks the schema against. It is here rather than at the call sites because
+// doctor's job is to answer BEFORE a verb is tried.
+var needs = []string{
+	herdr.CapTabCreate, herdr.CapTabList, herdr.CapTabClose,
+	herdr.CapPaneSplit, herdr.CapPaneRun, herdr.CapPaneRead, herdr.CapPaneList, herdr.CapPaneClose,
+	herdr.CapAgentStart, herdr.CapAgentGet, herdr.CapAgentList, herdr.CapPrompt,
 }
 
 // BoardHealth is the board's own report of itself, or why it gave none.
@@ -425,6 +458,7 @@ func (d *Daemon) doctor(ctx context.Context) (DoctorReport, error) {
 		MinPaneColumns: d.Loop.Config.Layout.MinPaneColumns,
 		MaxPanesPerTab: d.Loop.Config.Layout.MaxPanesPerTab,
 	}
+	rep.Herdr = d.herdrHealth(ctx)
 	board, err := d.Board.Doctor(ctx)
 	if err != nil {
 		rep.Board.Error = err.Error()
@@ -440,6 +474,33 @@ func (d *Daemon) doctor(ctx context.Context) (DoctorReport, error) {
 		rep.Board.Error = "the board's daemon is not answering on " + board.Binary
 	}
 	return rep, nil
+}
+
+// herdrHealth is §11.2 as doctor reports it. The schema is read at daemon
+// start and cached, so this normally answers off what was already seen; when
+// nothing has read one yet — a daemon whose start-time read failed — it asks,
+// because doctor exists to answer before a verb is tried.
+func (d *Daemon) herdrHealth(ctx context.Context) HerdrHealth {
+	if d.Loop == nil || d.Loop.Herdr == nil {
+		return HerdrHealth{Missing: []string{}}
+	}
+	schema, err := d.Loop.Herdr.Schema(ctx)
+	if err != nil {
+		return HerdrHealth{Missing: []string{}, Error: err.Error()}
+	}
+	out := HerdrHealth{
+		Detected: true,
+		Protocol: schema.Protocol,
+		Requests: len(schema.Requests),
+		Events:   len(schema.Events),
+		Missing:  []string{},
+	}
+	for _, want := range needs {
+		if !schema.Has(want) {
+			out.Missing = append(out.Missing, want)
+		}
+	}
+	return out
 }
 
 // check refuses a request the verb table does not describe: a required

@@ -170,6 +170,25 @@ func serve(argv []string) error {
 		}
 		log.Printf("htask %s (contract %s), ticking every %s", doc.Version, doc.Contract, *interval)
 	}
+	// §11.2: feature-detect at daemon start, once, and decide at the verb.
+	// It is said and not obeyed — a missing capability is UNSUPPORTED at the
+	// verb that needs it, never a refusal to start — and a Herdr that could
+	// not be asked is reported rather than assumed either way, so the first
+	// verb asks again.
+	if schema, err := pens.Schema(ctx); err != nil {
+		log.Printf("herdr could not say what it offers, so the first verb that needs a capability will ask again: %v", err)
+	} else {
+		log.Printf("herdr offers %d request(s) and %d event kind(s) at protocol %d",
+			len(schema.Requests), len(schema.Events), schema.Protocol)
+		for _, want := range []string{
+			herdr.CapTabCreate, herdr.CapPaneSplit, herdr.CapPaneRun, herdr.CapPaneRead,
+			herdr.CapAgentStart, herdr.CapAgentGet, herdr.CapPrompt,
+		} {
+			if !schema.Has(want) {
+				log.Printf("this herdr does not offer %s; the verbs that need it will refuse with UNSUPPORTED", want)
+			}
+		}
+	}
 	if pane == "" {
 		log.Print(`no base pane: nothing will be spawned and dispatch will refuse. ` +
 			`Run inside a Herdr pane, pass -pane, or set "pane" in the config.`)
