@@ -211,8 +211,8 @@ func TestRefusingAParkedActionNeverRunsTheVerb(t *testing.T) {
 	id := codes.ParkedOf(err)
 
 	if _, err := call(t, d, protocol.Request{
-		Verb: "parked_resolve", Args: map[string]any{"id": id, "refuse": true}}); err != nil {
-		t.Fatalf("refuse: %v", err)
+		Verb: "parked_resolve", Args: map[string]any{"id": id, "reject": true}}); err != nil {
+		t.Fatalf("reject: %v", err)
 	}
 	if got := d.Loop.Pending(); len(got) != 0 {
 		t.Fatalf("a refused dispatch reserved %v", got)

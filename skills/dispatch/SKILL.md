@@ -136,7 +136,7 @@ waiting for the operator.
 
 ```sh
 hdis parked list                     hdis parked resolve <id>
-hdis parked list --json              hdis parked resolve <id> --refuse
+hdis parked list --json              hdis parked resolve --reject <id>
 ```
 
 A parked call is **the operator's to decide**, not yours. Tell them the id and

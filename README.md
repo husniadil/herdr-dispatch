@@ -297,7 +297,7 @@ would be a call its caller was answered for and nobody can find.
 ```sh
 hdis parked list                     # what is waiting, and why
 hdis parked resolve pk-…             # let it through
-hdis parked resolve pk-… --refuse    # close it, the verb never runs
+hdis parked resolve --reject pk-…    # close it, the verb never runs
 ```
 
 Resolving **re-runs the verb under the subject the gate stopped**, never the
@@ -310,11 +310,12 @@ dispatch that has already happened twice. And a row the operator let through
 whose verb then errored is marked `failed` and stays in front of them, because
 a call that did not happen must not read like one that did.
 
-The switch is spelled `--refuse` where the sibling plugins spell it `--reject`.
-This binary never rules on a board submission, and a guard here fails on the
-board's review words appearing as arguments in its own source; keeping that
-guard sharp is worth more than matching a sibling's spelling for a switch
-nothing shares.
+The switch is spelled `--reject`, as the sibling plugins spell the same
+operator verdict. It rules on a parked action of this daemon's, never on a
+board submission — no task moves and the board is never called — so the guard
+here that fails on the board's review words appearing as arguments in its own
+source carries a named exemption for this one switch: exactly two files,
+exactly one occurrence in each, and `approve` nowhere at all.
 
 ## Configuration
 

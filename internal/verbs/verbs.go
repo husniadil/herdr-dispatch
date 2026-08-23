@@ -148,20 +148,21 @@ var All = []Verb{
 		Long: "Re-runs the parked verb under the subject the gate stopped, never " +
 			"the resolver's (§9.3), and skips the gate, because the resolution " +
 			"IS the decision the gate deferred. The row records who resolved " +
-			"it. With --refuse the verb never runs and the row is closed. This " +
+			"it. With --reject the verb never runs and the row is closed. This " +
 			"is the operator's authority and therefore advice rather than a " +
 			"refusal this door makes (§3.7): confirm with the user before " +
 			"resolving one on their behalf.",
 		Args: []Arg{
 			{Name: "id", Type: String, Desc: "The parked action id, as DENIED reported it", Required: true, Positional: true},
-			// Spelled `refuse`, where the sibling plugins spell the same
-			// switch with the board's review word. That word as a Go
-			// argument is exactly what
-			// TestNoSourceFilePassesAReviewVerbAsAnArgument forbids: this
-			// binary never rules on a board submission, and a guard that
-			// reads the word literally is worth more than matching a
-			// sibling's spelling for a switch nothing shares.
-			{Name: "refuse", Type: Bool, Desc: "Close the action without running the verb"},
+			// Spelled `reject`, as the sibling plugins spell the same
+			// operator verdict. It rules on a PARKED ACTION of this
+			// daemon's, never on a board submission — no task moves and
+			// the board is not called — so the guard that forbids the
+			// board's review words as arguments,
+			// TestNoSourceFilePassesAReviewVerbAsAnArgument, carries a
+			// named exemption for this one switch rather than pushing a
+			// caller to remember a spelling only this plugin uses.
+			{Name: "reject", Type: Bool, Desc: "Close the action without running the verb"},
 		},
 		Mutates: true,
 		Ungated: "resolving a deferral is the answer to a gate that already spoke; gating it would let a gate park its own resolution and strand every deferred action",

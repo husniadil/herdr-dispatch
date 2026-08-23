@@ -41,8 +41,25 @@ func TestTheBoardAdapterCarriesNoReviewVerb(t *testing.T) {
 // "approve" or "reject" as an argument to anything. The verifier's own
 // condition names both, in a sentence forbidding them, and that is a
 // sentence rather than an argument.
+//
+// One exemption, and only one: `hdis parked resolve --reject` closes a
+// PARKED ACTION this daemon deferred to the operator. That is not a verdict
+// on a board submission — no task changes state, the board is never called,
+// and the row it closes exists only in this binary's own document. The word
+// is the board's, but the thing it rules on is ours, and the sibling plugins
+// spell the same operator verdict `--reject`, so diverging here would cost a
+// caller for nothing. What the guard still holds is the shape of the
+// exemption: exactly the two files below, exactly one occurrence in each,
+// and `"approve"` nowhere at all. A third occurrence, or the word appearing
+// in a third file, fails and gets read by a human.
 func TestNoSourceFilePassesAReviewVerbAsAnArgument(t *testing.T) {
 	root := filepath.Join("..", "..")
+	exempt := map[string]int{
+		// The switch's declaration in the one verb table both doors render.
+		filepath.Join(root, "internal", "verbs", "verbs.go"): 1,
+		// Where the daemon reads that switch off the request.
+		filepath.Join(root, "internal", "daemon", "daemon.go"): 1,
+	}
 	verb := regexp.MustCompile(`"(approve|reject)"`)
 	read := 0
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
@@ -69,8 +86,25 @@ func TestNoSourceFilePassesAReviewVerbAsAnArgument(t *testing.T) {
 			return err
 		}
 		read++
-		if m := verb.Find(body); m != nil {
-			t.Errorf("%s passes %s as an argument: this binary never approves or rejects", path, m)
+		found := verb.FindAll(body, -1)
+		if allowed, ok := exempt[path]; ok {
+			// The exemption is for `"reject"` and nothing else, and it
+			// is spent by the first occurrence: anything past it, and
+			// every `"approve"`, is the boundary being crossed.
+			rejects := 0
+			for _, m := range found {
+				if string(m) == `"reject"` {
+					rejects++
+					if rejects <= allowed {
+						continue
+					}
+				}
+				t.Errorf("%s passes %s as an argument: this binary never approves or rejects, and its %d exempt %q may not grow", path, m, allowed, `"reject"`)
+			}
+			return nil
+		}
+		if len(found) > 0 {
+			t.Errorf("%s passes %s as an argument: this binary never approves or rejects", path, found[0])
 		}
 		return nil
 	})

@@ -689,9 +689,9 @@ type ParkedResolution struct {
 // stopped and no one who decided it could proceed.
 func (d *Daemon) resolveParked(ctx context.Context, req protocol.Request) (ParkedResolution, error) {
 	id, _ := req.Args["id"].(string)
-	refuse, _ := req.Args["refuse"].(bool)
+	reject, _ := req.Args["reject"].(bool)
 	state := store.ParkedResolved
-	if refuse {
+	if reject {
 		state = store.ParkedRefused
 	}
 	// The move is the one-winner check and it happens BEFORE the verb runs:
@@ -702,7 +702,7 @@ func (d *Daemon) resolveParked(ctx context.Context, req protocol.Request) (Parke
 	if err != nil {
 		return ParkedResolution{}, err
 	}
-	if refuse {
+	if reject {
 		d.logf("%s refused the parked %s (%s)", req.Caller(), was.Verb, id)
 		return ParkedResolution{ID: id, State: state}, nil
 	}

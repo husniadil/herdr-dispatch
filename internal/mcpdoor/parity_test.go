@@ -219,6 +219,12 @@ func TestBothDoorsBuildTheSameRequest(t *testing.T) {
 		{"doctor", nil, map[string]any{}},
 		{"status", nil, map[string]any{}},
 		{"dispatch", []string{"7"}, map[string]any{"task": "7"}},
+		// The switch is spelled the same on both doors, and it is the
+		// board's own word: a parked action is refused with --reject
+		// here because htask and hmail spell the same operator verdict
+		// that way, and a caller should not have to remember which
+		// plugin calls it what.
+		{"parked_resolve", []string{"--reject", "pk-1"}, map[string]any{"id": "pk-1", "reject": true}},
 	}
 	for _, tc := range cases {
 		v, ok := verbs.ByName(tc.verb)

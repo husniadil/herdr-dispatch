@@ -87,10 +87,14 @@ many calls are waiting on the operator. The bindings document gains an
 optional `parked` array; a document written by a binary without the gate still
 reads, and one written with it stays readable to a binary that predates it.
 
-The refuse switch is `hdis parked resolve <id> --refuse`, where the sibling
-plugins spell the same switch `--reject`. This binary never rules on a board
-submission and a guard here fails on the board's review words appearing as
-arguments in its own source.
+The reject switch is `hdis parked resolve --reject <id>`, spelled as the
+sibling plugins spell the same operator verdict. It closes a parked action of
+this daemon's and never a board submission — no task moves and the board is
+not called — so the guard here that fails on the board's review words
+appearing as arguments in its own source carries a named exemption for this
+one switch, rather than a caller having to remember a spelling only this
+plugin uses. The switch comes before the id, as every switch on this CLI
+does.
 
 `hdis version` prints the plugin name and the contract revision beside the
 version, and takes `--json` for the same three facts, which is the shape both
