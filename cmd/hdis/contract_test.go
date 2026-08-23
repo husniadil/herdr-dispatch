@@ -113,3 +113,24 @@ func readSkill(t *testing.T) string {
 	}
 	return string(raw)
 }
+
+// The operator's worker count survives a restart, and that is decided HERE
+// rather than in config: a flag whose default is a number would overwrite the
+// config document on every restart that omitted it.
+//
+// Pinned at the call site because that is where the choice is made. Putting
+// max_workers in the config and then still passing the raw flag through would
+// leave every config test green and the operator's number still dropped.
+func TestTheDaemonTakesItsWorkerCountFromTheConfigUnlessTheFlagIsPassed(t *testing.T) {
+	src, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(src)
+	if !strings.Contains(text, `fs.Int("max-workers", 0,`) {
+		t.Error(`the max-workers flag carries a default of its own, so an unpassed flag overwrites the config's max_workers on every restart`)
+	}
+	if !strings.Contains(text, "MaxWorkers:   cfg.MaxWorkersOr(*maxWorkers)") {
+		t.Error("the daemon's worker count is not resolved through cfg.MaxWorkersOr, so the config document's number never reaches the policy")
+	}
+}

@@ -236,3 +236,18 @@ func TestStatusNamesTheBranchTheWorkIsOn(t *testing.T) {
 		t.Fatalf("status does not name the branch: %q", out.String())
 	}
 }
+
+// The number the operator just set is read back from the running daemon, in
+// the prose an operator actually reads and not only in the JSON.
+func TestDoctorNamesTheMaxPanesPerTabInProse(t *testing.T) {
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/hdis.sock","base_pane":"wM:p1","max_workers":4,"interval":"15s","min_pane_columns":40,"max_panes_per_tab":2,"board":{"reachable":true}}`)
+	var out strings.Builder
+	if err := Write("doctor", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	for _, want := range []string{"max_panes_per_tab", "2"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("want %q in doctor prose %q", want, out.String())
+		}
+	}
+}

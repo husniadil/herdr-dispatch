@@ -823,3 +823,24 @@ func TestNoVerifierIsSpawnedForAWorkerBindingThatNamesNoBranch(t *testing.T) {
 		t.Fatalf("the operator was not told why: %q", logged.String())
 	}
 }
+
+// CRITERION 3, at the call site. A verifier belongs with the worker it
+// verifies, and what puts it there is that both spawn requests carry the SAME
+// tab label — the task's own. The placement rule is proved in the spawn
+// package; what is proved here is that the loop gives it the same label
+// twice, which is the whole of the "no special case".
+//
+// Pinned against the source because Loop.Spawn is a concrete pipeline: a
+// verifier labelled anything else would open a tab of its own and every
+// spawn-level test would still pass.
+func TestTheVerifierIsLabelledForTheTaskItVerifiesAndNotForItself(t *testing.T) {
+	src, err := os.ReadFile("loop.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "Label:      spawn.TabLabel(row.Seq),"
+	if n := strings.Count(string(src), want); n != 2 {
+		t.Errorf("%d of the two spawn requests carry %q; a verifier under any other label opens a tab of its own instead of joining its worker's",
+			n, want)
+	}
+}

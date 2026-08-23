@@ -246,24 +246,69 @@ func TestTheMeasuredPaneWidthCapIsInTheConfigAndCannotBeLowered(t *testing.T) {
 		}
 	})
 
-	// The cap is not a free number: it is what the measured window width and
-	// the measured readable floor work out to, given that splits alternate
-	// and a pane's width therefore halves only every second one.
-	t.Run("the cap follows from the two measurements", func(t *testing.T) {
-		width, panes := MeasuredWindowColumns, 1
-		for {
-			next := width
-			if panes%2 == 1 {
-				next = width / 2
-			}
-			if next < MeasuredReadableColumns {
-				break
-			}
-			width, panes = next, panes+1
+}
+
+// The grid rule: a new pane splits off the pane one GENERATION back, and the
+// direction alternates by generation. Four panes are a 2x2.
+func TestTheGridRulePutsFourPanesInATwoByTwo(t *testing.T) {
+	for _, c := range []struct {
+		held      int
+		target    int
+		direction string
+	}{
+		{1, 1, "right"},
+		{2, 1, "down"},
+		{3, 2, "down"},
+		{4, 1, "right"},
+		{5, 2, "right"},
+		{8, 1, "down"},
+	} {
+		target, direction := GridSplit(c.held)
+		if target != c.target || direction != c.direction {
+			t.Errorf("GridSplit(%d) = pane %d %s, want pane %d %s",
+				c.held, target, direction, c.target, c.direction)
 		}
-		if panes != DefaultMaxPanesPerTab {
-			t.Fatalf("a %d-column window at a %d-column floor holds %d readable panes, and the cap is %d",
-				MeasuredWindowColumns, MeasuredReadableColumns, panes, DefaultMaxPanesPerTab)
-		}
-	})
+	}
+}
+
+// The cap is derived from the grid rule and the measured floor rather than
+// chosen: the largest pane count whose narrowest pane still clears it.
+func TestTheMaxPanesPerTabDefaultIsTheWidestTheFloorAllows(t *testing.T) {
+	if got := NarrowestColumns(DefaultMaxPanesPerTab); got < MeasuredReadableColumns {
+		t.Errorf("%d panes leaves the narrowest at %d columns, under the %d floor",
+			DefaultMaxPanesPerTab, got, MeasuredReadableColumns)
+	}
+	if got := NarrowestColumns(DefaultMaxPanesPerTab + 1); got >= MeasuredReadableColumns {
+		t.Errorf("%d panes still clears the floor at %d columns, so the cap is set lower than the rule allows",
+			DefaultMaxPanesPerTab+1, got)
+	}
+}
+
+// max-workers is the operator's number and it survives a restart: the config
+// carries it, and the daemon flag wins only when it is passed.
+func TestMaxWorkersLivesInTheConfigAndTheFlagOverridesIt(t *testing.T) {
+	c, err := Parse([]byte(`{"default":"w","profiles":{"w":{"provider":"claude"}},"max_workers":4}`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if c.MaxWorkers != 4 {
+		t.Errorf("max_workers: got %d, want 4", c.MaxWorkers)
+	}
+	if got := c.MaxWorkersOr(0); got != 4 {
+		t.Errorf("with no flag the config's number did not survive: got %d, want 4", got)
+	}
+	if got := c.MaxWorkersOr(7); got != 7 {
+		t.Errorf("the flag did not win: got %d, want 7", got)
+	}
+
+	d, err := Parse([]byte(`{"default":"w","profiles":{"w":{"provider":"claude"}}}`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if d.MaxWorkers != DefaultMaxWorkers {
+		t.Errorf("an absent max_workers defaulted to %d, want %d", d.MaxWorkers, DefaultMaxWorkers)
+	}
+	if _, err := Parse([]byte(`{"default":"w","profiles":{"w":{"provider":"claude"}},"max_workers":-1}`)); err == nil {
+		t.Error("a negative max_workers was accepted")
+	}
 }

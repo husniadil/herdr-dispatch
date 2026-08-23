@@ -296,6 +296,11 @@ type DoctorReport struct {
 	// count for a pane, so this is the one place an operator can see the
 	// floor their window has to clear.
 	MinPaneColumns int `json:"min_pane_columns"`
+	// MaxPanesPerTab is how many panes one of this dispatcher's tabs may
+	// hold. A tab holds one task, so it bounds the panes ONE task may have
+	// rather than keeping two tasks apart. The operator sets it in the
+	// config, and this is where they read it back off the running daemon.
+	MaxPanesPerTab int `json:"max_panes_per_tab"`
 }
 
 // VerifyHealth is the verification lane as doctor reports it.
@@ -333,6 +338,7 @@ func (d *Daemon) doctor(ctx context.Context) (DoctorReport, error) {
 			Profile: d.Loop.Config.Verify.Profile,
 		},
 		MinPaneColumns: d.Loop.Config.Layout.MinPaneColumns,
+		MaxPanesPerTab: d.Loop.Config.Layout.MaxPanesPerTab,
 	}
 	board, err := d.Board.Doctor(ctx)
 	if err != nil {

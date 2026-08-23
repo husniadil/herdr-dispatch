@@ -711,3 +711,17 @@ func TestDoctorReportsTheVerificationLane(t *testing.T) {
 		t.Fatalf("the lane reads as %+v", rep.Verify)
 	}
 }
+
+// The operator sets max_panes_per_tab in the config, so it has to be
+// readable back off the running daemon like the floor beside it.
+func TestDoctorReportsTheMaxPanesPerTab(t *testing.T) {
+	d, _ := newDaemon(t)
+	cfg, err := config.Parse([]byte(`{"default":"w","profiles":{"w":{"provider":"claude"}},"layout":{"max_panes_per_tab":2}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Loop.Config = cfg
+	if rep := doctorOf(t, d); rep.MaxPanesPerTab != 2 {
+		t.Fatalf("doctor reports max_panes_per_tab %d, want 2", rep.MaxPanesPerTab)
+	}
+}

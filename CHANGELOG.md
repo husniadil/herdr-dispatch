@@ -11,8 +11,11 @@ A worker now comes up in a TAB of its own rather than as a split of the
 operator's pane, and the tab is created in the workspace of the pane the task
 was FILED from. `herdr tab create --workspace/--cwd/--label/--env --no-focus`
 replaces `herdr pane split --pane <base>` as the placement call. The operator's
-tab is never split; workers share this daemon's own tabs, alternating right and
-down with an explicit `--ratio` and capped at `layout.max_panes_per_tab`, and a
+tab is never split; a worker shares only the tab opened for ITS OWN task,
+compared against the tab's whole label and not its `hdis ` prefix, and a
+verifier joins the tab of the task it verifies. Panes inside a tab make a
+grid — the second splits right off the first, the third DOWN off the first,
+the fourth down off the second — capped at `layout.max_panes_per_tab`, and a
 full tab overflows into another tab in the same workspace.
 
 Placement now follows the same rule the report address already did: the task's
@@ -20,16 +23,26 @@ pane of origin when the board names one AND that pane is still alive, the
 daemon's own otherwise. Liveness is checked at the spawn, because an address
 can fall back lazily and a placement cannot. `hdis status` gained a `tab`
 column and the JSON gained a `tab` field. `hdis doctor` gained
-`min_pane_columns`. Bindings gained a `tab` key; an older document without one
+`min_pane_columns` and `max_panes_per_tab`, in the JSON and in the prose.
+Bindings gained a `tab` key; an older document without one
 still loads, and its pane is retired as a pane.
 
 Config gained a `layout` object with `min_pane_columns` (default 40) and
-`max_panes_per_tab` (default 5). Both are measured numbers with the measurement
-recorded beside them in the source and in the README: 40 is the narrowest pane
-whose detection text still reads correctly, and 5 is what a measured 226-column
-window holds at that floor given that splits alternate. A document naming a
+`max_panes_per_tab` (default 16). Both are measured numbers with the
+measurement recorded beside them in the source and in the README: 40 is the
+narrowest pane whose detection text still reads correctly, and 16 is what a
+measured 226-column window holds at that floor under the grid rule. The
+default was 5 while the split was always taken off the last pane; a grid
+narrows a pane far more slowly, so the same measurements now work out to 16.
+The cap bounds the panes ONE task may have, because a tab holds one task, and
+it is not what keeps two tasks apart. A document naming a
 `min_pane_columns` BELOW 40 is refused, because under it the dispatcher cannot
 trust what it reads off a worker.
+
+Config gained a top-level `max_workers` (default 2), and the daemon's
+`-max-workers` flag now defaults to `0` and overrides it only when passed. The
+operator's worker count used to exist nowhere but the shell line that started
+the daemon, so any restart that omitted the flag silently dropped back to 2.
 
 Ownership of a pane no longer depends on the Herdr agent name, which Herdr was
 measured dropping while the pane and its work were still live. A pane whose cwd

@@ -76,7 +76,7 @@ func serve(argv []string) error {
 	interval := fs.Duration("interval", 15*time.Second, "how often to tick")
 	once := fs.Bool("once", false, "run one tick and exit")
 	basePane := fs.String("pane", os.Getenv("HERDR_PANE_ID"), "the pane worker panes are split off")
-	maxWorkers := fs.Int("max-workers", 2, "how many workers may be live at once")
+	maxWorkers := fs.Int("max-workers", 0, `how many workers may be live at once; 0 means the config's "max_workers"`)
 	claimTimeout := fs.Duration("claim-timeout", 5*time.Minute, "how long a delivered goal may go unclaimed before a nudge")
 	maxPrompts := fs.Int("max-prompts", 3, "how many times one task's goal may be delivered before giving up")
 	startTimeout := fs.Duration("start-timeout", 45*time.Second, "how long herdr waits for a worker to become interactive")
@@ -132,7 +132,7 @@ func serve(argv []string) error {
 		Herdr:  pens,
 		Config: cfg,
 		Policy: decide.Policy{
-			MaxWorkers:   *maxWorkers,
+			MaxWorkers:   cfg.MaxWorkersOr(*maxWorkers),
 			ClaimTimeout: *claimTimeout,
 			MaxPrompts:   *maxPrompts,
 			// The lane is the config document's call, not a flag: which

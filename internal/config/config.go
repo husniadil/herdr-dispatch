@@ -101,17 +101,89 @@ const MeasuredReadableColumns = 40
 // six panes split across it summed to the same.
 const MeasuredWindowColumns = 226
 
-// DefaultMaxPanesPerTab is how many workers may share one of this
-// dispatcher's tabs, and it follows from the two numbers above rather than
+// GridSplit is the placement rule inside one tab: given how many panes it
+// already holds, which pane the next one is split off and which way.
+//
+// A tab fills as a GRID, and a grid needs the split TARGET to move rather
+// than only the direction. Panes are added in generations, each generation
+// twice the size of the one before, and every pane in a generation splits the
+// pane one generation back:
+//
+//	held  target  direction     shape
+//	1     p1      right         p1 | p2
+//	2     p1      down          (p1 over p3) | p2
+//	3     p2      down          (p1 over p3) | (p2 over p4)
+//	4..7  p1..p4  right         each of the four halved sideways
+//	8..15 p1..p8  down          each of the eight halved downwards
+//
+// Four panes are then four equal rectangles, each half the window wide, which
+// is what an operator watching two tasks at once needs to read. Splitting off
+// the LAST pane instead gives a column beside a stack and a fourth pane a
+// quarter of the width.
+//
+// The returned target is 1-based, in the order the tab lists its panes.
+func GridSplit(held int) (target int, direction string) {
+	if held < 1 {
+		return 0, ""
+	}
+	// generation is how many doublings deep the incoming pane is: the
+	// largest g with 2^g <= held.
+	generation, size := 0, 1
+	for size*2 <= held {
+		generation++
+		size *= 2
+	}
+	direction = "down"
+	if generation%2 == 0 {
+		direction = "right"
+	}
+	return held + 1 - size, direction
+}
+
+// NarrowestColumns is how wide the narrowest pane in a tab of the given size
+// is, under GridSplit and starting from MeasuredWindowColumns.
+//
+// Only the even generations split sideways, so a pane's width halves once per
+// two generations and the odd ones spend themselves on height instead.
+func NarrowestColumns(panes int) int {
+	width := MeasuredWindowColumns
+	for n := 1; n < panes; n++ {
+		if _, direction := GridSplit(n); direction == "right" {
+			// The pane being halved is the widest one left, so the
+			// narrowest width only moves on the first split of a
+			// generation.
+			if n&(n-1) == 0 {
+				width /= 2
+			}
+		}
+	}
+	return width
+}
+
+// DefaultMaxPanesPerTab is how many panes may share one of this dispatcher's
+// tabs, and it follows from GridSplit and MeasuredReadableColumns rather than
 // from taste.
 //
-// Splits alternate right and down and always divide the LAST pane, so a
-// pane's width halves only every SECOND split. Starting from
-// MeasuredWindowColumns the widths run 226, 113, 113, 56, 56, and then 28.
-// Five panes all clear MeasuredReadableColumns; the sixth does not, and a
-// pane that narrow is one whose detection text this dispatcher can no longer
-// read. So five, and the next worker opens a tab of its own.
-const DefaultMaxPanesPerTab = 5
+// Under the grid rule the widths run 226 for one pane, 113 for two through
+// four, and 113/2 = 56 for five through sixteen — the generation that fills
+// 9..16 spends itself on height, so the width holds. The seventeenth starts
+// the generation that halves 56 to 28, which is under the 40-column floor a
+// worker's detection text still reads at. So sixteen.
+//
+// This is a larger number than the 5 that stood before, and it is larger
+// because the rule changed: the old placement always split the LAST pane, so
+// a pane narrowed every second split forever and 56 was reached at five panes
+// and 28 at six. A real grid halves the width far more slowly.
+//
+// The cap is a FLOOR GUARD and nothing more. Grouping is by TASK: a tab holds
+// one task, so this bounds the panes ONE task may have — a worker and its
+// verifier, two today — and it is not what keeps two tasks apart. That is the
+// tab label, compared in the spawn pipeline.
+const DefaultMaxPanesPerTab = 16
+
+// DefaultMaxWorkers is how many workers may be live at once when neither the
+// config nor the daemon flag names a number.
+const DefaultMaxWorkers = 2
 
 // Layout is where a worker is placed. There is one placement — a tab of its
 // own — and this is the number that says why.
@@ -127,10 +199,14 @@ type Layout struct {
 	// be GUARANTEED beforehand, by giving the worker a tab nothing else is
 	// in.
 	MinPaneColumns int `json:"min_pane_columns"`
-	// MaxPanesPerTab is how many workers may share one of this dispatcher's
+	// MaxPanesPerTab is how many panes may share one of this dispatcher's
 	// tabs before the next opens a tab of its own. Zero means
 	// DefaultMaxPanesPerTab, which is what MinPaneColumns and the measured
-	// window width work out to.
+	// window width work out to under config.GridSplit.
+	//
+	// It bounds panes per TASK, because a tab holds one task: nothing here
+	// keeps two tasks apart, and raising it never puts a second task in a
+	// tab. It is the readability floor guard and only that.
 	MaxPanesPerTab int `json:"max_panes_per_tab"`
 }
 
@@ -148,6 +224,11 @@ type Config struct {
 	// Layout is where a worker is placed and the width it must be readable
 	// at.
 	Layout Layout `json:"layout"`
+	// MaxWorkers is how many workers may be live at once. Zero means
+	// DefaultMaxWorkers. It lives here rather than only on the daemon's
+	// flag because a number that exists only in the shell line that
+	// started the daemon is a number a restart drops without saying so.
+	MaxWorkers int `json:"max_workers"`
 	// Pane is the pane worker panes are split off, for a daemon that was
 	// not started inside one and was given no -pane. Without it, and
 	// without either of those, nothing can be spawned at all.
@@ -207,6 +288,12 @@ func Parse(b []byte) (Config, error) {
 	if c.Layout.MinPaneColumns < MeasuredReadableColumns {
 		return Config{}, fmt.Errorf("hdis config: layout.min_pane_columns is %d, and %d is the narrowest pane the detection text was measured to read correctly at; below it the dispatcher cannot trust what it reads off a worker",
 			c.Layout.MinPaneColumns, MeasuredReadableColumns)
+	}
+	if c.MaxWorkers == 0 {
+		c.MaxWorkers = DefaultMaxWorkers
+	}
+	if c.MaxWorkers < 1 {
+		return Config{}, fmt.Errorf("hdis config: max_workers is %d, and a dispatcher that may run no worker at all can never dispatch", c.MaxWorkers)
 	}
 	if c.Layout.MaxPanesPerTab == 0 {
 		c.Layout.MaxPanesPerTab = DefaultMaxPanesPerTab
@@ -285,4 +372,14 @@ func (p Profile) HasSettingsArg() bool {
 		}
 	}
 	return false
+}
+
+// MaxWorkersOr resolves how many workers may be live at once: what the daemon
+// flag was passed, else what the config names. The flag defaults to zero
+// precisely so an unpassed flag cannot silently overwrite the config.
+func (c Config) MaxWorkersOr(given int) int {
+	if given > 0 {
+		return given
+	}
+	return c.MaxWorkers
 }

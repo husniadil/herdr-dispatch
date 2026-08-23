@@ -97,6 +97,8 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 		fmt.Fprintf(out, "  bindings    %s, %d re-adopted at start\n",
 			or(rep.Bindings, "in memory only"), rep.Readopted)
 		fmt.Fprintf(out, "  verify      %s\n", verifyLane(rep.Verify))
+		fmt.Fprintf(out, "  layout      min_pane_columns %d, max_panes_per_tab %d per task\n",
+			rep.MinPaneColumns, rep.MaxPanesPerTab)
 		if rep.Board.Error != "" {
 			fmt.Fprintf(out, "  board       unreachable: %s\n", rep.Board.Error)
 			return nil

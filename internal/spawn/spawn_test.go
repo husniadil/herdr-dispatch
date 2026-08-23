@@ -1199,52 +1199,8 @@ func ownTab(t *testing.T, h *harness, panes ...string) {
 	h.Write(t, "panelist.json", `{"id":"x","result":{"type":"pane_list","panes":[`+strings.Join(rows, ",")+`]}}`)
 	h.Write(t, "tablist.json", `{"id":"x","result":{"type":"tab_list","tabs":[`+
 		`{"tab_id":"wM:t1","workspace_id":"wM","label":"1","pane_count":1},`+
-		`{"tab_id":"wM:t5","workspace_id":"wM","label":"hdis task 3","pane_count":`+
+		`{"tab_id":"wM:t5","workspace_id":"wM","label":"hdis task 7","pane_count":`+
 		strconv.Itoa(len(panes))+`}]}}`)
-}
-
-// A second worker joins the first one's tab rather than opening another, and
-// the splits alternate right and down with an explicit --ratio so the tab
-// fills as a grid instead of a row of slivers.
-//
-// The alternation is what makes the cap the number it is: a pane's width
-// halves only every SECOND split, so five panes in a measured 226-column
-// window are 226, 113, 113, 56 and 56 wide and every one clears the
-// 40-column readable floor.
-func TestASecondWorkerFillsTheFirstsTabAsAGridAndNeverTheOperatorsTab(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		panes []string
-		want  string
-	}{
-		{"the second pane goes beside the first", []string{"wM:p9"}, "right"},
-		{"the third goes below", []string{"wM:p9", "wM:pA"}, "down"},
-		{"the fourth goes beside again", []string{"wM:p9", "wM:pA", "wM:pB"}, "right"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h := newHarness(t, []string{goalActive}, startRegistered)
-			ownTab(t, h, tc.panes...)
-			if _, err := h.pipe.Run(context.Background(), req(claudeProfile())); err != nil {
-				t.Fatalf("run: %v", err)
-			}
-			if n := count(h.verbs(t), "tab create"); n != 0 {
-				t.Fatalf("a tab with room was ignored and %d new one(s) opened instead", n)
-			}
-			argv := splitArgvOf(t, h)
-			if !hasPair(argv, "--direction", tc.want) {
-				t.Errorf("the split went %v, want --direction %q; one direction forever is a row of slivers, not a grid", argv, tc.want)
-			}
-			if !hasPair(argv, "--ratio", "0.5") {
-				t.Errorf("the split passed no --ratio, so herdr places the pane wherever it likes: %v", argv)
-			}
-			// The pane split off is the LAST one in the tab, never the base
-			// pane and never the operator's.
-			last := tc.panes[len(tc.panes)-1]
-			if !hasPair(argv, "--pane", last) {
-				t.Errorf("the split was taken off the wrong pane, want the tab's last %q: %v", last, argv)
-			}
-		})
-	}
 }
 
 // A tab already holding the cap does not take another worker. The next one
@@ -1300,4 +1256,90 @@ func splitArgvOf(t *testing.T, h *harness) []string {
 	}
 	t.Fatal("no pane was split into the tab that had room")
 	return nil
+}
+
+// A tab belongs to ONE task. A tab this dispatcher opened for a different
+// task is not a candidate however much room it has: its label is the
+// operator's signpost, and a tab holding two tasks names only one of them.
+//
+// Dropping the task comparison and keeping only the hdis prefix fails this:
+// the split would be taken and no tab created.
+func TestAWorkerJoinsOnlyTheTabOpenedForItsOwnTask(t *testing.T) {
+	h := newHarness(t, []string{goalActive}, startRegistered)
+	ownTab(t, h, "wM:p9")
+	h.Write(t, "tablist.json", `{"id":"x","result":{"type":"tab_list","tabs":[`+
+		`{"tab_id":"wM:t1","workspace_id":"wM","label":"1","pane_count":1},`+
+		`{"tab_id":"wM:t5","workspace_id":"wM","label":"`+TabLabel(3)+`","pane_count":1}]}}`)
+
+	// The request is task 7's, and the only tab with room is task 3's.
+	if _, err := h.pipe.Run(context.Background(), req(claudeProfile())); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if n := count(h.verbs(t), "pane split"); n != 0 {
+		t.Errorf("task 7's worker was split into task 3's tab %d time(s); a tab holds one task", n)
+	}
+	argv := tabArgv(t, h)
+	if !hasPair(argv, "--label", TabLabel(7)) {
+		t.Errorf("no tab was opened for task 7's own work: %v", argv)
+	}
+}
+
+// A verifier belongs with the worker it verifies, which is the same task, so
+// it needs no special case: the same comparison puts it in that task's tab.
+func TestAVerifierLandsInTheTabOfTheTaskItVerifies(t *testing.T) {
+	h := newHarness(t, []string{goalActive}, startRegistered)
+	ownTab(t, h, "wM:p9")
+
+	r := req(claudeProfile())
+	r.Name = "hdis-verify-7"
+	r.Goal = VerifierGoal(7)
+	if _, err := h.pipe.Run(context.Background(), r); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if n := count(h.verbs(t), "tab create"); n != 0 {
+		t.Errorf("the verifier opened %d tab(s) of its own instead of joining its worker's", n)
+	}
+	argv := splitArgvOf(t, h)
+	if !hasPair(argv, "--pane", "wM:p9") {
+		t.Errorf("the verifier was not split into its worker's tab: %v", argv)
+	}
+}
+
+// CRITERION 4. Four panes in one tab are a 2x2 grid, and the reason is the
+// split TARGET rather than the direction alone: the third goes DOWN off the
+// FIRST, not off the last pane in the tab.
+//
+// Splitting the third off the last pane instead fails this by name.
+func TestFourPanesInOneTabAreATwoByTwoGrid(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		panes     []string
+		target    string
+		direction string
+	}{
+		{"the second splits right off the first", []string{"wM:p9"}, "wM:p9", "right"},
+		{"the third splits down off the FIRST", []string{"wM:p9", "wM:pA"}, "wM:p9", "down"},
+		{"the fourth splits down off the second", []string{"wM:p9", "wM:pA", "wM:pB"}, "wM:pA", "down"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, []string{goalActive}, startRegistered)
+			ownTab(t, h, tc.panes...)
+			if _, err := h.pipe.Run(context.Background(), req(claudeProfile())); err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			if n := count(h.verbs(t), "tab create"); n != 0 {
+				t.Fatalf("this task's own tab had room and %d new one(s) opened instead", n)
+			}
+			argv := splitArgvOf(t, h)
+			if !hasPair(argv, "--ratio", "0.5") {
+				t.Errorf("the split passed no --ratio, so herdr places the pane wherever it likes: %v", argv)
+			}
+			if !hasPair(argv, "--pane", tc.target) {
+				t.Errorf("the split was taken off the wrong pane, want %q: %v", tc.target, argv)
+			}
+			if !hasPair(argv, "--direction", tc.direction) {
+				t.Errorf("the split went the wrong way, want %q: %v", tc.direction, argv)
+			}
+		})
+	}
 }

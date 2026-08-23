@@ -403,11 +403,14 @@ func (p *Pipeline) Run(ctx context.Context, req Request) (string, error) {
 // else here follows from it: this dispatcher's own tabs are the only ones it
 // will add a pane to, and when none of them has room it opens another.
 //
-// Inside one of its own tabs the splits alternate right and down, so the tab
-// fills as a grid rather than a row of slivers. That alternation is what
-// makes the cap what it is: halving only happens every SECOND split, so five
-// panes in a 226-column window are 226, 113, 113, 56 and 56 columns wide and
-// every one of them clears the measured readable floor.
+// A tab also belongs to ONE task. Its label already carries the task number,
+// so placement is a comparison rather than new state: a worker goes in the
+// tab opened for ITS OWN task, or a new tab is opened for it. A verifier
+// belongs with the worker it verifies, which is the same task, so the same
+// comparison puts it in the same tab with no special case.
+//
+// Inside that tab the splits follow config.GridSplit, so four panes come out
+// as four equal rectangles rather than a column beside a stack.
 //
 // The env travels on whichever call opens the pane, so a worker carries its
 // report address and its cache TTL whether it was the first in a tab or the
@@ -419,15 +422,9 @@ func (p *Pipeline) place(ctx context.Context, req Request) (string, error) {
 	}
 	ws := p.workspaceFor(ctx, req)
 
-	if tab, last, held := p.roomInOwnTab(ctx, ws); tab != "" {
-		// held is how many panes the tab already has, so the pane being
-		// added is the (held+1)-th. Odd counts split sideways and even ones
-		// downwards, which is what turns a row into a grid.
-		direction := "down"
-		if held%2 == 1 {
-			direction = "right"
-		}
-		pane, err := p.Herdr.PaneSplit(ctx, last, direction, "0.5", req.Cwd, env...)
+	if tab, panes := p.roomInOwnTab(ctx, ws, req.label()); tab != "" {
+		target, direction := config.GridSplit(len(panes))
+		pane, err := p.Herdr.PaneSplit(ctx, panes[target-1], direction, "0.5", req.Cwd, env...)
 		if err == nil {
 			p.remember(pane, tab)
 			return pane, nil
@@ -445,22 +442,24 @@ func (p *Pipeline) place(ctx context.Context, req Request) (string, error) {
 	return pane, nil
 }
 
-// roomInOwnTab finds a tab this dispatcher opened in the given workspace that
-// is still under the pane cap, and the last pane in it to split off. It
-// returns an empty tab id when there is none, which is the ordinary case for
-// the first worker and for a workspace that is all the operator's.
+// roomInOwnTab finds the tab this dispatcher opened FOR THIS TASK in the
+// given workspace that is still under the pane cap, and the panes already in
+// it, in order. It returns an empty tab id when there is none, which is the
+// ordinary case for a task's first worker and for a workspace that is all the
+// operator's.
 //
-// A tab the operator made is never a candidate, whatever room it has. The
-// label is the only thing that distinguishes them, and it is checked here for
-// the same reason it is checked before a close.
-func (p *Pipeline) roomInOwnTab(ctx context.Context, ws string) (tab, last string, held int) {
+// The comparison is against the whole label and not its prefix. A tab the
+// operator made is never a candidate, and neither is a tab this dispatcher
+// opened for a DIFFERENT task: the label is the operator's signpost to the
+// work, and a tab holding two tasks names only one of them.
+func (p *Pipeline) roomInOwnTab(ctx context.Context, ws, label string) (tab string, held []string) {
 	tabs, err := p.Herdr.Tabs(ctx)
 	if err != nil {
-		return "", "", 0
+		return "", nil
 	}
 	panes, err := p.Herdr.PaneList(ctx)
 	if err != nil {
-		return "", "", 0
+		return "", nil
 	}
 
 	inTab := make(map[string][]string)
@@ -470,16 +469,16 @@ func (p *Pipeline) roomInOwnTab(ctx context.Context, ws string) (tab, last strin
 		}
 	}
 	for _, t := range tabs {
-		if !OwnTab(t.Label) || (ws != "" && t.WorkspaceID != ws) {
+		if !OwnTab(t.Label) || t.Label != label || (ws != "" && t.WorkspaceID != ws) {
 			continue
 		}
 		n := len(inTab[t.TabID])
 		if n == 0 || n >= p.maxPanesPerTab() {
 			continue
 		}
-		return t.TabID, inTab[t.TabID][n-1], n
+		return t.TabID, inTab[t.TabID]
 	}
-	return "", "", 0
+	return "", nil
 }
 
 func (p *Pipeline) maxPanesPerTab() int {

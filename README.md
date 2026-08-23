@@ -282,11 +282,30 @@ back lazily because it is only read on demand, a placement cannot. A pane of
 origin the operator has since closed falls back rather than failing the spawn
 — a task filed from a window that is gone is an ordinary task.
 
-**Inside one of this daemon's own tabs, workers share.** Splits alternate
-right and down with an explicit `--ratio`, so the tab fills as a grid rather
-than a row of slivers, and the split is taken off the LAST pane in the tab.
-A tab already holding `layout.max_panes_per_tab` workers takes no more: the
-next worker opens another tab, in the same workspace.
+**A tab belongs to ONE task.** The label already carries the task number, so
+placement is a comparison rather than new state: a worker goes in the tab
+opened for ITS OWN task, or a new tab is opened for it. A tab this daemon
+opened for a DIFFERENT task is not a candidate however much room it has,
+because a tab holding two tasks names only one of them and the label stops
+being the signpost half of its job. A verifier belongs with the worker it
+verifies, which is the same task, so the same comparison puts it in the same
+tab with no special case.
+
+**Inside that tab the panes make a grid.** Panes are added in generations,
+each twice the size of the one before, and every pane in a generation splits
+the pane one generation back with an explicit `--ratio 0.5`: the second goes
+right off the first, the third DOWN off the first, the fourth down off the
+second. Four panes are then four equal rectangles, a 2x2. Splitting off the
+LAST pane instead — which is what shipped before — gives a column beside a
+stack and a fourth pane a quarter of the width. The rule is
+`config.GridSplit`, and five panes give a left column of three and a right
+column of two, six give three and three.
+
+A tab already holding `layout.max_panes_per_tab` panes takes no more: the next
+worker opens another tab, in the same workspace. Because a tab holds one task,
+that cap bounds the panes ONE task may have — a worker and its verifier, two
+today — and it is the readability floor guard and nothing else. It is not what
+keeps two tasks apart.
 
 **The cap is measured, not guessed.** See
 [The readable width](#the-readable-width).
@@ -330,11 +349,18 @@ columns to land on one line, and a phrase that wraps is a phrase that never
 matches. So **40 columns**, the widest requirement of any marker in use, and
 not the 23 the goal markers alone would have allowed.
 
-A whole tab measured 226 columns. Because splits alternate, a pane's width
-halves only every SECOND split, so the widths run 226, 113, 113, 56, 56 and
-then 28. Five panes clear the floor and the sixth does not, which is where
-**5** comes from. `min_pane_columns` may be raised and never lowered below
-what was measured.
+A whole tab measured 226 columns. Under the grid rule only the EVEN
+generations split sideways, so a pane's width halves once every two
+generations and the odd ones spend themselves on height: the widths are 226
+for one pane, 113 for two through four, and 56 for five through sixteen. The
+seventeenth starts the generation that halves 56 to 28, which is under the
+floor, so the cap is **16**. It was 5 while the split was always taken off the
+last pane, because that rule narrowed a pane every second split forever; a
+real grid narrows far more slowly. `min_pane_columns` may be raised and never
+lowered below what was measured.
+
+`layout.max_panes_per_tab` is unaffected by an operator setting of `2`: at two
+panes the grid rule and the old rule agree.
 
 One thing the measurement is NOT: it is not a claim that the trust marker
 currently matches anything. It does not, at any width — see
