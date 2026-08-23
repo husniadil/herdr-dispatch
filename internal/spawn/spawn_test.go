@@ -803,7 +803,7 @@ func TestTheVerifierGoalForbidsApprovingAndRejecting(t *testing.T) {
 // read from, and how findings leave. None of the criteria travel on it.
 func TestTheVerifierGoalPointsAtTheBoardAndAtItsMailDoor(t *testing.T) {
 	goal := VerifierGoal(23)
-	for _, want := range []string{"mcp__herdr-tasks__get", "go clean -testcache", "mail MCP", "mcp__herdr-tasks__note_add"} {
+	for _, want := range []string{"mcp__herdr-tasks__get", "the gate CLAUDE.md names", "mail MCP", "mcp__herdr-tasks__note_add"} {
 		if !strings.Contains(goal, want) {
 			t.Fatalf("the verifier goal does not carry %q: %s", want, goal)
 		}
@@ -945,9 +945,10 @@ func hasPair(argv []string, flag, value string) bool {
 // fleetCLIs finds every place a condition tells an agent to run one of THIS
 // fleet's own binaries. Each of them is resolved from PATH, and a verifier's
 // pane is opened in a detached worktree where a plugin's own bin/ is not on
-// it. The project's own gate is deliberately not in this set: `go` is the
+// it. The project's own gate is deliberately not in this set: it is the
 // project's toolchain, not one of our plugins, and a verifier that cannot run
-// it has nothing to verify.
+// it has nothing to verify. Which command that is comes from the project's
+// own CLAUDE.md; see toolchainCommands for why this binary never names one.
 func fleetCLIs(goal string) []string {
 	var found []string
 	for _, cli := range []string{"htask ", "hmail ", "hdis "} {
@@ -988,16 +989,16 @@ func TestTheDoorGuardCatchesAnInstructionPutBackAsACLI(t *testing.T) {
 	}
 }
 
-// The gate is the other side of the same line. The command a verifier is told
-// to run is the PROJECT's own, and no door of ours stands in front of it.
+// The gate is the other side of the same line. What a verifier is told to run
+// is the PROJECT's own gate, and no door of ours stands in front of it.
 func TestTheVerifierGateCommandIsTheProjectsOwn(t *testing.T) {
 	goal := VerifierGoal(23)
-	for _, want := range []string{"go clean -testcache", "the gate CLAUDE.md names"} {
+	for _, want := range []string{"the gate CLAUDE.md names", "uncached"} {
 		if !strings.Contains(goal, want) {
 			t.Fatalf("the verifier is not told to run the project's own gate (%q missing): %s", want, goal)
 		}
 	}
-	if got := fleetCLIs("go clean -testcache"); len(got) > 0 {
+	if got := fleetCLIs("the gate CLAUDE.md names"); len(got) > 0 {
 		t.Fatalf("the guard mistakes the project's own gate for one of our plugins: %v", got)
 	}
 }
@@ -1341,5 +1342,55 @@ func TestFourPanesInOneTabAreATwoByTwoGrid(t *testing.T) {
 				t.Errorf("the split went the wrong way, want %q: %v", tc.direction, argv)
 			}
 		})
+	}
+}
+
+// toolchainCommands finds every place a condition names a build tool as a
+// command to run. hdis takes ready tasks off every project's board on the
+// machine, and nothing about a board says which language the project is in,
+// so this binary names no toolchain at all: it says what it wants and lets
+// the project's own CLAUDE.md say which command delivers it. That is the
+// same rule the worker's condition already follows.
+func toolchainCommands(goal string) []string {
+	var found []string
+	for _, tool := range []string{"go", "cargo", "npm", "make", "just"} {
+		if regexp.MustCompile(`(?i)\b` + tool + `\b`).MatchString(goal) {
+			found = append(found, tool)
+		}
+	}
+	return found
+}
+
+// A verifier for a Rust project was told to run `go clean -testcache` and
+// skipped it, which is the right outcome reached by ignoring an instruction.
+// The condition must not put an agent in that position: the gate is named by
+// what it is for, and the project's own CLAUDE.md names the command.
+func TestTheVerifierConditionNamesNoToolchainCommand(t *testing.T) {
+	goal := VerifierGoal(23)
+	if got := toolchainCommands(goal); len(got) > 0 {
+		t.Fatalf("the verifier condition names %v, a toolchain no board promises: %s", got, goal)
+	}
+	if !strings.Contains(goal, "the gate CLAUDE.md names") {
+		t.Fatalf("the verifier is not sent to the gate CLAUDE.md names: %s", goal)
+	}
+	if !strings.Contains(goal, "uncached") {
+		t.Fatalf("the verifier is not told to run the gate uncached: %s", goal)
+	}
+}
+
+// And the guard above is only worth what it catches. Put any one of those
+// toolchains back into the condition as a literal and it has to fail.
+func TestTheToolchainGuardCatchesEachToolchainPutBack(t *testing.T) {
+	for _, mutation := range []string{
+		"go clean -testcache then the gate CLAUDE.md names",
+		"cargo test after the gate CLAUDE.md names",
+		"npm ci then the gate CLAUDE.md names",
+		"make test-full, the gate CLAUDE.md names",
+		"just gate, the gate CLAUDE.md names",
+	} {
+		mutant := strings.Replace(VerifierGoal(23), "the gate CLAUDE.md names, uncached", mutation, 1)
+		if got := toolchainCommands(mutant); len(got) == 0 {
+			t.Errorf("%q put back into the condition is not caught: %s", mutation, mutant)
+		}
 	}
 }

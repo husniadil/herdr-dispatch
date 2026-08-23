@@ -150,20 +150,23 @@ func PointerGoal(seq int) string {
 // route that survives the worktree, so the board READ goes through
 // mcp__herdr-tasks__get for the same reason the report routes do: htask
 // happening to be go-installed on one machine is not something the lane
-// guarantees. The one command the condition still names as a command is the
-// project's own gate, which is the project's toolchain rather than one of our
-// plugins. The fallback is the board's note tool
+// guarantees. It names no command at all, of ours or of anyone's: the gate is
+// asked for by what it is for, and the project's own CLAUDE.md says which
+// command delivers it. hdis takes ready tasks off every project's board on
+// the machine and nothing about a board says the project is Go, so a verifier
+// on a Rust board was once told to run `go clean -testcache` and reached the
+// right outcome only by ignoring the instruction. The fallback is the board's note tool
 // because there is no task-scoped note verb: htask carries `task release`,
 // which takes a note and hands the task back, and a separate `note` group for
 // the board. A verifier holds nothing to hand back, so the board note fits.
 //
 // Rendered with a codex settings path and a profile of --agent claude --model
-// sonnet --effort high, the whole typed line is 503 of the 512 budgeted for a
+// sonnet --effort high, the whole typed line is 493 of the 512 budgeted for a
 // two-digit task; TestTheVerifierLineFitsTheTypedBudget holds it there.
 func VerifierGoal(seq int) string {
 	return fmt.Sprintf("verify task %d: read its report: mcp__herdr-tasks__get, run "+
-		"go clean -testcache then the gate CLAUDE.md names, check two claims against the "+
-		"code, make one COMPILING mutation, show it caught, send findings with "+
+		"the gate CLAUDE.md names, uncached, check two claims against the "+
+		"code, write one COMPILING mutation, show it caught, send findings with "+
 		"the mail MCP send to $"+DispatcherPaneVar+", else mcp__herdr-tasks__note_add. "+
 		"Never run task approve or task reject: you report, the operator judges.", seq)
 }
