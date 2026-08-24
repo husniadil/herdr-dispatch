@@ -102,6 +102,13 @@ func (l *Loop) Dispatch(ctx context.Context, ref, project string) (Reservation, 
 		return Reservation{}, l.whyNotReady(ctx, ref, project)
 	}
 
+	// Asked before the reservation is taken, and deliberately before the
+	// lock: it shells out to the proxy, and nothing slow runs under mu.
+	if why := l.quotaRefusal(ctx, row.Project); why != "" {
+		return Reservation{}, codes.Refusef(codes.AtQuota,
+			"task %d launches through the proxy and %s", row.Seq, why)
+	}
+
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for _, b := range l.bindings {

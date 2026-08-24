@@ -78,6 +78,12 @@ const (
 	NotReady Reason = "NOT_READY"
 	// AtCapacity is MaxWorkers already live.
 	AtCapacity Reason = "AT_CAPACITY"
+	// AtQuota is the proxy's serving account having nothing left to spend
+	// on a codex worker: at its limit, or past the configured share of its
+	// window. It is a sibling of AtCapacity — no room, of a different kind
+	// — and it is a name of its own so a caller and an operator read quota
+	// rather than a startup timeout with the cause hidden in a pane.
+	AtQuota Reason = "AT_QUOTA"
 	// NoBasePane is a daemon with no pane to split a worker off, which is
 	// every daemon started outside a Herdr pane and given no --pane.
 	NoBasePane Reason = "NO_BASE_PANE"
@@ -98,6 +104,7 @@ var carries = map[Reason]Code{
 	// calls CONFLICT.
 	NotReady:          Conflict,
 	AtCapacity:        Conflict,
+	AtQuota:           Conflict,
 	AlreadyDispatched: Conflict,
 	AlreadyRunning:    Conflict,
 	NotRunning:        Conflict,

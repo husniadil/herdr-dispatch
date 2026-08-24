@@ -67,6 +67,11 @@ type Task struct {
 	// worker waiting on a rejection from one that stopped without
 	// submitting: both sit idle on a doing row.
 	Feedback string
+	// Codex is whether the worker this task would get launches through the
+	// proxy. It is the config's word, resolved per project before the tick,
+	// because the core knows nothing about profiles — and only a worker
+	// that routes through the proxy is gated on the proxy's quota.
+	Codex bool
 }
 
 // Binding is the dispatcher's one piece of own state: which pane it prompted
@@ -114,6 +119,9 @@ type Snapshot struct {
 	Agents   map[string]string
 	Bindings []Binding
 	Now      time.Time
+	// Quota is the proxy launcher's word about the account a codex worker
+	// would spend. A zero Quota is an unknown one, which gates nothing.
+	Quota Quota
 }
 
 // Policy is the knobs a decision depends on.
@@ -125,6 +133,10 @@ type Policy struct {
 	// self-review shot in the pane that produced it. Off, a task reaching
 	// review is announced and nothing else.
 	Verify bool
+	// MaxUsedPercent is the share of its window the proxy's serving account
+	// may already have spent before a codex spawn is refused. Zero is no
+	// threshold, and the limit_reached flag still gates on its own.
+	MaxUsedPercent int
 }
 
 // Action is one thing for an adapter to do, in the order returned.
@@ -203,6 +215,12 @@ func Decide(s Snapshot, p Policy) []Action {
 	for _, id := range shareOut(s.Ready, s.Tasks) {
 		if live >= p.MaxWorkers {
 			break
+		}
+		// The quota gate is the codex provider's alone, and it skips this
+		// task rather than ending the loop: a claude task behind a gated
+		// one spends nothing on the proxy and still gets its slot.
+		if s.Tasks[id].Codex && QuotaRefusal(s.Quota, p) != "" {
+			continue
 		}
 		out = append(out, Action{Kind: Spawn, TaskID: id})
 		live++

@@ -114,10 +114,15 @@ func serve(f *daemonFlags) error {
 			// agent verifies and whether one runs at all is execution
 			// policy, and it lives where the profiles live.
 			Verify: cfg.Verify.Enabled,
+			// The quota threshold is the config document's call for the
+			// same reason: what this dispatcher may spend through the
+			// proxy is execution policy, and it lives beside the launcher
+			// it spends through.
+			MaxUsedPercent: cfg.Proxy.MaxUsedPercent,
 		},
 		Spawn: &spawn.Pipeline{
 			Herdr:          pens,
-			Proxy:          &proxy.Client{Bin: cfg.Proxy},
+			Proxy:          &proxy.Client{Bin: cfg.Proxy.Bin},
 			StartTimeout:   f.startTimeout,
 			DialogCeiling:  20 * time.Second,
 			ConfirmCeiling: f.confirmCeiling,

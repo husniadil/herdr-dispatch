@@ -7,6 +7,28 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+**Changed: the `proxy` config key is a table, not a string.** `proxy =
+"/opt/homebrew/bin/proxenos"` is refused at parse, naming the new spelling:
+write `[proxy]` with `bin = "..."` under it. The table is where the quota
+policy lives too, so the launcher and what may be spent through it sit
+together. A document that never named a launcher is unaffected: `bin` still
+defaults to the literal `proxenos`.
+
+**Added: a codex spawn asks the proxy what the account has spent first.**
+Before a `codex` worker is brought up, by a tick or by `hdis dispatch`, the
+dispatcher reads `proxenos usage --json` — the cheap default, never
+`--refresh`, once per tick — and refuses when the serving account reports
+`limit_reached`, or when its fullest window is at or past `[proxy]
+max_used_percent`. The threshold is unset by default, which is no threshold.
+The refusal is `CONFLICT` as `AT_QUOTA` and names the account and both
+figures. Only the `codex` lane is gated: a `claude` worker never routes
+through the proxy, and a `claude` task queued behind a gated one still takes
+its slot. An unknown quota — a metered key, or a proxy that could not be
+reached — gates nothing and is logged. `hdis doctor` gains a `quota` line, and
+`proxy.quota` in the `--json` shape, carrying `known`, `limit_reached`,
+`used_percent`, `max_used_percent`, `account`, `plan` and the `refusal` a
+spawn would meet now.
+
 **Changed: a daemon with no base pane now adopts one instead of refusing for
 good.** `HERDR_PANE_ID`, `--pane` and the config's `"pane"` key are unchanged
 and still win. What is new is the answer when none of the three gives one: the

@@ -236,8 +236,9 @@ contract's own nine (§6.3), and the sub-reason this binary refused for is the
 first word of the message, so nothing a caller could branch on before is lost:
 `USAGE` when no task was named; `CONFLICT` as `NOT_READY` when the board will
 not hand the task out, as `AT_CAPACITY` when `--max-workers` are already live
-or reserved, or as `ALREADY_DISPATCHED` when this daemon is already driving
-it; `UNSUPPORTED` as `NO_BASE_PANE` when there is nowhere to put a worker;
+or reserved, as `AT_QUOTA` when the task would launch through the proxy and
+the account it routes through has nothing left to spend, or as
+`ALREADY_DISPATCHED` when this daemon is already driving it; `UNSUPPORTED` as `NO_BASE_PANE` when there is nowhere to put a worker;
 `NOT_FOUND` when the board has no such task; and `UNAVAILABLE` when the board
 itself could not be read. The exit status is the one §6.3 fixes for the code —
 2, 3, 4, 6, 7 and the rest — and with `--json` a failure is exactly one
@@ -501,13 +502,15 @@ verifier is running. `hdis doctor` reports whether the lane is on and says
 what it buys. What the shot asks for, and the line it does not cross, is
 under [The boundary](#the-boundary).
 
-The `codex` provider's launcher is named by an optional top-level `"proxy"`
-key, and defaults to the literal `proxenos`. It lives in the config rather
-than in this binary because that binary has been renamed once already, and
-the next rename should be one line of config:
+The `codex` provider's launcher, and what may be spent through it, live under
+a `[proxy]` table. `bin` defaults to the literal `proxenos` and lives in the
+config rather than in this binary because that binary has been renamed once
+already, and the next rename should be one line of config:
 
 ```toml
-proxy = "/opt/homebrew/bin/proxenos"
+[proxy]
+bin = "/opt/homebrew/bin/proxenos"
+max_used_percent = 90
 ```
 
 `hdis doctor` asks it whether it is up, so a down proxy is read before a
@@ -526,6 +529,63 @@ A `claude` profile never touches the proxy, so where no profile is a `codex`
 one the line says so instead of reporting an outage there is none of. The
 JSON shape carries the same facts under `proxy`: `installed`, `reachable`,
 `account`, `profiles`, and the `error` in the proxy's own words.
+
+#### Spawning against a quota
+
+A worker that dies on a quota error has already cost a pane, and with the
+verification lane on, a submission spends twice. So before a `codex` worker is
+brought up — by a tick or by `hdis dispatch` — this dispatcher asks the proxy
+what the account it routes through has already spent, and refuses rather than
+spending the pane:
+
+- `limit_reached` on the proxy's own rollup refuses, always. There is no
+  config for this one: the proxy has said the account cannot pay.
+- `max_used_percent` refuses at or past that share of the account's fullest
+  window. **Unset — the default — is no threshold**, so an operator who never
+  wrote the key still gets the `limit_reached` gate and never a percentage
+  one. It is a whole number, 0..100, and a document outside that is refused at
+  parse.
+
+The refusal is `CONFLICT` as `AT_QUOTA`, and it names the account and both
+figures, so an operator reads quota rather than waiting on a pane that never
+comes up:
+
+```
+$ hdis dispatch 41
+hdis: CONFLICT: AT_QUOTA: task 41 launches through the proxy and the proxy
+reports work-codex at 95% of its window, and max_used_percent is 90
+```
+
+Three things are deliberate about the shape of this gate:
+
+- **Only the `codex` lane is gated.** The proxy reports the anthropic account
+  too, and `claude` workers do not route through the proxy, so gating them on
+  a proxy they never touch would stop the fleet for a quota it does not spend.
+  A `claude` task queued behind a gated `codex` one still takes its slot.
+- **The read is cheap.** `proxenos usage --json` is asked once per tick and
+  never with `--refresh`: the cheap default reports what the proxy daemon
+  already holds, and a gate that spent an upstream request per tick would cost
+  the quota it exists to protect. Where no configured profile is a `codex` one,
+  it is not asked at all.
+- **An unknown quota gates nothing.** A metered key has no ceiling — the proxy
+  answers `known: false` with no windows — and a proxy that cannot be reached
+  leaves the figure unread. Both proceed, and the daemon logs why it could not
+  ask. Fail loud, idle safe: a proxy that is really down still fails the spawn
+  at step zero, in the proxy's own words, and an unknown quota is not a reason
+  to stop dispatching.
+
+`hdis doctor` carries the same facts on a `quota` line, printed only where a
+profile launches through the proxy:
+
+```
+  quota       work-codex at 63.5% of its window on team, max_used_percent 90
+  quota       work-codex at 100% of its window on team, max_used_percent 90: no codex worker is spawned, because the proxy reports work-codex at its limit
+  quota       no quota to read for openai-api: a metered key has no ceiling and an unreachable proxy leaves none read, and nothing is gated on it
+```
+
+The JSON shape carries them under `proxy.quota`: `known`, `limit_reached`,
+`used_percent`, `max_used_percent`, `account`, `plan`, and the `refusal` a
+spawn would meet now, empty when none would.
 
 Which profile a project gets is decided here and nowhere else. The board
 carries no profile field, deliberately: which agent kind and model a worker

@@ -469,3 +469,74 @@ func verifyLineOf(t *testing.T, report string) string {
 	t.Fatalf("doctor printed no verify line: %q", report)
 	return ""
 }
+
+// quotaLineOf returns the one line of a doctor report that reports the quota.
+func quotaLineOf(t *testing.T, report string) string {
+	t.Helper()
+	for _, line := range strings.Split(report, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "quota") {
+			return strings.TrimSpace(line)
+		}
+	}
+	return ""
+}
+
+// The figure and the threshold beside each other: an operator reading one
+// without the other cannot tell how much room is left.
+func TestDoctorPrintsWhatTheAccountHasSpentAgainstTheThreshold(t *testing.T) {
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","proxy":{"binary":"proxenos","profiles":["cheap"],"installed":true,"reachable":true,"account":"work-codex","quota":{"known":true,"used_percent":63.5,"max_used_percent":90,"account":"work-codex","plan":"team"}},"board":{"reachable":true}}`)
+	var out strings.Builder
+	if err := Write("doctor", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	line := quotaLineOf(t, out.String())
+	for _, want := range []string{"63.5", "90", "work-codex", "team"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("want %q in the quota line %q", want, line)
+		}
+	}
+}
+
+// The whole point of the line: a fleet that has stopped says why, here, in
+// the same words a dispatch would answer with.
+func TestDoctorPrintsTheQuotaRefusalThatWouldStopASpawn(t *testing.T) {
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","proxy":{"binary":"proxenos","profiles":["cheap"],"installed":true,"reachable":true,"account":"work-codex","quota":{"known":true,"limit_reached":true,"used_percent":100,"account":"work-codex","refusal":"the proxy reports work-codex at its limit"}},"board":{"reachable":true}}`)
+	var out strings.Builder
+	if err := Write("doctor", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	line := quotaLineOf(t, out.String())
+	for _, want := range []string{"no codex worker is spawned", "at its limit"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("want %q in the quota line %q", want, line)
+		}
+	}
+}
+
+// A metered key has no ceiling and an unreachable proxy left the figure
+// unread. Neither is an outage and neither stops a spawn, so the line says
+// there is nothing to read rather than printing a zero.
+func TestDoctorSaysWhenThereIsNoQuotaFigureToPrint(t *testing.T) {
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","proxy":{"binary":"proxenos","profiles":["cheap"],"installed":true,"reachable":true,"account":"openai-api","quota":{"known":false}},"board":{"reachable":true}}`)
+	var out strings.Builder
+	if err := Write("doctor", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	line := quotaLineOf(t, out.String())
+	if !strings.Contains(line, "no quota to read") || !strings.Contains(line, "nothing is gated on it") {
+		t.Errorf("quota line = %q", line)
+	}
+}
+
+// No profile launches through the proxy, so there is no account this
+// dispatcher spends and no line to print about one.
+func TestDoctorPrintsNoQuotaLineWhereNothingLaunchesThroughTheProxy(t *testing.T) {
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","proxy":{"binary":"proxenos","profiles":[],"installed":false,"reachable":false,"quota":{"known":false}},"board":{"reachable":true}}`)
+	var out strings.Builder
+	if err := Write("doctor", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if line := quotaLineOf(t, out.String()); line != "" {
+		t.Errorf("a claude-only fleet printed a quota line: %q", line)
+	}
+}

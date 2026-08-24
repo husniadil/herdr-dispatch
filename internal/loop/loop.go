@@ -963,7 +963,7 @@ func (l *Loop) snapshot(ctx context.Context) (decide.Snapshot, error) {
 			continue
 		}
 		rows[row.ID] = row
-		snap.Tasks[row.ID] = readyTask(row)
+		snap.Tasks[row.ID] = l.readyTask(row)
 	}
 
 	ready, err := l.Board.Ready(ctx)
@@ -995,7 +995,7 @@ func (l *Loop) snapshot(ctx context.Context) (decide.Snapshot, error) {
 		}
 		reserved[row.ID] = true
 		rows[row.ID] = row
-		snap.Tasks[row.ID] = readyTask(row)
+		snap.Tasks[row.ID] = l.readyTask(row)
 		snap.Ready = append(snap.Ready, row.ID)
 	}
 
@@ -1006,7 +1006,7 @@ func (l *Loop) snapshot(ctx context.Context) (decide.Snapshot, error) {
 			continue
 		}
 		rows[row.ID] = row
-		snap.Tasks[row.ID] = readyTask(row)
+		snap.Tasks[row.ID] = l.readyTask(row)
 		snap.Ready = append(snap.Ready, row.ID)
 	}
 
@@ -1016,6 +1016,10 @@ func (l *Loop) snapshot(ctx context.Context) (decide.Snapshot, error) {
 	}
 	snap.Agents = panes
 	snap.Bindings = bindings
+	// One read per tick, after the rows are in: the gate asks about the one
+	// account every codex worker routes through, so asking per ready row
+	// would spend a process per row for the same answer.
+	snap.Quota = l.quota(ctx)
 
 	l.mu.Lock()
 	l.rows = rows
@@ -1026,8 +1030,16 @@ func (l *Loop) snapshot(ctx context.Context) (decide.Snapshot, error) {
 // readyTask is a row the board is offering, as the core reads it. The project
 // is what the core shares the ready list out by, so one board offering more
 // work than there are slots cannot take them all.
-func readyTask(row htask.Task) decide.Task {
-	return decide.Task{ID: row.ID, Status: row.Status, ClaimedBy: row.Pane(), Feedback: row.Feedback, Project: row.Project}
+func (l *Loop) readyTask(row htask.Task) decide.Task {
+	return decide.Task{
+		ID: row.ID, Status: row.Status, ClaimedBy: row.Pane(),
+		Feedback: row.Feedback, Project: row.Project,
+		// Which provider this row's worker would launch with is the
+		// config's word, resolved here because the core knows nothing
+		// about profiles and only a codex worker spends the proxy's
+		// account.
+		Codex: l.launchesThroughProxy(row.Project),
+	}
 }
 
 func (l *Loop) apply(ctx context.Context, actions []decide.Action) {

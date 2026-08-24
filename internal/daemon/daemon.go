@@ -506,6 +506,33 @@ type ProxyHealth struct {
 	Account string `json:"account,omitempty"`
 	// Error is the proxy's own words for why it gave no answer.
 	Error string `json:"error,omitempty"`
+	// Quota is what the account behind it has already spent. Reachability
+	// and quota are different questions with the same answer for an
+	// operator whose fleet has stopped, so doctor answers both here.
+	Quota QuotaHealth `json:"quota"`
+}
+
+// QuotaHealth is the proxy's quota as doctor reports it, plus the refusal a
+// codex spawn would meet right now. An operator whose fleet has stopped reads
+// the reason here rather than by trying a dispatch and reading the message.
+type QuotaHealth struct {
+	// Known is whether there is a ceiling to read at all. A metered key has
+	// none, and a proxy that could not be asked left it unread; both gate
+	// nothing.
+	Known bool `json:"known"`
+	// LimitReached is the proxy's own flag for an account that cannot pay.
+	LimitReached bool `json:"limit_reached"`
+	// UsedPercent is the fullest of the serving account's windows.
+	UsedPercent float64 `json:"used_percent"`
+	// MaxUsedPercent is the configured threshold. Zero is unset, which is
+	// no threshold.
+	MaxUsedPercent int `json:"max_used_percent"`
+	// Account and Plan name whose quota this is.
+	Account string `json:"account,omitempty"`
+	Plan    string `json:"plan,omitempty"`
+	// Refusal is why a codex spawn would be refused now, in the words the
+	// dispatch verb would use. Empty means one would be allowed.
+	Refusal string `json:"refusal,omitempty"`
 }
 
 // BoardHealth is the board's own report of itself, or why it gave none.
@@ -617,8 +644,8 @@ func (d *Daemon) proxyHealth(ctx context.Context) ProxyHealth {
 	if d.Loop == nil {
 		return out
 	}
-	if d.Loop.Config.Proxy != "" {
-		out.Binary = d.Loop.Config.Proxy
+	if d.Loop.Config.Proxy.Bin != "" {
+		out.Binary = d.Loop.Config.Proxy.Bin
 	}
 	for name, p := range d.Loop.Config.Profiles {
 		if p.Provider == config.ProviderCodex {
@@ -636,6 +663,20 @@ func (d *Daemon) proxyHealth(ctx context.Context) ProxyHealth {
 		return out
 	}
 	out.Installed, out.Reachable, out.Account = true, true, st.Account
+	// Asked only where a profile launches through it: a claude-only fleet
+	// spends no account here, and there is nothing to report.
+	if len(out.Profiles) > 0 {
+		q := d.Loop.Quota(ctx)
+		out.Quota = QuotaHealth{
+			Known:          q.Known,
+			LimitReached:   q.LimitReached,
+			UsedPercent:    q.UsedPercent,
+			MaxUsedPercent: d.Loop.Policy.MaxUsedPercent,
+			Account:        q.Account,
+			Plan:           q.Plan,
+			Refusal:        d.Loop.QuotaRefusal(q),
+		}
+	}
 	return out
 }
 

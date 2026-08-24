@@ -438,15 +438,32 @@ var HookVars = []string{
 	HookActorVar, HookKindVar, HookAtVar, HookDetailVar,
 }
 
+// Proxy is the codex provider's launcher and what this dispatcher may spend
+// through it. A claude profile never touches any of it.
+type Proxy struct {
+	// Bin is the launcher binary, resolved off PATH unless it is a path.
+	// Empty means DefaultProxy.
+	Bin string `json:"bin"`
+	// MaxUsedPercent is the share of its window the serving account may
+	// already have spent before a codex spawn is refused. Unset — zero — is
+	// no threshold, which is what an operator who never wrote the key has:
+	// the proxy's own limit_reached flag still stops a spawn, and a
+	// percentage never does.
+	//
+	// It is a whole number because a percentage an operator writes is, and
+	// because it is compared against a float the proxy reports.
+	MaxUsedPercent int `json:"max_used_percent"`
+}
+
 // Config is the whole document: named profiles, the one every project gets
 // unless it says otherwise, and the projects that say otherwise.
 type Config struct {
 	Default  string             `json:"default"`
 	Profiles map[string]Profile `json:"profiles"`
 	Projects map[string]string  `json:"projects"`
-	// Proxy is the codex provider's launcher binary, resolved off PATH
-	// unless it is a path. Empty means DefaultProxy.
-	Proxy string `json:"proxy"`
+	// Proxy is the codex provider's launcher and the policy for spending
+	// through it.
+	Proxy Proxy `json:"proxy"`
 	// Verify is the verification lane: off unless the document turns it on.
 	Verify Verify `json:"verify"`
 	// Layout is where a worker is placed and the width it must be readable
@@ -507,6 +524,14 @@ func Parse(b []byte) (Config, error) {
 			return Config{}, fmt.Errorf("hdis config: verify.profile names a verifier pane that no longer launches; the verification lane is a self-review shot in the worker's own pane, so remove the field")
 		}
 	}
+	// The launcher used to be a bare top-level string and is now a table,
+	// because the spending policy belongs beside the binary that spends.
+	// The key did not change, so DisallowUnknownFields never sees it, and
+	// the decoder's own "cannot unmarshal string" does not say what to
+	// write instead.
+	if _, isString := doc["proxy"].(string); isString {
+		return Config{}, fmt.Errorf("hdis config: the codex launcher moved into a table; write `[proxy]` with `bin = \"...\"` under it, which is where `max_used_percent` lives too")
+	}
 	// The old spelling of the policy gate key. DisallowUnknownFields would
 	// refuse it anyway, but "unknown field" does not say what to write
 	// instead, and a gate that quietly stops running is what §9.2 exists to
@@ -526,8 +551,11 @@ func Parse(b []byte) (Config, error) {
 		return Config{}, fmt.Errorf("hdis config: %w", err)
 	}
 
-	if c.Proxy == "" {
-		c.Proxy = DefaultProxy
+	if c.Proxy.Bin == "" {
+		c.Proxy.Bin = DefaultProxy
+	}
+	if c.Proxy.MaxUsedPercent < 0 || c.Proxy.MaxUsedPercent > 100 {
+		return Config{}, fmt.Errorf("hdis config: proxy.max_used_percent is %d, and a share of a window is 0..100; unset it to gate on the proxy's limit_reached flag alone", c.Proxy.MaxUsedPercent)
 	}
 	if len(c.Profiles) == 0 {
 		return Config{}, fmt.Errorf("hdis config: no profiles")

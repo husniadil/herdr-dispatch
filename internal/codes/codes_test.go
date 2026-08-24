@@ -40,6 +40,7 @@ func TestTheSubReasonsMapOntoTheCodesTheContractFixes(t *testing.T) {
 		NoBasePane:        Unsupported,
 		NotReady:          Conflict,
 		AtCapacity:        Conflict,
+		AtQuota:           Conflict,
 		AlreadyDispatched: Conflict,
 		AlreadyRunning:    Conflict,
 		NotRunning:        Conflict,

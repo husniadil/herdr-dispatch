@@ -162,20 +162,85 @@ provider = "codex"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := c.Proxy; got != DefaultProxy {
+	if got := c.Proxy.Bin; got != DefaultProxy {
 		t.Fatalf("a config that names no launcher must resolve to %q, got %q", DefaultProxy, got)
 	}
 
 	c, err = Parse([]byte(`default = "a"
-proxy = "/opt/bin/proxenos-next"
+[proxy]
+bin = "/opt/bin/proxenos-next"
 [profiles.a]
 provider = "codex"
 `))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := c.Proxy, "/opt/bin/proxenos-next"; got != want {
+	if got, want := c.Proxy.Bin, "/opt/bin/proxenos-next"; got != want {
 		t.Fatalf("the override was dropped: got %q, want %q", got, want)
+	}
+}
+
+// The quota threshold is off in a document that says nothing about it: the
+// gate still refuses a limit_reached account, and a percentage never stops a
+// spawn on its own.
+func TestTheQuotaThresholdIsUnsetUnlessTheDocumentNamesIt(t *testing.T) {
+	c, err := Parse([]byte(`default = "a"
+[profiles.a]
+provider = "codex"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Proxy.MaxUsedPercent; got != 0 {
+		t.Fatalf("an unset threshold resolved to %d, and zero is what means unset", got)
+	}
+
+	c, err = Parse([]byte(`default = "a"
+[proxy]
+max_used_percent = 85
+[profiles.a]
+provider = "codex"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := c.Proxy.MaxUsedPercent, 85; got != want {
+		t.Fatalf("threshold: got %d, want %d", got, want)
+	}
+}
+
+// A percentage outside 0..100 is a threshold that either never fires or fires
+// always, and an operator who wrote it meant neither.
+func TestAThresholdOutsideAPercentageIsRefused(t *testing.T) {
+	for _, bad := range []string{"-1", "101"} {
+		_, err := Parse([]byte(`default = "a"
+[proxy]
+max_used_percent = ` + bad + `
+[profiles.a]
+provider = "codex"
+`))
+		if err == nil {
+			t.Errorf("max_used_percent = %s was accepted", bad)
+		} else if !strings.Contains(err.Error(), "max_used_percent") {
+			t.Errorf("the refusal does not name the key: %v", err)
+		}
+	}
+}
+
+// The launcher used to be a bare top-level string. DisallowUnknownFields
+// cannot help here — the key is still `proxy` — and a JSON type error does
+// not say what to write instead, so the old spelling is named.
+func TestTheOldTopLevelProxyStringIsRefusedByName(t *testing.T) {
+	_, err := Parse([]byte(`default = "a"
+proxy = "/opt/bin/proxenos"
+[profiles.a]
+provider = "codex"
+`))
+	if err == nil {
+		t.Fatal("the old spelling was accepted")
+	}
+	if !strings.Contains(err.Error(), "[proxy]") || !strings.Contains(err.Error(), "bin") {
+		t.Fatalf("the refusal does not say what to write instead: %v", err)
 	}
 }
 

@@ -124,6 +124,11 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 		fmt.Fprintf(out, "  gate        %s\n", gateLane(rep.Gate))
 		fmt.Fprintf(out, "  herdr api   %s\n", herdrLane(rep.Herdr))
 		fmt.Fprintf(out, "  proxy       %s\n", proxyLane(rep.Proxy))
+		// Only where something launches through the proxy: a claude-only
+		// fleet spends no account here, so there is no quota to report.
+		if len(rep.Proxy.Profiles) > 0 {
+			fmt.Fprintf(out, "  quota       %s\n", quotaLane(rep.Proxy.Quota))
+		}
 		fmt.Fprintf(out, "  layout      min_pane_columns %d, max_panes_per_tab %d per task\n",
 			rep.MinPaneColumns, rep.MaxPanesPerTab)
 		if rep.Board.Error != "" {
@@ -297,6 +302,31 @@ func proxyLane(p daemon.ProxyHealth) string {
 		return line + ", and no configured profile launches through it: the claude path never touches it"
 	}
 	return line + ", launching " + strings.Join(p.Profiles, " ")
+}
+
+// quotaLane is the proxy's quota as one line: what the account has spent
+// against the threshold, or the refusal a codex spawn would meet right now.
+// An operator whose fleet has stopped reads the reason here rather than by
+// trying a dispatch and reading the message off the failure.
+func quotaLane(q daemon.QuotaHealth) string {
+	if !q.Known {
+		return "no quota to read for " + or(q.Account, "the account the proxy serves") +
+			": a metered key has no ceiling and an unreachable proxy leaves none read, and nothing is gated on it"
+	}
+	spent := fmt.Sprintf("%s at %s%% of its window",
+		or(q.Account, "the account the proxy serves"), strconv.FormatFloat(q.UsedPercent, 'g', -1, 64))
+	if q.Plan != "" {
+		spent += " on " + q.Plan
+	}
+	if q.MaxUsedPercent > 0 {
+		spent += fmt.Sprintf(", max_used_percent %d", q.MaxUsedPercent)
+	} else {
+		spent += ", no max_used_percent set"
+	}
+	if q.Refusal != "" {
+		return spent + ": no codex worker is spawned, because " + q.Refusal
+	}
+	return spent
 }
 
 func or(s, fallback string) string {
