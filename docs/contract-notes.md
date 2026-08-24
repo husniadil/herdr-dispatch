@@ -56,9 +56,8 @@ is written down.
 |---|---|
 | §3.4, §3.7 | This plugin attributes nothing. It holds no ledger, records no actor, and has no verb whose authority is anyone's in particular. See the README section on where the contract is written for a plugin this one is not. |
 | §7.5 | Same reason, and the contract has a gap here rather than this plugin: §7.5 rests its declaration on "`<name> doctor` (§10.3) already prints the calling principal", which §10.3 does not require and this door has no principal to print. |
-| §5.2 | No SQLite store, so no schema and no migrations. §5.1's store choice is a recorded divergence in the README. |
+| §5.2 | No SQLite store, so no schema and no migrations. §5.1's store choice is a recorded divergence in the README. §5.5's sibling events TABLE is the same divergence: the trail is a bounded list in the one JSON document, written whole with what it is a trail of, which is what §5.5's "same transaction" buys. |
 | §6.6 | No review semantics. The board's review gate is htask's, and this binary stops at review. |
-| §8.3 | No event hook. |
 | §11.5 | Lease liveness and the sweep are htask's; a second writer racing them is the bug. |
 | §11.6 | The manifest declares no `[[panes]]`. |
 | §16.1 | Acceptance criteria are a board concept. |
@@ -71,7 +70,6 @@ reason it stands.
 
 | Section | The rule | Where this plugin stands |
 |---|---|---|
-| §8.1, §8.2 | Events for every state change, and an `events` verb | No events and no `_events` table. Every state change here is a binding moving, and a binding is derivable from the board plus Herdr the moment a worker claims; the durable trail of what was dispatched is the board's own. Adding an event stream means adding the store §5.5 shapes it around. |
 | §11.1 | Reach Herdr through `HERDR_BIN_PATH`, or the socket at `HERDR_SOCKET_PATH` | The binary path is now read (`TestTheHerdrBinaryComesFromTheVariableTheContractNames`). `HERDR_SOCKET_PATH` is not, and is a non-divergence in substance: this binary shells out to the CLI and opens no socket of its own, so it hard-codes no socket path — the CLI resolves that variable itself. |
 
 ## The MUSTs that do apply
@@ -85,7 +83,11 @@ reason it stands.
 | §2.4 | The manifest declares startup, stop and restart | `TestTheManifestCarriesStartupStopAndRestart` |
 | §3.5 | State dir 0700, socket 0600, boundary documented | `TestEnsureStateDirMakesItPrivate`, `TestTheSocketIsCreatedPrivateToTheUser` |
 | §5.1 | `state_dir` never from `HERDR_PLUGIN_STATE_DIR` | `TestTheHerdrPluginDirsAreNotRead` |
-| §5.8 | `dump --json` prints the whole store, on both doors | `TestDumpPrintsTheWholeStore`, `TestTheServedToolListIsPinned` |
+| §5.8 | `dump --json` prints the whole store, on both doors | `TestDumpPrintsTheWholeStore`, `TestDumpCarriesTheTrail`, `TestTheServedToolListIsPinned` |
+| §5.5 | An append-only event trail written in the same write as the mutation | `TestTheTrailIsWrittenWithTheChangeItRecords`, `TestAnEventSurvivesARoundTrip` |
+| §8.1 | An event for every state change, named `<name>.<entity>.<verb>` | `TestReservingATaskIsOnTheTrail`, `TestAWorkerComingUpIsOnTheTrail`, `TestAReservationGivenUpOnIsOnTheTrail` |
+| §8.2 | `events [--follow] [--since] [--json]` streams the trail | `TestEventsAnswersTheTrail`, `TestEventsResumesAfterAnID`, `TestFollowingHandsOverAnEventWrittenAfterItOpened`, `TestAStreamEndsWithDoneWhenTheDaemonGoes` |
+| §8.3 | One configurable `on_event` hook, detached, and a hook that fails does not fail the write | `TestTheHookRunsForEveryEventCarryingIt`, `TestAHookThatCannotRunDoesNotFailTheWrite`, `TestEveryEventReachesTheHook` |
 | §6.1 | A parity test enumerating both surfaces, failing both ways | `TestTheServedToolListIsPinned`, `TestTheSchemaDeclaresExactlyWhatTheCLITakes` |
 | §7.2 | The door's instructions say what a tool list cannot | `TestTheServerRegistersUnderTheRepositoryAndServesBareVerbs` |
 | §7.3 | Every verb the CLI serves is on the door | `TestStopIsServedWithItsBlastRadiusStated`, `TestTheServedToolListIsPinned` |
@@ -108,6 +110,23 @@ reason it stands.
 | §12.2 | A test cites the section it enforces | `TestEveryTestThisDocumentNamesExists`, `TestContractCitationsResolve` |
 | §13.4 | The declared revision is the vendored one, and the README states it | `TestTheDeclaredRevisionIsTheVendoredOne`, `TestTheChangelogHasALineForTheDeclaredContractRevision` |
 | §13.2 | The short name is `dispatch` | `TestTheManifestNamesThisPluginAtThisVersion` |
+
+## What the §8 sweep added
+
+The §8.1/§8.2 divergence and the §8.3 exemption above are gone, and what
+replaced them is narrower than "every state change" reads. The events here are
+the ones this plugin OWNS: a reservation, a binding, a pane. A task claimed,
+submitted or approved is a board fact, it is on htask's trail, and copying it
+here would be the second ledger the boundary with htask forbids.
+
+Two things about the shape are decisions rather than omissions. The trail is
+bounded to `store.MaxEvents`, because the whole document is rewritten on every
+change; a `--since` id that has rotated past that bound is refused rather than
+answered with the window again, since a consumer handed the window would take
+it for the tail of its own stream. And `--follow` is on the CLI alone: it is a
+property of the connection rather than an argument of the verb, so the MCP
+door publishes `events` without it (§8.2 with §7.1) and
+`TestFollowIsOnTheRequestAndNotAnArgument` is what keeps it off the schema.
 
 ## What the sweep found
 

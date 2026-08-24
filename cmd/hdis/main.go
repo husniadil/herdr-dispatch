@@ -262,6 +262,10 @@ func serve(argv []string) error {
 		LogPath:  *logPath,
 		Lock:     lock,
 	}
+	// Every event the loop writes reaches the §8.3 hook and every live
+	// `events --follow` through the daemon, which is the one place both
+	// live. The loop knows nothing of either.
+	l.OnEvent = d.Emitted
 	err = d.Serve(ctx, ln)
 	log.Print("stopping")
 	if errors.Is(err, context.Canceled) {

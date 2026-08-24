@@ -411,6 +411,33 @@ type Layout struct {
 	MaxPanesPerTab int `json:"max_panes_per_tab"`
 }
 
+// The environment §8.3's event hook is handed. They are constants rather than
+// literals at the call site because two documents rest on the exact spelling:
+// the README, which is where an operator learns what their hook can read, and
+// the guard that holds every HDIS_ name in the README to a name this binary
+// really sets.
+const (
+	HookEventVar   = "HDIS_EVENT"
+	HookEntityVar  = "HDIS_ENTITY"
+	HookIDVar      = "HDIS_ID"
+	HookProjectVar = "HDIS_PROJECT"
+	HookActorVar   = "HDIS_ACTOR"
+	HookKindVar    = "HDIS_KIND"
+	HookAtVar      = "HDIS_AT"
+	// HookDetailVar is the one key beyond §8.3's list, for the reason §8.3
+	// gives `detail` itself: what a hook acts on — which pane, which task
+	// number, why a prompt was refused — is in there and nowhere else in
+	// the environment.
+	HookDetailVar = "HDIS_DETAIL"
+)
+
+// HookVars is every name the hook is given, for a document to be checked
+// against.
+var HookVars = []string{
+	HookEventVar, HookEntityVar, HookIDVar, HookProjectVar,
+	HookActorVar, HookKindVar, HookAtVar, HookDetailVar,
+}
+
 // Config is the whole document: named profiles, the one every project gets
 // unless it says otherwise, and the projects that say otherwise.
 type Config struct {
@@ -449,6 +476,11 @@ type Config struct {
 	// reads {subject, verb, target} on stdin and prints a decision, and any
 	// failure to get a well-formed one denies.
 	Gate []string `json:"gate"`
+	// OnEvent is the §8.3 hook: one command, argv-style, run detached with
+	// all three stdio closed for every event this dispatcher writes. Absent
+	// or empty is no hook, which is a dispatcher whose trail is read with
+	// `hdis events` and pushed nowhere.
+	OnEvent []string `json:"on_event"`
 }
 
 // Parse reads a config document (§10.1: TOML) and refuses one it could not
@@ -528,6 +560,14 @@ func Parse(b []byte) (Config, error) {
 	for i, word := range c.Gate {
 		if strings.TrimSpace(word) == "" {
 			return Config{}, fmt.Errorf("hdis config: gate word %d is empty; remove the gate key to leave the policy gate unconfigured, which allows (§9.2)", i)
+		}
+	}
+	// An empty word in the hook is a command nobody can run, and it would
+	// fail once per event for as long as the daemon lives. An operator who
+	// meant to turn the hook off deletes the key.
+	for i, word := range c.OnEvent {
+		if strings.TrimSpace(word) == "" {
+			return Config{}, fmt.Errorf("hdis config: on_event word %d is empty; remove the on_event key to leave the event hook unconfigured", i)
 		}
 	}
 	if c.MaxWorkers == 0 {

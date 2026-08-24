@@ -11,6 +11,10 @@ package verbs
 const (
 	String = "string"
 	Bool   = "bool"
+	// Int arrived with `events --limit`, which is a count. Rendering it as
+	// a string would have every door asking a caller to quote a number and
+	// the daemon parsing one back out of it.
+	Int = "int"
 )
 
 // Arg is one parameter of a verb. A positional arg is a CLI positional and an
@@ -131,6 +135,25 @@ var All = []Verb{
 			"it is what the next save will write. Nothing here is a board " +
 			"fact — task state, claims and leases are htask's and are read " +
 			"from htask.",
+	},
+	{
+		Name: "events", CLI: []string{"events"},
+		Short: "Read the append-only trail of what the dispatcher did",
+		Long: "The §8.1 events this dispatcher owns and nothing else records: a task " +
+			"reserved or given back, a worker spawned, adopted, prompted, retired or " +
+			"gone, review announced, and the policy gate parking or releasing a call. " +
+			"Board facts are NOT here — a task claimed, submitted or approved is on " +
+			"htask's own trail. Without since this reads from the BEGINNING of what " +
+			"the daemon still holds, oldest first, so a consumer that resumes passes " +
+			"since with the last event id it saw, or a Unix-millisecond timestamp, or " +
+			"it reads everything again. The trail is bounded: an id that has rotated " +
+			"out of it is refused rather than answered with the whole window. On the " +
+			"CLI --follow turns this into a subscription that keeps printing; a tool " +
+			"call answers once and has no follow, because a stream is not a tool call.",
+		Args: []Arg{
+			{Name: "since", Type: String, Desc: "An event id, or a Unix-millisecond timestamp, to resume after"},
+			{Name: "limit", Type: Int, Desc: "Stop after this many events"},
+		},
 	},
 	{
 		Name: "parked_list", CLI: []string{"parked", "list"},

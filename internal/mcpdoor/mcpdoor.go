@@ -77,8 +77,11 @@ func tool(v verbs.Verb) *mcp.Tool {
 	var required []string
 	for _, a := range v.Args {
 		kind := "string"
-		if a.Type == verbs.Bool {
+		switch a.Type {
+		case verbs.Bool:
 			kind = "boolean"
+		case verbs.Int:
+			kind = "integer"
 		}
 		props[a.Name] = map[string]any{"type": kind, "description": a.Desc}
 		if a.Required {

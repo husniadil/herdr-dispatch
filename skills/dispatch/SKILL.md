@@ -111,8 +111,8 @@ first — a refusal is usually one of those four.
 ## Through MCP instead of the CLI
 
 Every verb this binary has is one of the `herdr-dispatch` server's MCP tools,
-named by the verb alone — seven of them: `doctor`, `dispatch`, `status`,
-`stop`, `dump`, `parked_list`, `parked_resolve`.
+named by the verb alone — eight of them: `doctor`, `dispatch`, `status`,
+`stop`, `dump`, `events`, `parked_list`, `parked_resolve`.
 Your client shows them under the server's own label, which is what tells you
 whose `dispatch` you are calling. Nothing is reachable by shell alone, so a
 harness with no terminal loses no verb.
@@ -144,6 +144,27 @@ what you were trying to do; resolve one yourself only when they have said to.
 Resolving re-runs the verb as whoever the gate stopped, never as you, and the
 row records that you were the one who let it through.
 
+## What the dispatcher did
+
+```sh
+hdis events                          hdis events --since <id|ms>
+hdis events --follow                 hdis events --limit 20 --json
+```
+
+`events` is the trail of what this dispatcher did: a task reserved or given
+back, a worker spawned, adopted, prompted, retired or gone, review announced,
+a call the policy gate parked. It is what answers "what happened last night"
+without reading the daemon log.
+
+Board facts are **not** here. A task claimed, submitted, approved or rejected
+is htask's own trail, and `htask events` is where you read it.
+
+Without `--since` this reads from the beginning of what the daemon still
+holds, oldest first, so a consumer that resumes passes the last event id it
+saw. The trail is bounded, and an id that has rotated out of it is refused
+rather than answered with the whole window again. `--follow` keeps printing as
+events arrive; it is the CLI's, because a tool call answers once.
+
 ## Everything else
 
 ```sh
@@ -156,7 +177,7 @@ bindings, the reservations, the parked actions — in one document. It is a
 debugging read, not a source of board facts: task state, claims and leases are
 htask's, and `htask` is where you read them.
 
-`hdis --help` lists the same seven verbs the door serves, for a caller with a
+`hdis --help` lists the same eight verbs the door serves, for a caller with a
 shell. Add `--json` to
 any verb for one machine-readable document, and those bytes are the same
 document the MCP tool hands its caller.

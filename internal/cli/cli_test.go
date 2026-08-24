@@ -327,3 +327,68 @@ func TestDoctorSaysWhenNoLogFileCouldBeOpened(t *testing.T) {
 		t.Fatalf("doctor does not say the log went nowhere: %q", out.String())
 	}
 }
+
+// A named argument the verb declares is a flag on this door, so `hdis events
+// --since <id> --limit 5` reaches the daemon as the arguments the registry
+// declares rather than as words the parser refuses.
+func TestANamedArgumentIsAFlagOnThisDoor(t *testing.T) {
+	v, ok := verbs.ByCLI([]string{"events"})
+	if !ok {
+		t.Fatal("no events subcommand")
+	}
+	req, _, err := Request(v, []string{"--since", "ev-1", "--limit", "5"})
+	if err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	if req.Args["since"] != "ev-1" {
+		t.Fatalf("since came through as %v", req.Args["since"])
+	}
+	if req.Args["limit"] != 5 {
+		t.Fatalf("limit came through as %v (%T)", req.Args["limit"], req.Args["limit"])
+	}
+}
+
+// --follow is a property of the connection and not an argument of the verb:
+// it is on the request the daemon reads and never in the args it checks
+// against the registry, which would refuse it.
+func TestFollowIsOnTheRequestAndNotAnArgument(t *testing.T) {
+	v, _ := verbs.ByCLI([]string{"events"})
+	req, _, err := Request(v, []string{"--follow"})
+	if err != nil {
+		t.Fatalf("events --follow: %v", err)
+	}
+	if !req.Follow {
+		t.Fatal("--follow did not reach the request")
+	}
+	if _, named := req.Args["follow"]; named {
+		t.Fatalf("--follow was sent as an argument: %v", req.Args)
+	}
+	for _, a := range v.Args {
+		if a.Name == "follow" {
+			t.Fatal("follow is declared as a verb argument, so the MCP door publishes a stream it cannot serve")
+		}
+	}
+}
+
+// An event reads as one line an operator can scan, and as its own document
+// for a machine caller.
+func TestAnEventRendersAsALineAndAsItsOwnDocument(t *testing.T) {
+	raw := json.RawMessage(`{"id":"ev-1","name":"dispatch.worker.spawned","entity":"worker","entity_id":"01AAA","at":1756000000000,"actor":"plugin:hdis","kind":"spawned","detail":{"pane":"wM:p9"}}`)
+	var out bytes.Buffer
+	if err := WriteEvent(raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	line := out.String()
+	for _, want := range []string{"dispatch.worker.spawned", "01AAA", "pane=wM:p9"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the line %q does not carry %q", line, want)
+		}
+	}
+	out.Reset()
+	if err := WriteEvent(raw, true, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if strings.TrimSpace(out.String()) != string(raw) {
+		t.Fatalf("--json rewrote the daemon's document as %s", out.String())
+	}
+}

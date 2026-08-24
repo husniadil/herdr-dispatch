@@ -117,7 +117,12 @@ func (l *Loop) Dispatch(ctx context.Context, ref string) (Reservation, error) {
 		Owner: l.principal(),
 		At:    l.now(),
 	})
-	l.saveLocked()
+	ev := l.emitLocked(store.EntityTask, KindReserved, row.ID, row.Project, map[string]any{
+		"seq": row.Seq, "title": row.Title,
+	})
+	// The lock is held for the rest of this call by the deferred unlock, so
+	// the hook runs after it, when the caller has its answer.
+	defer l.fire(ev)
 
 	return Reservation{TaskID: row.ID, Seq: row.Seq, Title: row.Title, Project: row.Project}, nil
 }
@@ -302,8 +307,12 @@ func (l *Loop) attempt(taskID string) bool {
 		}
 		if l.pending[i].Attempts >= MaxSpawnAttempts {
 			l.pending = append(l.pending[:i:i], l.pending[i+1:]...)
-			l.saveLocked()
+			project := l.rows[taskID].Project
+			ev := l.emitLocked(store.EntityTask, KindReservationDropped, taskID, project, map[string]any{
+				"why": "its spawn failed", "attempts": MaxSpawnAttempts,
+			})
 			l.mu.Unlock()
+			l.fire(ev)
 			l.logf("task %s: %d spawn attempts failed, so its reservation is dropped and the task is left on the board",
 				taskID, MaxSpawnAttempts)
 			return false

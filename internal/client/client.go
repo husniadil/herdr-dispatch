@@ -59,6 +59,43 @@ func (c *Client) Call(req protocol.Request) (json.RawMessage, error) {
 	return resp.Result, nil
 }
 
+// Stream sends one request and hands every answer to fn until the daemon says
+// the stream is over or fn returns an error. This is `events --follow` (§8.2),
+// and it is the one call with no single answer to wait for.
+func (c *Client) Stream(req protocol.Request, fn func(json.RawMessage) error) error {
+	conn, err := c.dialOrStart()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	if err := json.NewEncoder(conn).Encode(req); err != nil {
+		return codes.Errorf(codes.Unavailable, "send %s: %v", req.Verb, err)
+	}
+	dec := json.NewDecoder(bufio.NewReader(conn))
+	for {
+		var resp protocol.Response
+		if err := dec.Decode(&resp); err != nil {
+			// A closed socket is not an ending. The daemon says when a
+			// stream is over; anything else that stops the decoder is the
+			// daemon going away underneath, and reporting that as a clean
+			// finish would have a follower exit having silently stopped
+			// watching.
+			return codes.Errorf(codes.Unavailable,
+				"the daemon stopped streaming %s without saying it had finished: %v", req.Verb, err)
+		}
+		if resp.Error != nil {
+			return &codes.Error{Code: codes.Code(resp.Error.Code), Message: resp.Error.Message}
+		}
+		if resp.Done {
+			return nil
+		}
+		if err := fn(resp.Result); err != nil {
+			return err
+		}
+	}
+}
+
 func (c *Client) dialOrStart() (net.Conn, error) {
 	path := config.SocketPath()
 	if conn, err := net.Dial("unix", path); err == nil {

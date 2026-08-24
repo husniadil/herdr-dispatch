@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/husniadil/herdr-dispatch/internal/config"
 )
 
 // The dispatcher publishes an address; it does not carry the mail. hmail is
@@ -30,8 +32,17 @@ func TestReadmeDocumentsTheDispatcherVariableByItsRealName(t *testing.T) {
 	if len(found) == 0 {
 		t.Fatalf("README documents no HDIS_ variable, and an agent has no other way to learn %s", DispatcherPaneVar)
 	}
+	// The §8.3 hook's own environment is in the README too, and it is a
+	// different audience: an operator's hook process reads it, never a
+	// spawned agent. Those names are derived from the constants the daemon
+	// really sets, so this stays a pin in one direction rather than a list
+	// written out twice.
+	hook := map[string]bool{}
+	for _, name := range config.HookVars {
+		hook[name] = true
+	}
 	for _, name := range found {
-		if name != DispatcherPaneVar {
+		if name != DispatcherPaneVar && !hook[name] {
 			t.Errorf("README tells an agent to read %s, and the pane is launched with %s", name, DispatcherPaneVar)
 		}
 	}

@@ -62,6 +62,13 @@ type State struct {
 	// the process because the operator resolves them at their own pace, and
 	// they are in this document because it is the only one there is.
 	Parked []Parked
+	// Events is the append-only trail of this dispatcher's own state
+	// changes (§5.5, §8.1), bounded by MaxEvents. It shares the document
+	// with what it is a trail OF, which is what makes it written in the
+	// same write as the mutation: the document goes out whole, so an event
+	// can never land without the change it records, or the change without
+	// the event.
+	Events []Event
 }
 
 type document struct {
@@ -73,6 +80,9 @@ type document struct {
 	// Parked is omitted when there are none, so a document written by a
 	// binary with a policy gate stays readable to one without.
 	Parked []Parked `json:"parked,omitempty"`
+	// Events is omitted when there are none, so a document written by a
+	// binary with an event trail stays readable to one without.
+	Events []Event `json:"events,omitempty"`
 }
 
 // reservation is one reservation as it is written.
@@ -162,7 +172,7 @@ func (b *Bindings) Load() (State, error) {
 			Attempts: r.Attempts,
 		})
 	}
-	return State{Bindings: out, Reservations: held, Parked: doc.Parked}, nil
+	return State{Bindings: out, Reservations: held, Parked: doc.Parked, Events: doc.Events}, nil
 }
 
 // Save writes the whole set, atomically: a temp file in the same directory,
@@ -195,6 +205,7 @@ func (b *Bindings) Save(state State) error {
 		})
 	}
 	doc.Parked = state.Parked
+	doc.Events = Rotate(state.Events)
 	raw, err := json.Marshal(doc)
 	if err != nil {
 		return fmt.Errorf("encode the bindings: %w", err)

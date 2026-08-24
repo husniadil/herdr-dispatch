@@ -143,6 +143,7 @@ unreachable to a harness that has no shell.
 | `hdis stop`           | `stop`           | Ask the running daemon to shut down              |
 | `hdis status`         | `status`         | What the dispatcher is driving now               |
 | `hdis dump`           | `dump`           | The whole store as JSON (§5.8)                   |
+| `hdis events`         | `events`         | The append-only trail of what it did (§8.2)      |
 | `hdis parked list`    | `parked_list`    | Calls the policy gate deferred to the operator   |
 | `hdis parked resolve <id>` | `parked_resolve` | Let one through, or close it unrun          |
 
@@ -234,7 +235,7 @@ answer is not cached and the next verb asks again.
 
 `hdis dump --json` prints everything this daemon remembers across restarts in
 one document (§5.8): the bindings, the reservations no tick has spawned for
-yet, and the parked actions, decided ones included. It is the daemon's own
+yet, the parked actions, decided ones included, and the event trail. It is the daemon's own
 live set rather than a re-read of the file, so it is what the next save will
 write, and the document names the file so a reader who wants it without this
 binary knows where to look.
@@ -243,6 +244,71 @@ Every list is `[]` when it is empty rather than `null`: a reader has to be
 able to tell "none" from "this daemon could not say". Nothing in it is a board
 fact — task state, claims, leases and evidence are htask's, and `htask` is
 where they are read.
+
+## The event trail
+
+Every state change of this dispatcher's own is on an append-only trail (§8.1),
+read with `hdis events` and followed with `hdis events --follow` (§8.2):
+
+```sh
+hdis events                          # from the beginning of what is held
+hdis events --since <id|ms>          # resume after the last one you saw
+hdis events --limit 20 --json        # one page, as documents
+hdis events --follow                 # keep printing as they arrive
+```
+
+The names are `dispatch.<entity>.<kind>`:
+
+| Event                                | When                                                     |
+| ------------------------------------ | -------------------------------------------------------- |
+| `dispatch.task.reserved`             | A dispatch took a ready task for the next tick            |
+| `dispatch.task.reservation_dropped`  | The board stopped offering it, or its spawn kept failing  |
+| `dispatch.task.review_announced`     | The operator was told a submission is waiting             |
+| `dispatch.worker.spawned`            | A pane came up for a task with its goal delivered         |
+| `dispatch.worker.adopted`            | A restart took a live worker back                         |
+| `dispatch.worker.prompted`           | A nudge or a self-review shot was delivered               |
+| `dispatch.worker.prompt_refused`     | A condition did not fit its budget, so nothing was sent   |
+| `dispatch.worker.retired`            | This dispatcher closed a worker's pane                    |
+| `dispatch.worker.gone`               | A worker's pane disappeared and its binding was dropped   |
+| `dispatch.parked.deferred`           | The policy gate parked a call (§9.3)                      |
+| `dispatch.parked.resolved`           | The operator decided one, either way                      |
+
+What is NOT here is deliberate: a task claimed, submitted, approved or
+rejected is a BOARD state change, it lives on htask's own trail, and copying
+it here would be a second ledger of facts this plugin does not own. What is
+left is exactly what nothing else records — the binding, the reservation and
+the pane.
+
+The trail lives in the same document as the bindings, and that is what makes
+it written in the same write as the mutation the way §5.5 asks: the document
+goes out whole, so an event cannot reach disk without the change it records,
+or a change without its event. It is bounded to the newest 1000 events,
+because that whole document is rewritten on every change. A `--since` id that
+has rotated past the bound is REFUSED rather than answered with the window
+again: a consumer handed the whole window would take it for the tail of its
+own stream. A consumer that cannot afford to miss one follows the stream
+rather than polling.
+
+`--follow` is the CLI's alone. A tool call answers once, so the MCP door
+publishes `events` without it (§8.2 with §7.1) and a caller there reads pages
+with `since`.
+
+### The event hook
+
+§8.3's hook is one command in the config, run detached with all three stdio
+closed for every event:
+
+```toml
+on_event = ["/usr/local/bin/fleet-notify"]
+```
+
+It is handed `HDIS_EVENT` (the full name), `HDIS_ENTITY`, `HDIS_ID`,
+`HDIS_PROJECT`, `HDIS_ACTOR`, `HDIS_KIND`, `HDIS_AT` (Unix milliseconds), and
+`HDIS_DETAIL`, the event's own JSON — which pane, which task number, why a
+prompt was refused. A hook that fails does not fail the write that caused it:
+it is started after the event is on disk, and nothing waits for it. `hdis
+doctor` says whether one is configured, which is the one fact a call site
+cannot show.
 
 ## The policy gate
 
@@ -363,12 +429,13 @@ exists to prevent.
 | `effort`   | Defaults to `low`.                                                                                                           |
 | `args`     | Extra argv passed through to the worker.                                                                                     |
 
-Six keys sit at the top level beside `default`, `profiles` and `projects`:
+Seven keys sit at the top level beside `default`, `profiles` and `projects`:
 `proxy` names the codex provider's launcher, `pane` names the base pane a
 daemon uses when it was not started inside a Herdr pane and was given no
 `-pane`, `max_workers` is how many workers may be live at once, `gate` is the
-§9 policy gate command, `[layout]` carries `min_pane_columns` and
-`max_panes_per_tab`, and `[verify]` is the verification lane.
+§9 policy gate command, `on_event` is the §8.3 event hook, `[layout]` carries
+`min_pane_columns` and `max_panes_per_tab`, and `[verify]` is the verification
+lane.
 
 The lane is off unless the document turns it on. On, every task a worker of
 this daemon's submits earns one self-review shot in that worker's OWN pane —

@@ -7,6 +7,34 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+**Added: an event trail, `hdis events`, and the `on_event` hook (§8.1, §8.2,
+§8.3).** Every state change this dispatcher owns is now recorded: a task
+reserved or given back, a worker spawned, adopted, prompted, retired or gone,
+review announced, a call the policy gate parked or the operator decided. The
+names are `dispatch.<entity>.<kind>` and the payload is §8.1's. Board facts
+are NOT on it — a task claimed, submitted or approved is htask's own trail —
+because a second ledger of facts this plugin does not own is what the boundary
+with htask forbids.
+
+`events` is on both doors. `hdis events` reads from the beginning of what is
+held, oldest first, with `--since <id|ms>` to resume, `--limit <n>` for one
+page, and `--json`. `--follow` is the CLI's alone: a tool call answers once,
+so the MCP `events` tool takes `since` and `limit` and no `follow`. The trail
+is bounded to the newest 1000 events, and a `--since` id that has rotated past
+that bound is refused with `USAGE` rather than answered with the whole window
+again, which a resuming consumer would take for the tail of its own stream.
+
+The hook is one config key, `on_event = ["cmd", "args"...]`, run detached with
+all three stdio closed for every event, carrying `HDIS_EVENT`, `HDIS_ENTITY`,
+`HDIS_ID`, `HDIS_PROJECT`, `HDIS_ACTOR`, `HDIS_KIND`, `HDIS_AT` and
+`HDIS_DETAIL`. A hook that fails does not fail the write that caused it.
+`hdis doctor` gained an `events` block naming the hook and how much trail is
+held, and `hdis dump` carries the trail, because §5.8 is the whole store.
+
+Nothing a caller had before moved: no verb, argument, JSON field or code
+changed shape. The store document gained an `events` array, and a document
+written without one still loads.
+
 ## 0.2.0 — 2026-08-24
 
 The release that makes `hdis` refuse the way the contract says a plugin

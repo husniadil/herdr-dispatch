@@ -23,7 +23,7 @@ func TestEveryVerbIsWholeOnBothDoors(t *testing.T) {
 			if a.Name == "" || a.Desc == "" {
 				t.Errorf("verb %q has an unnamed or undescribed argument", v.Name)
 			}
-			if a.Type != String && a.Type != Bool {
+			if a.Type != String && a.Type != Bool && a.Type != Int {
 				t.Errorf("verb %q argument %q has type %q, which no door can render", v.Name, a.Name, a.Type)
 			}
 		}
@@ -105,12 +105,12 @@ func TestTheGatedSetIsTheTwoWorldChangingVerbs(t *testing.T) {
 	}
 }
 
-func TestTheTableIsTheSevenVerbsAndNoMore(t *testing.T) {
+func TestTheTableIsTheEightVerbsAndNoMore(t *testing.T) {
 	var got []string
 	for _, v := range All {
 		got = append(got, v.Name)
 	}
-	want := []string{"doctor", "dispatch", "stop", "status", "dump", "parked_list", "parked_resolve"}
+	want := []string{"doctor", "dispatch", "stop", "status", "dump", "events", "parked_list", "parked_resolve"}
 	if len(got) != len(want) {
 		t.Fatalf("verbs = %v, want %v", got, want)
 	}

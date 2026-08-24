@@ -20,12 +20,22 @@ type Request struct {
 	// Door is the surface the call came in through, "cli" or "mcp", for the
 	// daemon's log.
 	Door string `json:"door,omitempty"`
+	// Follow turns `events` into a subscription (§8.2): the daemon keeps
+	// the connection and writes one Response per event until the caller
+	// goes away. It is a property of the CONNECTION rather than an argument
+	// of the verb, which is why it is here and not in the verb's Args: a
+	// tool call answers once, so the MCP door has nothing to set it with.
+	Follow bool `json:"follow,omitempty"`
 }
 
 // Response is the one answer. Exactly one of Result and Error is set.
 type Response struct {
 	Result json.RawMessage `json:"result,omitempty"`
 	Error  *Failure        `json:"error,omitempty"`
+	// Done ends a stream on purpose. Without it a daemon that finished and
+	// a daemon that was killed are the same closed socket, and a follower
+	// cannot tell "there is no more" from "I stopped being told".
+	Done bool `json:"done,omitempty"`
 }
 
 // Failure is a refusal with a name on it. ParkedID is the §9.3 addition a

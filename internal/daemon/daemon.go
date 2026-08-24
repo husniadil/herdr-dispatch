@@ -69,6 +69,9 @@ type Daemon struct {
 	answered  chan struct{}
 	stopOnce  sync.Once
 	writeOnce sync.Once
+	// followers is every live `events --follow`, woken by each event the
+	// loop writes.
+	followers watchers
 }
 
 // Lock takes the one-daemon lock, and holds it for as long as the returned
@@ -220,6 +223,12 @@ func (d *Daemon) answer(ctx context.Context, conn net.Conn) {
 			Code: string(codes.Invalid), Message: "unreadable request: " + err.Error()}})
 		return
 	}
+	// `events --follow` is the one call that does not answer once: it holds
+	// the connection and writes one Response per event (§8.2).
+	if req.Verb == "events" && req.Follow {
+		d.stream(ctx, req, conn, json.NewEncoder(conn))
+		return
+	}
 	result, err := d.Handle(ctx, req)
 	if err != nil {
 		d.write(conn, protocol.Response{Error: &protocol.Failure{
@@ -288,8 +297,11 @@ func (d *Daemon) serve(ctx context.Context, v verbs.Verb, req protocol.Request) 
 			Bindings:     append([]decide.Binding{}, held.Bindings...),
 			Reservations: append([]store.Reservation{}, held.Reservations...),
 			Parked:       append([]store.Parked{}, held.Parked...),
+			Events:       append([]store.Event{}, held.Events...),
 		}
 		return encode(rep, nil)
+	case "events":
+		return encode(d.events(req))
 	case "parked_list":
 		held := d.Loop.Parked()
 		return encode(ParkedReport{Parked: held, Count: len(held)}, nil)
@@ -370,6 +382,11 @@ type DoctorReport struct {
 	// nobody has decided. An operator whose dispatch came back DENIED reads
 	// here first.
 	Gate GateHealth `json:"gate"`
+	// Events is the §8 trail: how many events this daemon still holds, and
+	// the hook each one is handed to. A hook that is configured and never
+	// fires is indistinguishable from no hook at all at the call site, so
+	// whether one is configured is a fact only doctor can give.
+	Events EventsHealth `json:"events"`
 	// Herdr is what §11.2's feature detection found: the protocol Herdr
 	// reported, how many requests and events it listed, and any capability
 	// this binary needs that it did not. §10.3 makes doctor print the Herdr
@@ -408,6 +425,16 @@ type GateHealth struct {
 	// Parked is how many deferrals are waiting on the operator, or were
 	// resolved and then failed. Both want a human.
 	Parked int `json:"parked"`
+}
+
+// EventsHealth is the §8 event trail as doctor reports it.
+type EventsHealth struct {
+	// Trail is how many events are held, of the Max the trail keeps.
+	Trail int `json:"trail"`
+	Max   int `json:"max"`
+	// Hook is the §8.3 command every event is handed to, empty when none is
+	// configured.
+	Hook []string `json:"hook,omitempty"`
 }
 
 // HerdrHealth is the §11.2 schema read, as doctor reports it.
@@ -474,6 +501,7 @@ func (d *Daemon) doctor(ctx context.Context) (DoctorReport, error) {
 		MinPaneColumns: d.Loop.Config.Layout.MinPaneColumns,
 		MaxPanesPerTab: d.Loop.Config.Layout.MaxPanesPerTab,
 	}
+	rep.Events = d.eventsHealth()
 	rep.Herdr = d.herdrHealth(ctx)
 	board, err := d.Board.Doctor(ctx)
 	if err != nil {
@@ -490,6 +518,22 @@ func (d *Daemon) doctor(ctx context.Context) (DoctorReport, error) {
 		rep.Board.Error = "the board's daemon is not answering on " + board.Binary
 	}
 	return rep, nil
+}
+
+// eventsHealth is the §8 trail as doctor reports it. A trail that cannot be
+// read is reported as empty: doctor answers rather than fails, and an
+// operator reading zero against a running dispatcher has the same question a
+// refusal would have raised.
+func (d *Daemon) eventsHealth() EventsHealth {
+	out := EventsHealth{Max: store.MaxEvents}
+	if d.Loop == nil {
+		return out
+	}
+	out.Hook = d.Loop.Config.OnEvent
+	if trail, err := d.Loop.Events(store.EventFilter{}); err == nil {
+		out.Trail = len(trail)
+	}
+	return out
 }
 
 // herdrHealth is §11.2 as doctor reports it. The schema is read at daemon
@@ -558,6 +602,18 @@ func CheckArg(v verbs.Verb, a verbs.Arg, raw any) error {
 	case verbs.Bool:
 		if _, ok := raw.(bool); !ok {
 			return codes.Refusef(codes.Invalid, "%s wants %s as true or false", v.Name, a.Name)
+		}
+	case verbs.Int:
+		// A JSON number arrives as a float64 whichever door sent it, and a
+		// count with a fraction on it is not a count.
+		n, ok := raw.(float64)
+		if !ok {
+			if i, isInt := raw.(int); isInt {
+				n, ok = float64(i), true
+			}
+		}
+		if !ok || n != float64(int(n)) {
+			return codes.Refusef(codes.Invalid, "%s wants %s as a whole number", v.Name, a.Name)
 		}
 	default:
 		s, ok := raw.(string)
@@ -665,6 +721,10 @@ type DumpReport struct {
 	Bindings     []decide.Binding    `json:"bindings"`
 	Reservations []store.Reservation `json:"reservations"`
 	Parked       []store.Parked      `json:"parked"`
+	// Events is the §8.1 trail. It is part of the store, so §5.8's "the
+	// whole store" includes it: a reader who wants the document without
+	// this binary should not have to know that one list was held back.
+	Events []store.Event `json:"events"`
 }
 
 // ParkedReport is what parked_list answers with.

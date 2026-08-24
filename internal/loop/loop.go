@@ -78,6 +78,11 @@ type Loop struct {
 	Now func() time.Time
 	// Log is where the operator hears about anything that went wrong.
 	Log *log.Logger
+	// OnEvent is handed every event this loop appends to the trail, after
+	// it is written (§8.3). The daemon wires the configured hook and its
+	// `events --follow` streams to it; a nil one is a loop nobody is
+	// listening to, which is every test that does not care.
+	OnEvent func(store.Event)
 
 	// mu guards everything below it. The tick runs on the daemon's own
 	// goroutine while dispatch and status answer on a door's, so the
@@ -112,6 +117,11 @@ type Loop struct {
 	// So while it is set nothing is saved and no tick dispatches; each tick
 	// tries the Adopt again instead, and clears it when one succeeds.
 	unadopted bool
+	// events is the append-only trail of this dispatcher's own state
+	// changes (§8.1), bounded by store.MaxEvents. It is held beside the
+	// bindings because it is written with them: one document, written
+	// whole, so an event cannot reach disk without the change it records.
+	events []store.Event
 	// rows is the last tick's board rows, by task id: the project a worker
 	// runs in, the number an operator reads, the title status prints. It is
 	// a cache of board facts and never a source of them.
@@ -165,6 +175,13 @@ func (l *Loop) Adopt(ctx context.Context) (int, error) {
 			l.logf("the bindings could not be read, starting with none: %v", err)
 			held = store.State{}
 		}
+		// The trail comes back FIRST, before anything this reconciliation
+		// does can append to it. Taking it later would have the events of
+		// the restart itself overwritten by the document they were appended
+		// to.
+		l.mu.Lock()
+		l.events = held.Events
+		l.mu.Unlock()
 	}
 
 	rowsAlive, err := l.Herdr.PaneList(ctx)
@@ -510,6 +527,7 @@ func (l *Loop) reconcile(ctx context.Context, p ourPane) (decide.Binding, htask.
 	// now: the claim timeout has nothing earlier to measure from.
 	l.logf("task %s: pane %s is working it and no binding named it; adopting the worker a restart lost", row.ID, p.pane)
 	tree, branch := l.checkoutOf(p, row.Seq)
+	l.emit(store.EntityWorker, KindAdopted, row.ID, row.Project, map[string]any{"pane": p.pane})
 	return decide.Binding{
 		TaskID:     row.ID,
 		Pane:       p.pane,
@@ -794,7 +812,9 @@ func (l *Loop) saveLocked() {
 	if l.unadopted {
 		return
 	}
-	if err := l.Store.Save(store.State{Bindings: l.bindings, Reservations: l.pending, Parked: l.parked}); err != nil {
+	if err := l.Store.Save(store.State{
+		Bindings: l.bindings, Reservations: l.pending, Parked: l.parked, Events: l.events,
+	}); err != nil {
 		l.logf("the bindings could not be written: %v", err)
 	}
 }
@@ -818,7 +838,10 @@ func (l *Loop) Park(p store.Parked) (string, error) {
 	p.State = store.ParkedWaiting
 	p.AtMS = l.now().UnixMilli()
 	l.parked = append(l.parked, p)
-	l.saveLocked()
+	ev := l.emitLocked(store.EntityParked, KindDeferred, p.ID, "", map[string]any{
+		"subject": p.Subject, "verb": p.Verb, "target": p.Target, "reason": p.Reason,
+	})
+	defer l.fire(ev)
 	return p.ID, nil
 }
 
@@ -855,7 +878,11 @@ func (l *Loop) ClaimParked(id, state, by string) (store.Parked, error) {
 		l.parked[i].State = state
 		l.parked[i].ResolvedBy = by
 		l.parked[i].ResolvedMS = l.now().UnixMilli()
-		l.saveLocked()
+		ev := l.emitLocked(store.EntityParked, KindResolved, id, "", map[string]any{
+			"subject": was.Subject, "verb": was.Verb, "target": was.Target,
+			"state": state, "resolved_by": by,
+		})
+		defer l.fire(ev)
 		return was, nil
 	}
 	return store.Parked{}, codes.Errorf(codes.NotFound, "no parked action %s", id)
@@ -889,6 +916,7 @@ func (l *Loop) Dump() store.State {
 		Bindings:     append([]decide.Binding(nil), l.bindings...),
 		Reservations: append([]store.Reservation(nil), l.pending...),
 		Parked:       append([]store.Parked(nil), l.parked...),
+		Events:       append([]store.Event(nil), l.events...),
 	}
 }
 
@@ -945,6 +973,9 @@ func (l *Loop) snapshot(ctx context.Context) (decide.Snapshot, error) {
 			// Either way the reservation has nothing left to buy.
 			if !bound[id] {
 				l.logf("task %s: was reserved for dispatch, but the board no longer offers it; dropping the reservation", id)
+				l.emit(store.EntityTask, KindReservationDropped, id, l.projectOf(id), map[string]any{
+					"why": "the board no longer offers it",
+				})
 			}
 			l.unreserve(id)
 			continue
@@ -1023,6 +1054,7 @@ func (l *Loop) apply(ctx context.Context, actions []decide.Action) {
 			l.logf("task %s: pane %s is gone, dropping its binding", a.TaskID, a.Pane)
 			l.Spawn.Discard(a.Pane)
 			l.drop(ctx, a.Pane)
+			l.emit(store.EntityWorker, KindGone, a.TaskID, l.projectOf(a.TaskID), map[string]any{"pane": a.Pane})
 		case decide.GiveUp:
 			l.logf("task %s: %s after %d prompts, retiring pane %s",
 				a.TaskID, a.Reason, l.promptsFor(a.Pane), a.Pane)
@@ -1102,8 +1134,11 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 		PromptedAt: l.now(),
 		Prompts:    1,
 	})
-	l.saveLocked()
+	ev := l.emitLocked(store.EntityWorker, KindSpawned, row.ID, row.Project, map[string]any{
+		"pane": pane, "branch": branch, "worktree": tree, "seq": row.Seq, "agent": profile.Agent,
+	})
 	l.mu.Unlock()
+	l.fire(ev)
 	// The reservation is spent the moment the binding exists.
 	l.unreserve(row.ID)
 	return err
@@ -1151,13 +1186,16 @@ func (l *Loop) prompt(ctx context.Context, a decide.Action) error {
 	// unspent, which an operator can see; a silently shortened condition is
 	// the failure nobody would find.
 	if err := promptBudget(text, a.Reason); err != nil {
+		l.emit(store.EntityWorker, KindPromptRefused, a.TaskID, l.projectOf(a.TaskID), map[string]any{
+			"pane": a.Pane, "reason": a.Reason, "why": err.Error(),
+		})
 		return err
 	}
 	if err := l.Herdr.AgentPrompt(ctx, a.Pane, text); err != nil {
 		return err
 	}
+	prompts := 0
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	for i := range l.bindings {
 		if l.bindings[i].TaskID == a.TaskID {
 			l.bindings[i].Prompts++
@@ -1169,9 +1207,14 @@ func (l *Loop) prompt(ctx context.Context, a decide.Action) error {
 			if a.Reason == decide.ReasonSelfReview {
 				l.bindings[i].Verified = true
 			}
+			prompts = l.bindings[i].Prompts
 		}
 	}
-	l.saveLocked()
+	ev := l.emitLocked(store.EntityWorker, KindPrompted, a.TaskID, l.rows[a.TaskID].Project, map[string]any{
+		"pane": a.Pane, "reason": a.Reason, "prompts": prompts,
+	})
+	l.mu.Unlock()
+	l.fire(ev)
 	return nil
 }
 
@@ -1224,13 +1267,16 @@ func (l *Loop) notify(ctx context.Context, a decide.Action) error {
 		return err
 	}
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	for i := range l.bindings {
 		if l.bindings[i].TaskID == a.TaskID {
 			l.bindings[i].Notified = true
 		}
 	}
-	l.saveLocked()
+	ev := l.emitLocked(store.EntityTask, KindReviewAnnounced, a.TaskID, l.rows[a.TaskID].Project, map[string]any{
+		"pane": a.Pane,
+	})
+	l.mu.Unlock()
+	l.fire(ev)
 	return nil
 }
 
@@ -1241,6 +1287,9 @@ func (l *Loop) notify(ctx context.Context, a decide.Action) error {
 func (l *Loop) retire(ctx context.Context, a decide.Action) error {
 	err := l.Spawn.Retire(ctx, a.Pane)
 	l.drop(ctx, a.Pane)
+	l.emit(store.EntityWorker, KindRetired, a.TaskID, l.projectOf(a.TaskID), map[string]any{
+		"pane": a.Pane, "reason": a.Reason, "action": string(a.Kind),
+	})
 	return err
 }
 
