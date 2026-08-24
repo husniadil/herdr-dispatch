@@ -54,7 +54,7 @@ No config library; see the dependency budget below.
 Identical in all three, and additions go in one of these:
 
 ```
-cmd/<binary>/        main, and nothing else
+cmd/<binary>/        main, the command tree, and nothing else
 internal/            see below
 docs/contract.md     the Herdr plugin contract this repo is written against
 docs/contract-notes.md   where the contract and the observed daemon disagree
@@ -82,11 +82,33 @@ These names are the standard, and a package doing this job carries this name:
 | `store` | the persistent state, where a plugin has one |
 | `mcpdoor` | the MCP server built from `verbs` |
 | `gate` | the policy gate call |
-| `cli` | the CLI door built from `verbs` |
+| `cli` | the CLI door built from `verbs`, where it is not in `cmd/<binary>` |
 | `herdrclient` | the `herdr <verb>` adapter |
+| `project` | resolving the project a call is scoped to, from a directory |
+| `ids` | minting the ids a plugin issues, where it issues its own |
+| `testenv` | the stand-in binaries and throwaway world a layer-2 test runs in |
 | `e2e` | layer 3, driving the shipped binary against a real sibling |
 
 A plugin omits a package it has no job for. It does not rename one it has.
+
+**Where the CLI door lives is not fixed; that it is generated from `verbs`
+is.** The invariant the parity test needs is that it can import both doors,
+and a test cannot import `package main`. So whichever door is not in `main`
+is the one that hosts the parity test, and either arrangement satisfies it:
+hdis assembles the tree in `internal/cli` and its parity test sits in
+`internal/mcpdoor`; htask and hmail assemble theirs in `cmd/<binary>/root.go`
+and their parity tests sit beside it in `cmd/`. Moving 600 lines across two
+repositories to make the three agree would change no behaviour and break no
+test that is failing, so the table records both homes rather than picking one.
+`cmd/<binary>/main.go` stays main and nothing else in all three; the tree, the
+daemon subcommand and the MCP subcommand are the only things allowed beside it.
+
+`project` and `ids` are the two packages a plugin grows when it owns the job.
+htask and hmail both mint ULIDs and both resolve a project from the caller's
+working directory. hdis mints no ids at all — the ids it handles are the
+board's — and resolves a project from a git worktree's common directory, one
+caller, inside the `worktree.Manager` that made the worktree. A package for
+one caller is an abstraction ahead of its second use, so hdis omits both.
 
 ## The two doors, one registry
 
@@ -136,20 +158,33 @@ failure, via `<SHORT NAME>_E2E_REQUIRED=1`, and is what runs before a release ta
 
 ## README shape
 
-In this order, so the same question is answered in the same place in all
-three:
+The three READMEs answer the same questions, and the questions an operator
+arrives with are answered in the same place. Everything else is the repo's
+own vocabulary and its own order:
 
-1. What the plugin is, in a paragraph.
-2. `## Install` — `herdr plugin install husniadil/<repo>`, what `[[build]]`
-   and `[[startup]]` do, then the **skill symlink**, which the install does
-   not place for you. Ask Herdr for `plugin_root` rather than writing the
-   hashed path out. Then the develop-against-a-checkout variant with
-   `herdr plugin link .`.
-3. Running it: the daemon, the lock, the socket, the log.
-4. The two doors.
-5. Configuration, keyed exactly as the TOML document spells it.
-6. Building and testing.
-7. Dependencies, License.
+1. What the plugin is, in a paragraph, before the first heading.
+2. `## Install`, the first heading and spelled exactly that — `herdr plugin
+   install husniadil/<repo>`, what `[[build]]` and `[[startup]]` do, then the
+   **skill symlink**, which the install does not place for you. Ask Herdr for
+   `plugin_root` rather than writing the hashed path out. Then the
+   develop-against-a-checkout variant with `herdr plugin link .`.
+3. How the verbs are reached on both doors, under whatever heading the repo
+   gives them, and before Configuration.
+4. `## Configuration`, spelled exactly that, keyed exactly as the TOML
+   document spells it.
+5. Building and testing, dependencies, and the licence, last, in whatever
+   order the repo already has them. `Licence` and `License` are both fine.
+
+That is the whole rule, and it is deliberately shorter than the one it
+replaces. The first version prescribed a full section order that only hdis
+came close to, and hdis only because the order was written from it. htask
+reaches its doors through `## Driving htask from another program`, hmail
+through `## Verbs` and `## The MCP door`, and the domain sections each repo
+needs — the board's key, the ask-and-reply obligation, where a worker comes
+up — have no shared position because they have no shared subject. Pinning
+the four questions that are genuinely shared is enforceable; pinning an order
+none of the three keeps is a rule that reports a violation every time it is
+read.
 
 ## Dependency budget
 
@@ -173,21 +208,37 @@ TOML library, no config library, and no logging library.
 ## Known deltas, 2026-08-24
 
 Each is filed on the board of the repo it belongs to. This list is the audit's
-output, not a backlog kept in sync by hand.
+output, not a backlog kept in sync by hand, and it is only true as of the
+re-measure below.
 
 **herdr-dispatch** — nothing open. `internal/cli` was stdlib `flag` rather
 than cobra (task 59) and there was no `events` verb (task 58); `internal/herdr`
 is `herdrclient` and `parked.list`/`parked.resolve` are dotted `Name` with an
-`MCP` field (task 62). Fixed by the audit's own task: the gate config key, the
-`release-check` target, and the README `## Install` section.
+`MCP` field (task 62). The gate config key, the `release-check` target and the
+README `## Install` section were fixed by the audit's own task. `internal/fake`
+is `internal/testenv`, the name its two siblings already gave the same job
+(task 64).
 
-**herdr-tasks** — `HTASK_E2E_REQUIRED` was prefixed by the binary name where
-`htask` is the only thing that reads it; it is `TASKS_E2E_REQUIRED` now, fixed
-by this task. Nothing else open.
+**herdr-tasks** — nothing open. `HTASK_E2E_REQUIRED` was prefixed by the
+binary name where `htask` is the only thing that reads it; it is
+`TASKS_E2E_REQUIRED` now.
 
-**herdr-mail** — no `internal/e2e` layer-3 suite, and so no `e2e` or
-`release-check` target. Filed on its own board as herdr-mail task 8. Nothing
-else open.
+**herdr-mail** — nothing open. It had no `internal/e2e` layer-3 suite and so
+no `e2e` or `release-check` target; herdr-mail task 8 closed that, and the
+suite drives the shipped binary against a real `herdr` with
+`MAIL_E2E_REQUIRED` escalating the skip.
+
+Two entries above were stale within the day, because the package table and the
+README rule were written in the commit that aligned hdis alone, and a rule
+written from one repo scores the other two as deltas the moment it lands. A
+second assessment on 2026-08-24 re-measured all three against the standard and
+found five: the CLI door's home, the fixture package's two names, `ids` and
+`project` missing from the table, the README order, and this section claiming
+nothing was open while the first two falsified it. Task 64 settled them, and
+three of the five were settled by changing the rule rather than the repos —
+the standard is meant to write down what the three do, and where they already
+agreed with each other and not with the document, the document was what was
+wrong.
 
 The environment prefixes were the audit's one false lead: all three already
 build theirs from a `config.EnvPrefix` constant carrying the short name, so

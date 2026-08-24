@@ -18,6 +18,12 @@ wrong because pane ids are not durable across Herdr restarts. `NO_BASE_PANE`
 is unchanged as the refusal while there is still nothing to adopt; `doctor`
 now says `base pane none yet` rather than `none` there.
 
+**Changed: `internal/fake` is `internal/testenv`.** Internal test package, no
+consumer surface; the name is the one herdr-tasks and herdr-mail already give
+the same job of putting stand-in binaries on PATH for a test, and
+`docs/repo-standard.md` now names it in the package table so a third spelling
+is recognisable as one.
+
 **Changed: the socket verbs `parked_list` and `parked_resolve` are now
 `parked.list` and `parked.resolve`.** The MCP tool names do NOT move: they are
 `parked_list` and `parked_resolve`, as released. What changed is where the
