@@ -202,6 +202,39 @@ func TestResolvingRunsTheVerbWithoutAskingTheGateAgain(t *testing.T) {
 	}
 }
 
+// §9.3 re-runs the call the caller made, and the board scope is part of that
+// call: a number means different tasks on different boards, so a re-run that
+// lost the scope could reserve the same seq on the wrong project's board.
+func TestAParkedDispatchRerunsUnderTheBoardItWasCalledOn(t *testing.T) {
+	stateDir(t)
+	d, _ := newDaemon(t)
+	gateScript(t, d, `echo '{"decision":"defer","reason":"ask the operator"}'`)
+
+	// The board offers task 7 on /src/p; this call names another board, so
+	// the scope alone decides whether the re-run finds a task at all.
+	_, err := call(t, d, protocol.Request{
+		Verb: "dispatch", Args: map[string]any{"task": "7"}, Project: "/src/other"})
+	id := codes.ParkedOf(err)
+	if id == "" {
+		t.Fatalf("no parked row: %v", err)
+	}
+	held := d.Loop.Parked()
+	if len(held) != 1 || held[0].Project != "/src/other" {
+		t.Fatalf("the parked row does not carry the scope the caller named: %+v", held)
+	}
+
+	_, err = call(t, d, protocol.Request{Verb: "parked.resolve", Args: map[string]any{"id": id}})
+	if err == nil {
+		t.Fatal("the re-run reserved task 7 although the call named a board that is not offering it")
+	}
+	if !strings.Contains(err.Error(), "/src/other") {
+		t.Errorf("the re-run was answered off another board: %v", err)
+	}
+	if got := d.Loop.Pending(); len(got) != 0 {
+		t.Fatalf("the re-run reserved %v off a board the call never named", got)
+	}
+}
+
 // §9.3: a refused action closes without the verb running.
 func TestRefusingAParkedActionNeverRunsTheVerb(t *testing.T) {
 	stateDir(t)

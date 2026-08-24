@@ -30,7 +30,7 @@ func TestPaneSplitReturnsTheNewPane(t *testing.T) {
 		t.Fatalf("pane: got %q", pane)
 	}
 	want := "pane split --pane wM:p1 --direction right --cwd /src/p --no-focus --ratio 0.5"
-	if got := f.Calls(t)[0]; got != want {
+	if got := withoutSchema(f.Calls(t))[0]; got != want {
 		t.Fatalf("argv: got %q, want %q", got, want)
 	}
 }
@@ -103,7 +103,7 @@ func TestAgentStartForwardsAgentArgsAfterTheSeparator(t *testing.T) {
 		"agent", "start", "hdis-7", "--kind", "claude", "--pane", "wM:p9", "--timeout", "45000",
 		"--", "--agent", "claude", "--effort", "low", "/goal do the thing · Done when: ...",
 	}
-	if got := f.Argv(t)[0]; !reflect.DeepEqual(got, want) {
+	if got := withoutSchemaArgv(f.Argv(t))[0]; !reflect.DeepEqual(got, want) {
 		t.Fatalf("argv:\n got %v\nwant %v", got, want)
 	}
 }
@@ -158,7 +158,7 @@ func TestPanesMapsEveryLivePaneToItsAgentStatus(t *testing.T) {
 	if !reflect.DeepEqual(byPane, want) {
 		t.Fatalf("got %v, want %v", byPane, want)
 	}
-	if got, want := f.Calls(t)[0], "pane list"; got != want {
+	if got, want := withoutSchema(f.Calls(t))[0], "pane list"; got != want {
 		t.Fatalf("argv: got %q, want %q", got, want)
 	}
 }
@@ -172,7 +172,7 @@ func TestNotifyCarriesATitleAndABody(t *testing.T) {
 		t.Fatalf("notify: %v", err)
 	}
 	want := []string{"notification", "show", "task 7 is in review", "--body", "worker hdis-7 submitted"}
-	if got := f.Argv(t)[0]; !reflect.DeepEqual(got, want) {
+	if got := withoutSchemaArgv(f.Argv(t))[0]; !reflect.DeepEqual(got, want) {
 		t.Fatalf("argv: got %v, want %v", got, want)
 	}
 }
@@ -186,7 +186,7 @@ func TestAgentPromptGoesThroughTheAgentSurface(t *testing.T) {
 		t.Fatalf("prompt: %v", err)
 	}
 	want := []string{"agent", "prompt", "wM:p9", "claim task 7 and get to work"}
-	if got := f.Argv(t)[0]; !reflect.DeepEqual(got, want) {
+	if got := withoutSchemaArgv(f.Argv(t))[0]; !reflect.DeepEqual(got, want) {
 		t.Fatalf("argv: got %v, want %v", got, want)
 	}
 }
@@ -290,7 +290,7 @@ func TestAgentsListEveryRegisteredWorkerWithItsName(t *testing.T) {
 	if !reflect.DeepEqual(agents, want) {
 		t.Fatalf("got %v, want %v", agents, want)
 	}
-	if got, want := f.Calls(t)[0], "agent list"; got != want {
+	if got, want := withoutSchema(f.Calls(t))[0], "agent list"; got != want {
 		t.Fatalf("argv: got %q, want %q", got, want)
 	}
 }

@@ -45,11 +45,12 @@ negotiable in either direction:
 - Herdr is driven the same way: shell out to `herdr <verb>` (`pane list`,
   `pane split`, `pane read`, `pane run`, `pane close`, `tab create`,
   `tab list`, `tab close`, `agent start`, `agent prompt`, `agent list`,
-  `agent get`, `notification show`). No socket and no PTY parsing.
+  `agent get`, `pane send-keys`, `api schema`, `notification show`). No socket
+  and no PTY parsing.
   `agent_status` is Herdr's word about a worker and the only one this repo
-  accepts for whether it is working; the one thing read off a pane's own
-  screen is whether a `/goal` registered, because Herdr has no status for
-  that.
+  accepts for whether it is working; TWO things are read off a pane's own
+  screen, because Herdr has no status for either: whether a `/goal`
+  registered, and whether the client's trust-folder dialog is up.
 
 ## Principles
 

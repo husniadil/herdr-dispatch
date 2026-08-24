@@ -117,6 +117,9 @@ func (c *Client) PaneSplit(ctx context.Context, pane, direction, ratio, cwd stri
 			PaneID string `json:"pane_id"`
 		} `json:"pane"`
 	}
+	if err := c.Require(ctx, CapPaneSplit); err != nil {
+		return "", err
+	}
 	argv := []string{"pane", "split", "--pane", pane, "--direction", direction, "--cwd", cwd, "--no-focus"}
 	if ratio != "" {
 		argv = append(argv, "--ratio", ratio)
@@ -180,6 +183,9 @@ func (c *Client) TabCreate(ctx context.Context, workspace, cwd, label string, en
 
 // TabClose closes a tab and everything in it.
 func (c *Client) TabClose(ctx context.Context, tab string) error {
+	if err := c.Require(ctx, CapTabClose); err != nil {
+		return err
+	}
 	return c.result(ctx, nil, "tab", "close", tab)
 }
 
@@ -189,6 +195,9 @@ func (c *Client) TabClose(ctx context.Context, tab string) error {
 func (c *Client) Tabs(ctx context.Context) ([]Tab, error) {
 	var res struct {
 		Tabs []Tab `json:"tabs"`
+	}
+	if err := c.Require(ctx, CapTabList); err != nil {
+		return nil, err
 	}
 	if err := c.result(ctx, &res, "tab", "list"); err != nil {
 		return nil, err
@@ -220,11 +229,17 @@ func (c *Client) PaneRead(ctx context.Context, pane string, lines int) (string, 
 
 // PaneSendKeys presses logical keys in a pane.
 func (c *Client) PaneSendKeys(ctx context.Context, pane string, keys ...string) error {
+	if err := c.Require(ctx, CapPaneSendKeys); err != nil {
+		return err
+	}
 	return c.result(ctx, nil, append([]string{"pane", "send-keys", pane}, keys...)...)
 }
 
 // PaneClose closes a worker pane.
 func (c *Client) PaneClose(ctx context.Context, pane string) error {
+	if err := c.Require(ctx, CapPaneClose); err != nil {
+		return err
+	}
 	return c.result(ctx, nil, "pane", "close", pane)
 }
 
@@ -244,6 +259,9 @@ type StartRequest struct {
 // and means the worker went to work rather than that the dispatch failed.
 // Deciding that is the spawn pipeline's job, not this adapter's.
 func (c *Client) AgentStart(ctx context.Context, req StartRequest) (Agent, error) {
+	if err := c.Require(ctx, CapAgentStart); err != nil {
+		return Agent{}, err
+	}
 	args := []string{"agent", "start", req.Name, "--kind", req.Kind, "--pane", req.Pane}
 	if req.Timeout > 0 {
 		args = append(args, "--timeout", strconv.FormatInt(req.Timeout.Milliseconds(), 10))
@@ -299,6 +317,9 @@ func (c *Client) PaneList(ctx context.Context) ([]Agent, error) {
 	var res struct {
 		Panes []Agent `json:"panes"`
 	}
+	if err := c.Require(ctx, CapPaneList); err != nil {
+		return nil, err
+	}
 	if err := c.result(ctx, &res, "pane", "list"); err != nil {
 		return nil, err
 	}
@@ -316,6 +337,9 @@ func (c *Client) Agents(ctx context.Context) ([]Agent, error) {
 	var res struct {
 		Agents []Agent `json:"agents"`
 	}
+	if err := c.Require(ctx, CapAgentList); err != nil {
+		return nil, err
+	}
 	if err := c.result(ctx, &res, "agent", "list"); err != nil {
 		return nil, err
 	}
@@ -327,11 +351,17 @@ func (c *Client) Agents(ctx context.Context) ([]Agent, error) {
 // measured ceiling for the latter is spawn.PromptedGoalBudget, which is not
 // the typed spawn line's budget and is recorded beside its own measurement.
 func (c *Client) AgentPrompt(ctx context.Context, target, text string) error {
+	if err := c.Require(ctx, CapPrompt); err != nil {
+		return err
+	}
 	return c.result(ctx, nil, "agent", "prompt", target, text)
 }
 
 // Notify puts a message in front of the operator.
 func (c *Client) Notify(ctx context.Context, title, body string) error {
+	if err := c.Require(ctx, CapNotify); err != nil {
+		return err
+	}
 	return c.result(ctx, nil, "notification", "show", title, "--body", body)
 }
 

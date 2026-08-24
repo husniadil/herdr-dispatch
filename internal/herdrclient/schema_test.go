@@ -107,11 +107,11 @@ func TestAMissingCapabilityIsUnsupportedAtTheVerbThatNeedsIt(t *testing.T) {
 	}
 }
 
-// The other three verbs the same way, each naming its own capability. They
-// are here as a table because the failure this guards against is a verb that
-// was gated and then quietly ungated in a refactor.
+// Every verb the same way, each naming its own capability. They are here as a
+// table because the failure this guards against is a verb that was gated and
+// then quietly ungated in a refactor.
 func TestEveryVerbThatNeedsACapabilityRefusesWithoutIt(t *testing.T) {
-	for _, tc := range []struct {
+	cases := []struct {
 		capability string
 		call       func(*Client) error
 	}{
@@ -128,12 +128,43 @@ func TestEveryVerbThatNeedsACapabilityRefusesWithoutIt(t *testing.T) {
 			_, _, err := c.TabCreate(context.Background(), "", "/src/p", "l")
 			return err
 		}},
-	} {
+		{CapTabList, func(c *Client) error {
+			_, err := c.Tabs(context.Background())
+			return err
+		}},
+		{CapTabClose, func(c *Client) error { return c.TabClose(context.Background(), "wM:t9") }},
+		{CapPaneSplit, func(c *Client) error {
+			_, err := c.PaneSplit(context.Background(), "wM:p1", "right", "", "/src/p")
+			return err
+		}},
+		{CapPaneList, func(c *Client) error {
+			_, err := c.PaneList(context.Background())
+			return err
+		}},
+		{CapPaneClose, func(c *Client) error { return c.PaneClose(context.Background(), "wM:p9") }},
+		{CapPaneSendKeys, func(c *Client) error { return c.PaneSendKeys(context.Background(), "wM:p9", "enter") }},
+		{CapAgentStart, func(c *Client) error {
+			_, err := c.AgentStart(context.Background(), StartRequest{Name: "hdis-7", Kind: "claude", Pane: "wM:p9"})
+			return err
+		}},
+		{CapAgentList, func(c *Client) error {
+			_, err := c.Agents(context.Background())
+			return err
+		}},
+		{CapPrompt, func(c *Client) error { return c.AgentPrompt(context.Background(), "wM:p9", "go") }},
+		{CapNotify, func(c *Client) error { return c.Notify(context.Background(), "t", "b") }},
+	}
+	// Needs is the one list, so a capability added there without a verb
+	// gating on it is a promise doctor makes and no verb keeps.
+	if len(cases) != len(Needs) {
+		t.Errorf("%d verbs are gated and Needs names %d capabilities: %v", len(cases), len(Needs), Needs)
+	}
+	for _, tc := range cases {
 		t.Run(tc.capability, func(t *testing.T) {
 			c, f := client(t)
 			// Everything this binary needs EXCEPT the one under test.
 			offered := []string{}
-			for _, cap := range []string{CapTabCreate, CapPaneRun, CapPaneRead, CapAgentGet} {
+			for _, cap := range Needs {
 				if cap != tc.capability {
 					offered = append(offered, `"`+cap+`"`)
 				}

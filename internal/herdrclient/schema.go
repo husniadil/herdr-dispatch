@@ -19,15 +19,28 @@ const (
 	CapPaneSplit = "pane.split"
 	// `herdr pane run` is the CLI spelling; the request it sends is
 	// `pane.send_input`, and the schema lists requests, not subcommands.
-	CapPaneRun    = "pane.send_input"
-	CapPaneRead   = "pane.read"
-	CapPaneList   = "pane.list"
-	CapPaneClose  = "pane.close"
-	CapAgentStart = "agent.start"
-	CapAgentGet   = "agent.get"
-	CapAgentList  = "agent.list"
-	CapPrompt     = "agent.prompt"
+	CapPaneRun      = "pane.send_input"
+	CapPaneRead     = "pane.read"
+	CapPaneList     = "pane.list"
+	CapPaneClose    = "pane.close"
+	CapPaneSendKeys = "pane.send_keys"
+	CapAgentStart   = "agent.start"
+	CapAgentGet     = "agent.get"
+	CapAgentList    = "agent.list"
+	CapPrompt       = "agent.prompt"
+	CapNotify       = "notification.show"
 )
+
+// Needs is every Herdr request this binary asks for: the single source for
+// what feature detection checks, what the startup log reports and what a verb
+// gates on. Three lists that could disagree is how doctor came to promise an
+// UNSUPPORTED that a verb with no Require call would never give.
+var Needs = []string{
+	CapTabCreate, CapTabList, CapTabClose,
+	CapPaneSplit, CapPaneRun, CapPaneRead, CapPaneList, CapPaneClose, CapPaneSendKeys,
+	CapAgentStart, CapAgentGet, CapAgentList, CapPrompt,
+	CapNotify,
+}
 
 // Schema is what `herdr api schema --json` says this Herdr can do (§11.2).
 // Requests are the request methods (`agent.get`, `pane.send_input`) and Events the

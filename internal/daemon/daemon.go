@@ -477,13 +477,9 @@ type HerdrHealth struct {
 }
 
 // needs is every Herdr request this binary asks for, which is what doctor
-// checks the schema against. It is here rather than at the call sites because
-// doctor's job is to answer BEFORE a verb is tried.
-var needs = []string{
-	herdrclient.CapTabCreate, herdrclient.CapTabList, herdrclient.CapTabClose,
-	herdrclient.CapPaneSplit, herdrclient.CapPaneRun, herdrclient.CapPaneRead, herdrclient.CapPaneList, herdrclient.CapPaneClose,
-	herdrclient.CapAgentStart, herdrclient.CapAgentGet, herdrclient.CapAgentList, herdrclient.CapPrompt,
-}
+// checks the schema against. It is the adapter's own list, so what doctor
+// reports missing is exactly what a verb refuses with UNSUPPORTED.
+var needs = herdrclient.Needs
 
 // BoardHealth is the board's own report of itself, or why it gave none.
 type BoardHealth struct {
@@ -723,7 +719,11 @@ func (d *Daemon) pass(v verbs.Verb, req protocol.Request) error {
 			Verb:    v.Gated,
 			Target:  target,
 			Payload: req.Args,
-			Reason:  res.Reason,
+			// The scope travels with the call: it is not an argument, and a
+			// re-run without it would look on boards the caller never named.
+			Project:     req.Project,
+			AllProjects: req.AllProjects,
+			Reason:      res.Reason,
 		})
 		if err != nil {
 			return err
@@ -796,7 +796,10 @@ func (d *Daemon) resolveParked(ctx context.Context, req protocol.Request) (Parke
 	// §9.3: the verb re-runs under the subject the gate stopped, never the
 	// resolver's. The gate is not consulted again — the resolution IS the
 	// decision it deferred, and asking a second time would park it forever.
-	rerun := protocol.Request{Verb: verb.Name, Args: was.Payload, Door: req.Door}
+	rerun := protocol.Request{
+		Verb: verb.Name, Args: was.Payload, Door: req.Door,
+		Project: was.Project, AllProjects: was.AllProjects,
+	}
 	if pane, found := strings.CutPrefix(was.Subject, "agent:"); found {
 		rerun.Pane = pane
 	}

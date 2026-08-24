@@ -106,9 +106,15 @@ daemon subcommand and the MCP subcommand are the only things allowed beside it.
 `project` and `ids` are the two packages a plugin grows when it owns the job.
 htask and hmail both mint ULIDs and both resolve a project from the caller's
 working directory. hdis mints no ids at all — the ids it handles are the
-board's — and resolves a project from a git worktree's common directory, one
-caller, inside the `worktree.Manager` that made the worktree. A package for
-one caller is an abstraction ahead of its second use, so hdis omits both.
+board's — and resolves a project from a git worktree's common directory,
+inside the `worktree.Manager` that made the worktree. There are two callers of
+`Manager.Project`: the loop, naming the repository a bound pane's checkout
+belongs to, and the doors, canonicalizing an explicit `--project` per §4.1
+through a zero-value `Manager`. Both want the same answer from the same git
+question, and the manager is where the worktree it is asked about came from,
+so it stays the home. A `project` package is the alternative if a third caller
+appears or the doors ever need it without a manager; two callers of one method
+do not earn it yet, and hdis omits both packages.
 
 ## The two doors, one registry
 

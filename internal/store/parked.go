@@ -24,6 +24,12 @@ type Parked struct {
 	// re-runs the verb the caller actually asked for rather than one
 	// reconstructed from its target.
 	Payload map[string]any `json:"payload,omitempty"`
+	// Project and AllProjects are the board scope the call was made with.
+	// They are not arguments, so the payload cannot carry them, and a seq
+	// number means a different task on every board: a re-run that lost the
+	// scope would answer off whichever board happened to have that number.
+	Project     string `json:"project,omitempty"`
+	AllProjects bool   `json:"all_projects,omitempty"`
 	// State is "parked", "resolved", "refused" or "failed".
 	State  string `json:"state"`
 	Reason string `json:"reason,omitempty"`

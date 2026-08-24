@@ -90,10 +90,7 @@ func serve(f *daemonFlags) error {
 	} else {
 		log.Printf("herdr offers %d request(s) and %d event kind(s) at protocol %d",
 			len(schema.Requests), len(schema.Events), schema.Protocol)
-		for _, want := range []string{
-			herdrclient.CapTabCreate, herdrclient.CapPaneSplit, herdrclient.CapPaneRun, herdrclient.CapPaneRead,
-			herdrclient.CapAgentStart, herdrclient.CapAgentGet, herdrclient.CapPrompt,
-		} {
+		for _, want := range herdrclient.Needs {
 			if !schema.Has(want) {
 				log.Printf("this herdr does not offer %s; the verbs that need it will refuse with UNSUPPORTED", want)
 			}
