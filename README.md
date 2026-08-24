@@ -463,9 +463,10 @@ args = ["--add-dir", "/srv/shared"]
 The reader is a hand-written subset of TOML rather than a dependency: top-level
 `key = value`, `[table]` and `[table.sub]` headers, and values that are quoted
 strings, whole numbers, `true`/`false`, or one-line arrays of quoted strings.
-A project path is a key, so it is quoted. Anything outside that subset — an
-inline table, an array of tables, a multi-line array, an unquoted string, a key
-set twice — is refused by line number rather than ignored, because a setting an
+`[[route]]` repeats a table into a list, which is how the routing table below
+is written. A project path is a key, so it is quoted. Anything outside that
+subset — an inline table, a multi-line array, an unquoted string, a key set
+twice — is refused by line number rather than ignored, because a setting an
 operator wrote and this binary silently dropped is the failure a config parser
 exists to prevent.
 
@@ -477,7 +478,55 @@ exists to prevent.
 | `effort`   | Defaults to `low`.                                                                                                           |
 | `args`     | Extra argv passed through to the worker.                                                                                     |
 
-Seven keys sit at the top level beside `default`, `profiles` and `projects`:
+### Routing a task to a profile by its priority
+
+A board row carries a priority, which is a descriptive fact the ledger already
+keeps. `hdis` ROUTES on it: named routes pair a minimum priority with a
+profile, the highest matching minimum wins, and a task below every minimum
+launches with the profile it would have had anyway. The mapping lives entirely
+in this document; htask changes not at all.
+
+```toml
+default = "worker"
+
+[profiles.worker]
+provider = "claude"
+model = "opus"            # effort defaults low
+
+[profiles.medium]
+provider = "claude"
+model = "opus"
+effort = "medium"
+
+[profiles.heavy]
+provider = "claude"
+model = "opus"
+effort = "high"
+
+[[route]]
+min_priority = 3
+profile = "medium"
+
+[[route]]
+min_priority = 5
+profile = "heavy"
+```
+
+A task at priority 4 launches with `medium`, one at 5 or above with `heavy`,
+and one at 2 with `worker`. A route naming a profile that is not defined is
+refused when the document is read — at startup, loudly — rather than hours
+later on the first task priced high enough to reach it.
+
+The priority is read once, at dispatch. A binding records which profile its
+worker was launched with, so `hdis status` names it per worker and a restart
+still reports what is really running; a document rewritten meanwhile is what
+the NEXT spawn reads, not what a running pane is re-labelled with. Rework
+keeps its pane under the existing rejected-task rule, so a priority changed
+after dispatch changes nothing for a task already bound. The verification lane
+keeps its own profile selection: routes apply to workers alone.
+
+Seven keys sit at the top level beside `default`, `profiles`, `projects` and
+`route`:
 `proxy` names the codex provider's launcher, `pane` names the base pane a
 daemon uses when it was not started inside a Herdr pane and was given no
 `--pane`, `max_workers` is how many workers may be live at once,

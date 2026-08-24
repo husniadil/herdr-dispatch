@@ -592,3 +592,17 @@ func properties(t *testing.T, tl *mcp.Tool) map[string]json.RawMessage {
 	}
 	return schema.Properties
 }
+
+// The two claims about profiles are both true and neither replaces the other:
+// a caller cannot pick a model or an effort, and the board row's priority
+// picks which configured profile the worker launches with.
+func TestTheInstructionsSayPriorityPicksTheProfileAndACallerStillCannot(t *testing.T) {
+	for what, want := range map[string]string{
+		"that model and effort are not per-call": "not selectable per call",
+		"that priority selects the profile":      "priority selects WHICH configured profile",
+	} {
+		if !strings.Contains(Instructions, want) {
+			t.Errorf("the instructions do not say %s (looked for %q)", what, want)
+		}
+	}
+}

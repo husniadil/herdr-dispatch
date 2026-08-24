@@ -455,12 +455,28 @@ type Proxy struct {
 	MaxUsedPercent int `json:"max_used_percent"`
 }
 
+// Route sends a task to a profile by the priority its board row carries. The
+// board is untouched by this: priority is a fact it already keeps, and what a
+// dispatcher does with it is execution policy that lives here alone.
+//
+// A route matches a task priced at MinPriority or above, and the highest
+// matching minimum wins. A task below every minimum has no route and launches
+// with the profile its project would have given it anyway.
+type Route struct {
+	MinPriority int    `json:"min_priority"`
+	Profile     string `json:"profile"`
+}
+
 // Config is the whole document: named profiles, the one every project gets
 // unless it says otherwise, and the projects that say otherwise.
 type Config struct {
 	Default  string             `json:"default"`
 	Profiles map[string]Profile `json:"profiles"`
 	Projects map[string]string  `json:"projects"`
+	// Routes is the priority-to-profile table, written as repeated
+	// `[[route]]` blocks. Empty is a fleet with no routing, where every
+	// worker launches with its project's own profile.
+	Routes []Route `json:"route"`
 	// Proxy is the codex provider's launcher and the policy for spending
 	// through it.
 	Proxy Proxy `json:"proxy"`
@@ -624,6 +640,18 @@ func Parse(b []byte) (Config, error) {
 	if c.Layout.MaxPanesPerTab < 1 {
 		return Config{}, fmt.Errorf("hdis config: layout.max_panes_per_tab is %d, and a tab that may hold no worker at all can never be spawned into", c.Layout.MaxPanesPerTab)
 	}
+	// A route naming a profile nobody defined is refused HERE, at startup,
+	// rather than at the first task priced high enough to reach it: that
+	// task would arrive hours later, fail to spawn, and take its slot with
+	// it while the document that caused it sat unread.
+	for i, r := range c.Routes {
+		if r.Profile == "" {
+			return Config{}, fmt.Errorf("hdis config: route %d (min_priority %d) names no profile", i, r.MinPriority)
+		}
+		if _, ok := c.Profiles[r.Profile]; !ok {
+			return Config{}, fmt.Errorf("hdis config: route %d (min_priority %d) names profile %q, which is not defined", i, r.MinPriority, r.Profile)
+		}
+	}
 	for project, name := range c.Projects {
 		if _, ok := c.Profiles[name]; !ok {
 			return Config{}, fmt.Errorf("hdis config: project %q names profile %q, which is not defined", project, name)
@@ -645,18 +673,31 @@ func Load(path string) (Config, error) {
 	return c, nil
 }
 
-// ProfileFor resolves the profile a project's workers launch with: its own
-// override if it has one, the global default otherwise.
-func (c Config) ProfileFor(project string) (Profile, error) {
-	name := c.Default
+// ProfileNameFor is the profile a project's workers launch with by name: its
+// own override if it has one, the global default otherwise. It is the name a
+// route starts from, before the board row's priority is read.
+func (c Config) ProfileNameFor(project string) string {
 	if over, ok := c.Projects[project]; ok {
-		name = over
+		return over
 	}
+	return c.Default
+}
+
+// ProfileNamed is one profile by the name a decision chose. A routed worker
+// launches with a profile that is not its project's, so the lookup is by name
+// rather than by project.
+func (c Config) ProfileNamed(name string) (Profile, error) {
 	p, ok := c.Profiles[name]
 	if !ok {
 		return Profile{}, fmt.Errorf("hdis config: profile %q is not defined", name)
 	}
 	return p, nil
+}
+
+// ProfileFor resolves the profile a project's workers launch with: its own
+// override if it has one, the global default otherwise.
+func (c Config) ProfileFor(project string) (Profile, error) {
+	return c.ProfileNamed(c.ProfileNameFor(project))
 }
 
 // AgentArgs renders the profile as the argv herdr forwards to the worker

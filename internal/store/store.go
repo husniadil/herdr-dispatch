@@ -108,6 +108,10 @@ type record struct {
 	// Verified says the submission this binding is holding has had its
 	// self-review shot.
 	Verified bool `json:"verified,omitempty"`
+	// Profile is the profile the worker was LAUNCHED with, which a document
+	// rewritten since does not change. Omitted for a binding written before
+	// routing existed, which names no profile this daemon can report.
+	Profile string `json:"profile,omitempty"`
 	// Worktree is the checkout the pane works in. The binding is the only
 	// record of where it is, so a binding that comes back without it leaves
 	// a live worker's tree with nothing naming it: the retire cannot
@@ -158,6 +162,7 @@ func (b *Bindings) Load() (State, error) {
 			Notified:   r.Notified,
 			Kind:       r.Kind,
 			Verified:   r.Verified,
+			Profile:    r.Profile,
 			Worktree:   r.Worktree,
 			Tab:        r.Tab,
 			Branch:     r.Branch,
@@ -191,6 +196,7 @@ func (b *Bindings) Save(state State) error {
 			// A worker's kind is left off: an absent kind reads as one,
 			// which is what every binding is.
 			Verified: x.Verified,
+			Profile:  x.Profile,
 			Worktree: x.Worktree,
 			Tab:      x.Tab,
 			Branch:   x.Branch,

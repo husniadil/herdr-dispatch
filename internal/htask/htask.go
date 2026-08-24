@@ -56,11 +56,15 @@ func (c *Client) bin() string {
 
 // Task is the slice of a board row the dispatcher reads.
 type Task struct {
-	ID        string `json:"id"`
-	Seq       int    `json:"seq"`
-	Project   string `json:"project"`
-	Title     string `json:"title"`
-	Status    string `json:"status"`
+	ID      string `json:"id"`
+	Seq     int    `json:"seq"`
+	Project string `json:"project"`
+	Title   string `json:"title"`
+	Status  string `json:"status"`
+	// Priority is the row's own number, which the board keeps as a
+	// descriptive fact. The dispatcher ROUTES on it — which profile a
+	// priority earns is this binary's config — and never writes it.
+	Priority  int    `json:"priority"`
 	ClaimedBy string `json:"claimed_by"`
 	// PaneID is the pane the task was created from, or empty when nothing
 	// with a pane created it. A task an operator files at a terminal has

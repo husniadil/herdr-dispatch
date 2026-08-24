@@ -67,6 +67,15 @@ type Task struct {
 	// worker waiting on a rejection from one that stopped without
 	// submitting: both sit idle on a doing row.
 	Feedback string
+	// Priority is the board row's own number, which is a descriptive fact
+	// the ledger already keeps. It is what a route reads; what the routes
+	// MEAN is this binary's config and never the board's.
+	Priority int
+	// Profile is the profile name this task's project would launch a worker
+	// with, resolved from the config before the tick because the core reads
+	// no config. A route may send the task to another one; with no route
+	// matching, this is what it launches with.
+	Profile string
 	// Codex is whether the worker this task would get launches through the
 	// proxy. It is the config's word, resolved per project before the tick,
 	// because the core knows nothing about profiles — and only a worker
@@ -100,6 +109,11 @@ type Binding struct {
 	// It outlives the checkout, so it is what tells the operator where the
 	// work is.
 	Branch string
+	// Profile is the profile name the worker was LAUNCHED with, which a
+	// document rewritten since does not change. A binding written before
+	// the field existed carries none, and reads as a worker whose profile
+	// this daemon cannot name.
+	Profile string
 	// Verified says a self-review shot has been SENT for the submission the
 	// binding is currently holding. Sent, not received: §11.4 forbids reading
 	// a successful `agent prompt` as delivery, so this alone does not close
@@ -137,6 +151,38 @@ type Policy struct {
 	// may already have spent before a codex spawn is refused. Zero is no
 	// threshold, and the limit_reached flag still gates on its own.
 	MaxUsedPercent int
+	// Routes is the priority-to-profile table, as the config document wrote
+	// it. It is data rather than a lookup the core performs: the mapping is
+	// read off disk at the edge, and what arrives here is a table.
+	Routes []Route
+}
+
+// Route sends a task priced at MinPriority or above to Profile. It is the
+// config's own table, carried into the core as facts.
+type Route struct {
+	MinPriority int
+	Profile     string
+}
+
+// RouteProfile is the profile a task of this priority launches with: the
+// highest matching minimum in the table, or def where nothing matches.
+//
+// Document order does not decide it. An operator's table is written however
+// they think about their work, and a rule that took the first match would
+// send a task priced above every band to whichever band happened to be
+// written first.
+func RouteProfile(priority int, def string, routes []Route) string {
+	name, matched := def, false
+	best := 0
+	for _, r := range routes {
+		if priority < r.MinPriority {
+			continue
+		}
+		if !matched || r.MinPriority > best {
+			name, best, matched = r.Profile, r.MinPriority, true
+		}
+	}
+	return name
 }
 
 // Action is one thing for an adapter to do, in the order returned.
@@ -145,6 +191,10 @@ type Action struct {
 	TaskID string
 	Pane   string
 	Reason string
+	// Profile is the profile a Spawn launches its worker with, chosen here
+	// from the task's priority and the policy's routes. It is empty on every
+	// other kind: nothing else launches anything.
+	Profile string
 }
 
 // Decide walks the bindings first — endings free worker slots — and then
@@ -222,7 +272,11 @@ func Decide(s Snapshot, p Policy) []Action {
 		if s.Tasks[id].Codex && QuotaRefusal(s.Quota, p) != "" {
 			continue
 		}
-		out = append(out, Action{Kind: Spawn, TaskID: id})
+		out = append(out, Action{
+			Kind:    Spawn,
+			TaskID:  id,
+			Profile: RouteProfile(s.Tasks[id].Priority, s.Tasks[id].Profile, p.Routes),
+		})
 		live++
 	}
 	return out

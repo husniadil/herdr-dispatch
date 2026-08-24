@@ -1027,6 +1027,20 @@ func (l *Loop) snapshot(ctx context.Context) (decide.Snapshot, error) {
 	return snap, nil
 }
 
+// Routes carries the config's routing table into the core, which reads no
+// config of its own. The two types are separate on purpose: the document's
+// shape is config's business, and what the core decides on is facts.
+func Routes(c config.Config) []decide.Route {
+	if len(c.Routes) == 0 {
+		return nil
+	}
+	out := make([]decide.Route, 0, len(c.Routes))
+	for _, r := range c.Routes {
+		out = append(out, decide.Route{MinPriority: r.MinPriority, Profile: r.Profile})
+	}
+	return out
+}
+
 // readyTask is a row the board is offering, as the core reads it. The project
 // is what the core shares the ready list out by, so one board offering more
 // work than there are slots cannot take them all.
@@ -1034,11 +1048,17 @@ func (l *Loop) readyTask(row htask.Task) decide.Task {
 	return decide.Task{
 		ID: row.ID, Status: row.Status, ClaimedBy: row.Pane(),
 		Feedback: row.Feedback, Project: row.Project,
+		// The board's own number, and the profile the project would
+		// launch with before any route reads that number. Both are facts
+		// the core decides on; neither is a config read it makes.
+		Priority: row.Priority,
+		Profile:  l.Config.ProfileNameFor(row.Project),
 		// Which provider this row's worker would launch with is the
 		// config's word, resolved here because the core knows nothing
 		// about profiles and only a codex worker spends the proxy's
-		// account.
-		Codex: l.launchesThroughProxy(row.Project),
+		// account. It is asked of the ROUTED profile: a route may send
+		// this row to a codex one its project would never have used.
+		Codex: l.launchesThroughProxy(row),
 	}
 }
 
@@ -1098,7 +1118,13 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 	if !ok {
 		return fmt.Errorf("no board row to spawn from")
 	}
-	profile, err := l.Config.ProfileFor(row.Project)
+	// The profile the decision chose, which the row's priority may have
+	// routed away from the project's own.
+	name := a.Profile
+	if name == "" {
+		name = l.Config.ProfileNameFor(row.Project)
+	}
+	profile, err := l.Config.ProfileNamed(name)
 	if err != nil {
 		return err
 	}
@@ -1153,6 +1179,7 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 		TaskID:     row.ID,
 		Pane:       pane,
 		Kind:       decide.KindWorker,
+		Profile:    name,
 		Worktree:   tree,
 		Tab:        l.Spawn.TabOf(pane),
 		Branch:     branch,
@@ -1160,7 +1187,7 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 		Prompts:    1,
 	})
 	ev := l.emitLocked(store.EntityWorker, KindSpawned, row.ID, row.Project, map[string]any{
-		"pane": pane, "branch": branch, "worktree": tree, "seq": row.Seq, "agent": profile.Agent,
+		"pane": pane, "branch": branch, "worktree": tree, "seq": row.Seq, "agent": profile.Agent, "profile": name,
 	})
 	l.mu.Unlock()
 	l.fire(ev)

@@ -42,6 +42,8 @@ func TestTheSkillTeachesWhatTheRegistrySays(t *testing.T) {
 		"that a cross-board id is the 26-character one":        "must be the 26-character id",
 		"why a number is not one":                              "only unique inside a project",
 		"that the profile is config and not an argument":       "not selectable per call",
+		"that priority routes a task to a profile":             "a task's priority routes it to a profile",
+		"where the routing table lives":                        "live in `dispatch.toml`",
 		"what HDIS_DISPATCHER_PANE is":                         "the address you owe your report at",
 		"that the variable never says who the reader is":       "never says who you are",
 		"that doctor answers before a dispatch is tried":       "says why a dispatch would refuse",

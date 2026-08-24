@@ -323,3 +323,22 @@ func TestABindingsBranchAndWorktreeBothSurviveARestart(t *testing.T) {
 		t.Fatalf("the binding came back as %+v, want %+v", got, want)
 	}
 }
+
+// A restart reads back the profile a worker was launched with. The config may
+// have been rewritten since; what is already running is a fact, and the
+// document is only what the NEXT spawn reads.
+func TestABindingKeepsTheProfileItsWorkerLaunchedWith(t *testing.T) {
+	b := &Bindings{Path: filepath.Join(t.TempDir(), "dispatch-bindings.json")}
+	if err := b.Save(State{Bindings: []decide.Binding{{
+		TaskID: "01AAA", Pane: "wM:p9", Kind: decide.KindWorker, Profile: "heavy",
+	}}}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	held, err := b.Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(held.Bindings) != 1 || held.Bindings[0].Profile != "heavy" {
+		t.Fatalf("bindings: %+v", held.Bindings)
+	}
+}

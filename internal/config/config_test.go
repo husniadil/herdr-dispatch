@@ -586,3 +586,115 @@ provider = "claude"
 		t.Errorf("the refusal does not name the key to use: %v", err)
 	}
 }
+
+const routed = `default = "worker"
+
+[profiles.worker]
+provider = "claude"
+model = "opus"
+
+[profiles.heavy]
+provider = "claude"
+model = "opus"
+effort = "high"
+
+[[route]]
+min_priority = 3
+profile = "medium"
+
+[[route]]
+min_priority = 5
+profile = "heavy"
+
+[profiles.medium]
+provider = "claude"
+model = "opus"
+effort = "medium"
+`
+
+// The routing table is read as written: each route in document order, with
+// its minimum priority and the profile it names.
+func TestTheRoutingTableIsReadAsWritten(t *testing.T) {
+	c, err := Parse([]byte(routed))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	want := []Route{{MinPriority: 3, Profile: "medium"}, {MinPriority: 5, Profile: "heavy"}}
+	if len(c.Routes) != len(want) {
+		t.Fatalf("routes: %+v", c.Routes)
+	}
+	for i, r := range c.Routes {
+		if r != want[i] {
+			t.Fatalf("route %d: %+v, want %+v", i, r, want[i])
+		}
+	}
+}
+
+// A route naming a profile nobody defined is refused HERE, at startup, and
+// not hours later on the first task priced high enough to reach it.
+func TestARouteNamingAnUndefinedProfileIsRefusedAtParse(t *testing.T) {
+	_, err := Parse([]byte(`default = "worker"
+
+[profiles.worker]
+provider = "claude"
+
+[[route]]
+min_priority = 5
+profile = "heavey"
+`))
+	if err == nil {
+		t.Fatal("a route to a profile that does not exist was accepted")
+	}
+	if !strings.Contains(err.Error(), "heavey") {
+		t.Fatalf("the refusal does not name the profile: %v", err)
+	}
+}
+
+// A route with no profile at all names nothing to launch.
+func TestARouteMustNameAProfile(t *testing.T) {
+	_, err := Parse([]byte(`default = "worker"
+
+[profiles.worker]
+provider = "claude"
+
+[[route]]
+min_priority = 5
+`))
+	if err == nil {
+		t.Fatal("a route naming no profile was accepted")
+	}
+}
+
+// A document with no routes at all is what every existing operator has, and
+// it keeps behaving exactly as it did: one default, no routing table.
+func TestADocumentWithNoRoutesCarriesNone(t *testing.T) {
+	c, err := Parse([]byte("default = \"worker\"\n\n[profiles.worker]\nprovider = \"claude\"\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(c.Routes) != 0 {
+		t.Fatalf("routes: %+v", c.Routes)
+	}
+}
+
+// The routed profile is looked up by the name a decision chose, which is not
+// always the project's own.
+func TestAProfileIsLookedUpByTheNameTheDecisionChose(t *testing.T) {
+	c, err := Parse([]byte(routed))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	p, err := c.ProfileNamed("heavy")
+	if err != nil {
+		t.Fatalf("heavy: %v", err)
+	}
+	if p.Effort != "high" {
+		t.Fatalf("profile: %+v", p)
+	}
+	if _, err := c.ProfileNamed("nothing"); err == nil {
+		t.Fatal("a profile nobody defined was looked up without complaint")
+	}
+	if name := c.ProfileNameFor("/src/p"); name != "worker" {
+		t.Fatalf("default name: %q", name)
+	}
+}

@@ -41,7 +41,8 @@ const Instructions = "herdr-dispatch drives the htask board's ready work: it bri
 	"a worker up runs to minutes, so read the outcome with status rather than waiting on the " +
 	"call. The worker claims the task itself; nothing here claims, approves or rejects on its " +
 	"behalf. Which agent kind, model and effort a worker launches with is this binary's config and " +
-	"is not selectable per call. doctor says why a dispatch would refuse."
+	"is not selectable per call. The board row's priority selects WHICH configured profile a " +
+	"worker launches with. doctor says why a dispatch would refuse."
 
 // Caller is what the door needs to reach the daemon. The default dials the
 // real socket, starting a daemon when none answers; a test swaps in something

@@ -75,6 +75,12 @@ call**. There is no argument for it, and the board carries no profile field,
 for the same reason: which agent runs the work is execution policy, not a fact
 about the task.
 
+What the board DOES carry is a priority, and **a task's priority routes it to
+a profile**: a row priced high enough launches its worker with a heavier model
+or effort than a routine one. **The mapping and its meaning live in
+`dispatch.toml`**, never on the board — the row says how urgent the work is,
+and this binary alone decides what that earns.
+
 ## HDIS_DISPATCHER_PANE, if you are the worker
 
 Every pane the dispatcher opens is launched with

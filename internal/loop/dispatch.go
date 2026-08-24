@@ -33,6 +33,11 @@ type Worker struct {
 	// Kind is which lane the pane was brought up for. There is one, worker,
 	// and this says so rather than leaving a caller to infer it.
 	Kind string `json:"kind"`
+	// Profile is the profile the worker was launched with, which its task's
+	// priority may have routed to. It is what the binding recorded at spawn
+	// rather than what the config says now, so a document rewritten since
+	// does not change what this reports about a pane already running.
+	Profile string `json:"profile,omitempty"`
 	// AgentStatus is herdr's own word for the worker, or empty when herdr
 	// no longer lists the pane at all.
 	AgentStatus string `json:"agent_status"`
@@ -104,7 +109,7 @@ func (l *Loop) Dispatch(ctx context.Context, ref, project string) (Reservation, 
 
 	// Asked before the reservation is taken, and deliberately before the
 	// lock: it shells out to the proxy, and nothing slow runs under mu.
-	if why := l.quotaRefusal(ctx, row.Project); why != "" {
+	if why := l.quotaRefusal(ctx, row); why != "" {
 		return Reservation{}, codes.Refusef(codes.AtQuota,
 			"task %d launches through the proxy and %s", row.Seq, why)
 	}
@@ -215,6 +220,7 @@ func (l *Loop) Status(ctx context.Context) (Status, error) {
 			Project:     row.Project,
 			Pane:        b.Pane,
 			Kind:        kindOf(b),
+			Profile:     b.Profile,
 			AgentStatus: status,
 			Branch:      b.Branch,
 			Tab:         b.Tab,

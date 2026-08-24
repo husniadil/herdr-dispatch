@@ -5,13 +5,20 @@ import (
 
 	"github.com/husniadil/herdr-dispatch/internal/config"
 	"github.com/husniadil/herdr-dispatch/internal/decide"
+	"github.com/husniadil/herdr-dispatch/internal/htask"
 )
 
-// launchesThroughProxy reports whether the workers a project's profile
-// launches route through the proxy. Only those spend the account the quota
-// gate reads; a claude worker never touches it.
-func (l *Loop) launchesThroughProxy(project string) bool {
-	p, err := l.Config.ProfileFor(project)
+// launchesThroughProxy reports whether the worker this row would get routes
+// through the proxy. Only those spend the account the quota gate reads; a
+// claude worker never touches it.
+//
+// It asks of the profile the row's PRIORITY routes to, not of the project's
+// own: a route may send a high-priority row to a codex profile the project
+// would never otherwise have used, and gating that spawn on the project's
+// answer would let it past the quota gate entirely.
+func (l *Loop) launchesThroughProxy(row htask.Task) bool {
+	name := decide.RouteProfile(row.Priority, l.Config.ProfileNameFor(row.Project), l.Policy.Routes)
+	p, err := l.Config.ProfileNamed(name)
 	if err != nil {
 		// A project whose profile is not defined has a spawn that will fail
 		// on its own, with a message about the profile. Calling it a codex
@@ -60,12 +67,12 @@ func (l *Loop) quota(ctx context.Context) decide.Quota {
 	}
 }
 
-// quotaRefusal is why a worker for this project must not be brought up now,
+// quotaRefusal is why a worker for this row must not be brought up now,
 // or empty when it may. It is the same gate the tick applies, asked on the
 // dispatch verb's path so a caller is told quota rather than left waiting for
 // a pane that the next tick will not bring up either.
-func (l *Loop) quotaRefusal(ctx context.Context, project string) string {
-	if !l.launchesThroughProxy(project) {
+func (l *Loop) quotaRefusal(ctx context.Context, row htask.Task) string {
+	if !l.launchesThroughProxy(row) {
 		return ""
 	}
 	return decide.QuotaRefusal(l.quota(ctx), l.Policy)

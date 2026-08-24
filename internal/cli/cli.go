@@ -175,8 +175,8 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 			if w.AwaitingReview {
 				title += "  (" + HeldPhrase + ")"
 			}
-			fmt.Fprintf(out, "#%-4d %-10s %-8s %-10s %-23s prompted %s x%d notified=%t  %s\n",
-				w.Seq, w.Pane, or(w.Tab, "-"), or(state, "unknown"), branch,
+			fmt.Fprintf(out, "#%-4d %-10s %-8s %-10s %-10s %-23s prompted %s x%d notified=%t  %s\n",
+				w.Seq, w.Pane, or(w.Tab, "-"), or(state, "unknown"), or(w.Profile, "-"), branch,
 				w.PromptedAt.Format(time.RFC3339), w.Prompts, w.Notified, title)
 		}
 		for _, id := range st.Pending {

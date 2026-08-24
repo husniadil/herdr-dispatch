@@ -540,3 +540,22 @@ func TestDoctorPrintsNoQuotaLineWhereNothingLaunchesThroughTheProxy(t *testing.T
 		t.Errorf("a claude-only fleet printed a quota line: %q", line)
 	}
 }
+
+// Which profile a worker is running is the one thing the board cannot tell an
+// operator, so the terminal line says it.
+func TestStatusNamesTheProfileEachWorkerRuns(t *testing.T) {
+	raw, err := json.Marshal(loop.Status{Workers: []loop.Worker{{
+		Seq: 7, Pane: "wM:p9", AgentStatus: "working", PaneAlive: true,
+		Profile: "heavy", Branch: "hdis/task-7", Title: "do the thing",
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if err := Write("status", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if !strings.Contains(out.String(), "heavy") {
+		t.Fatalf("status does not name the profile: %q", out.String())
+	}
+}

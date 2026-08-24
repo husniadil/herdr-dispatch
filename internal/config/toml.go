@@ -16,10 +16,10 @@ import (
 //
 // Hand-written, because the dependency budget is one library and it is the
 // MCP go-sdk. What is NOT accepted is refused by line number rather than
-// ignored: inline tables, arrays of tables, multi-line arrays, a bare value
-// this parser cannot type. A setting an operator wrote and this binary
-// silently dropped is the failure mode a config parser exists to prevent,
-// and it is the one a permissive parser produces.
+// ignored: inline tables, multi-line arrays, a bare value this parser cannot
+// type. A setting an operator wrote and this binary silently dropped is the
+// failure mode a config parser exists to prevent, and it is the one a
+// permissive parser produces.
 func parseTOML(src string) (map[string]any, error) {
 	root := map[string]any{}
 	table := root
@@ -30,7 +30,15 @@ func parseTOML(src string) (map[string]any, error) {
 			continue
 		}
 		if strings.HasPrefix(s, "[[") {
-			return nil, fmt.Errorf("line %d: arrays of tables are not supported in this config", n)
+			if !strings.HasSuffix(s, "]]") {
+				return nil, fmt.Errorf("line %d: an array-of-tables header must open and close on one line: %q", n, s)
+			}
+			next, err := appendTable(root, strings.TrimSpace(s[2:len(s)-2]))
+			if err != nil {
+				return nil, fmt.Errorf("line %d: %w", n, err)
+			}
+			table = next
+			continue
 		}
 		if strings.HasPrefix(s, "[") {
 			if !strings.HasSuffix(s, "]") {
@@ -92,6 +100,43 @@ func descend(root map[string]any, path string) (map[string]any, error) {
 		}
 	}
 	return at, nil
+}
+
+// appendTable adds one more entry to an array of tables and answers it. The
+// path is walked the same way a `[table.sub]` header is, and only the LAST
+// name becomes the list: everything before it is an ordinary table.
+//
+// A name already holding something that is not a list of tables is refused
+// rather than replaced, for the reason every refusal in this parser exists:
+// the alternative is an operator's keys landing somewhere they never wrote.
+func appendTable(root map[string]any, path string) (map[string]any, error) {
+	if path == "" {
+		return nil, fmt.Errorf("a table header names nothing")
+	}
+	parts := splitTopLevel(path, '.')
+	parent := root
+	if len(parts) > 1 {
+		var err error
+		parent, err = descend(root, strings.Join(parts[:len(parts)-1], "."))
+		if err != nil {
+			return nil, err
+		}
+	}
+	name, err := bareKey(strings.TrimSpace(parts[len(parts)-1]))
+	if err != nil {
+		return nil, err
+	}
+	held, set := parent[name]
+	if !set {
+		held = []any{}
+	}
+	list, ok := held.([]any)
+	if !ok {
+		return nil, fmt.Errorf("%q is already a value, so it cannot also be an array of tables", name)
+	}
+	next := map[string]any{}
+	parent[name] = append(list, next)
+	return next, nil
 }
 
 // bareKey is a key as written: a bare word, or a quoted one, which is how a

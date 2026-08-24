@@ -119,6 +119,10 @@ func serve(f *daemonFlags) error {
 			// proxy is execution policy, and it lives beside the launcher
 			// it spends through.
 			MaxUsedPercent: cfg.Proxy.MaxUsedPercent,
+			// The routing table, carried in as facts: the core reads no
+			// config, and which profile a priority earns is written in
+			// the same document the profiles are.
+			Routes: loop.Routes(cfg),
 		},
 		Spawn: &spawn.Pipeline{
 			Herdr:          pens,

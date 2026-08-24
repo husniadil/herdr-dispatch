@@ -7,6 +7,21 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+**Added: a task's priority routes it to a profile.** Named `[[route]]` blocks
+in `dispatch.toml` pair a minimum priority with a profile name; the highest
+matching minimum wins, and a task below every minimum launches with the
+profile its project would have given it anyway. A document with no routes
+behaves exactly as it did. A route naming a profile that is not defined is
+refused when the config is read, at startup. `hdis status` gained a `profile`
+per worker, in the JSON and on the terminal line, recording what the worker
+was LAUNCHED with rather than what the document says now. The board is
+untouched: priority is a fact it already keeps, and what a priority earns is
+this binary's config.
+
+**Changed: `[[route]]` is readable config.** The TOML subset accepted arrays
+of tables nowhere and refused them by line; it now reads them into a list.
+Every other refusal is unchanged.
+
 **Changed: the `proxy` config key is a table, not a string.** `proxy =
 "/opt/homebrew/bin/proxenos"` is refused at parse, naming the new spelling:
 write `[proxy]` with `bin = "..."` under it. The table is where the quota
