@@ -1,10 +1,10 @@
-// Package herdr drives Herdr the same way the board is driven: shell out to
-// `herdr <verb>`, never open its socket, and read what it answers with — a
-// JSON envelope for every verb but `pane read`, which answers with the
-// terminal's own text.
+// Package herdrclient drives Herdr the same way the board is driven: shell
+// out to `herdr <verb>`, never open its socket, and read what it answers
+// with — a JSON envelope for every verb but `pane read`, which answers with
+// the terminal's own text.
 // There is no detection logic here — Herdr's own agent_status is the only
 // truth about a worker this repo accepts.
-package herdr
+package herdrclient
 
 import (
 	"bytes"

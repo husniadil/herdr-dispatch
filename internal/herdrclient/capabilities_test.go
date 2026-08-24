@@ -1,4 +1,4 @@
-package herdr
+package herdrclient
 
 import (
 	"encoding/json"

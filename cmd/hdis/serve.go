@@ -12,7 +12,7 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/config"
 	"github.com/husniadil/herdr-dispatch/internal/daemon"
 	"github.com/husniadil/herdr-dispatch/internal/decide"
-	"github.com/husniadil/herdr-dispatch/internal/herdr"
+	"github.com/husniadil/herdr-dispatch/internal/herdrclient"
 	"github.com/husniadil/herdr-dispatch/internal/htask"
 	"github.com/husniadil/herdr-dispatch/internal/loop"
 	"github.com/husniadil/herdr-dispatch/internal/proxy"
@@ -61,7 +61,7 @@ func serve(f *daemonFlags) error {
 	// is holding names the daemon that reserved it and a restart can tell
 	// its own stale hold from a live peer's.
 	board := &htask.Client{Principal: htask.PrincipalFor(pane)}
-	pens := herdr.New()
+	pens := herdrclient.New()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -91,8 +91,8 @@ func serve(f *daemonFlags) error {
 		log.Printf("herdr offers %d request(s) and %d event kind(s) at protocol %d",
 			len(schema.Requests), len(schema.Events), schema.Protocol)
 		for _, want := range []string{
-			herdr.CapTabCreate, herdr.CapPaneSplit, herdr.CapPaneRun, herdr.CapPaneRead,
-			herdr.CapAgentStart, herdr.CapAgentGet, herdr.CapPrompt,
+			herdrclient.CapTabCreate, herdrclient.CapPaneSplit, herdrclient.CapPaneRun, herdrclient.CapPaneRead,
+			herdrclient.CapAgentStart, herdrclient.CapAgentGet, herdrclient.CapPrompt,
 		} {
 			if !schema.Has(want) {
 				log.Printf("this herdr does not offer %s; the verbs that need it will refuse with UNSUPPORTED", want)

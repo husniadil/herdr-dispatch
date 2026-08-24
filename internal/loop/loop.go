@@ -22,7 +22,7 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/codes"
 	"github.com/husniadil/herdr-dispatch/internal/config"
 	"github.com/husniadil/herdr-dispatch/internal/decide"
-	"github.com/husniadil/herdr-dispatch/internal/herdr"
+	"github.com/husniadil/herdr-dispatch/internal/herdrclient"
 	"github.com/husniadil/herdr-dispatch/internal/htask"
 	"github.com/husniadil/herdr-dispatch/internal/spawn"
 	"github.com/husniadil/herdr-dispatch/internal/store"
@@ -53,7 +53,7 @@ type Trees interface {
 // Loop holds the adapters, the policy, and the bindings.
 type Loop struct {
 	Board  *htask.Client
-	Herdr  *herdr.Client
+	Herdr  *herdrclient.Client
 	Spawn  *spawn.Pipeline
 	Config config.Config
 	Policy decide.Policy
@@ -303,7 +303,7 @@ type ourPane struct {
 //
 // A binding whose pane is gone names nothing to reconcile, and is dropped
 // here with a word to the operator.
-func (l *Loop) ourPanes(ctx context.Context, alive []herdr.Agent, agents []herdr.Agent, tabs []herdr.Tab, held []decide.Binding) []ourPane {
+func (l *Loop) ourPanes(ctx context.Context, alive []herdrclient.Agent, agents []herdrclient.Agent, tabs []herdrclient.Tab, held []decide.Binding) []ourPane {
 	panes := make(map[string]bool, len(alive))
 	for _, row := range alive {
 		panes[row.PaneID] = true
@@ -379,8 +379,8 @@ func (l *Loop) ourPanes(ctx context.Context, alive []herdr.Agent, agents []herdr
 // is on.
 //
 // A pane covered by both evidences is counted once, from the agent record.
-func (l *Loop) named(alive []herdr.Agent, agents []herdr.Agent, tabs []herdr.Tab) []herdr.Agent {
-	out := make([]herdr.Agent, 0, len(agents)+len(alive))
+func (l *Loop) named(alive []herdrclient.Agent, agents []herdrclient.Agent, tabs []herdrclient.Tab) []herdrclient.Agent {
+	out := make([]herdrclient.Agent, 0, len(agents)+len(alive))
 	seen := make(map[string]bool, len(agents))
 	for _, a := range agents {
 		if a.PaneID == "" || seen[a.PaneID] {
@@ -428,7 +428,7 @@ func (l *Loop) named(alive []herdr.Agent, agents []herdr.Agent, tabs []herdr.Tab
 // was opened for, so reading a pane's task off the tab it happens to sit in
 // would give every worker in that tab the first one's number. The label is
 // the close guard and the operator's signpost; the checkout is the identity.
-func (l *Loop) nameFor(row herdr.Agent, label string) string {
+func (l *Loop) nameFor(row herdrclient.Agent, label string) string {
 	if l.Worktrees == nil {
 		return ""
 	}
@@ -698,7 +698,7 @@ func (l *Loop) release(ctx context.Context) {
 // daemon creates its own checkouts in, and only entries carrying the prefix
 // this daemon names them with. A directory under that root that hdis did not
 // create is not hdis's to remove.
-func (l *Loop) reap(ctx context.Context, alive, agents []herdr.Agent) {
+func (l *Loop) reap(ctx context.Context, alive, agents []herdrclient.Agent) {
 	if l.Worktrees == nil || l.Worktrees.RootDir() == "" {
 		return
 	}
@@ -729,7 +729,7 @@ func (l *Loop) reap(ctx context.Context, alive, agents []herdr.Agent) {
 	// `agent list` has the working directory of an agent it still holds.
 	// The union is what "somebody is alive in there" means.
 	var live []string
-	for _, row := range append(append([]herdr.Agent(nil), alive...), agents...) {
+	for _, row := range append(append([]herdrclient.Agent(nil), alive...), agents...) {
 		if row.Cwd != "" {
 			live = append(live, row.Cwd)
 		}

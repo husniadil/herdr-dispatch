@@ -14,7 +14,7 @@ import (
 
 	"github.com/husniadil/herdr-dispatch/internal/config"
 	"github.com/husniadil/herdr-dispatch/internal/fake"
-	"github.com/husniadil/herdr-dispatch/internal/herdr"
+	"github.com/husniadil/herdr-dispatch/internal/herdrclient"
 	"github.com/husniadil/herdr-dispatch/internal/proxy"
 )
 
@@ -114,7 +114,7 @@ func newHarness(t *testing.T, reads []string, start string) *harness {
 		}
 	}
 	return &harness{Fake: f, pipe: &Pipeline{
-		Herdr:          &herdr.Client{},
+		Herdr:          &herdrclient.Client{},
 		Proxy:          &proxy.Client{},
 		SettingsDir:    t.TempDir(),
 		StartTimeout:   45 * time.Second,

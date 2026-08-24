@@ -19,7 +19,7 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/daemon"
 	"github.com/husniadil/herdr-dispatch/internal/decide"
 	"github.com/husniadil/herdr-dispatch/internal/fake"
-	"github.com/husniadil/herdr-dispatch/internal/herdr"
+	"github.com/husniadil/herdr-dispatch/internal/herdrclient"
 	"github.com/husniadil/herdr-dispatch/internal/htask"
 	"github.com/husniadil/herdr-dispatch/internal/loop"
 	"github.com/husniadil/herdr-dispatch/internal/protocol"
@@ -65,11 +65,11 @@ provider = "claude"
 	d := &daemon.Daemon{
 		Loop: &loop.Loop{
 			Board:  &htask.Client{},
-			Herdr:  &herdr.Client{},
+			Herdr:  &herdrclient.Client{},
 			Config: cfg,
 			Policy: decide.Policy{MaxWorkers: 2, ClaimTimeout: time.Minute, MaxPrompts: 2},
 			Spawn: &spawn.Pipeline{
-				Herdr: &herdr.Client{}, Proxy: &proxy.Client{},
+				Herdr: &herdrclient.Client{}, Proxy: &proxy.Client{},
 				StartTimeout: time.Second, Poll: time.Second, Sleep: func(time.Duration) {},
 			},
 			BasePane: "wM:p1",

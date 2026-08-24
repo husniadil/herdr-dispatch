@@ -25,7 +25,7 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/config"
 	"github.com/husniadil/herdr-dispatch/internal/decide"
 	"github.com/husniadil/herdr-dispatch/internal/gate"
-	"github.com/husniadil/herdr-dispatch/internal/herdr"
+	"github.com/husniadil/herdr-dispatch/internal/herdrclient"
 	"github.com/husniadil/herdr-dispatch/internal/htask"
 	"github.com/husniadil/herdr-dispatch/internal/loop"
 	"github.com/husniadil/herdr-dispatch/internal/protocol"
@@ -473,9 +473,9 @@ type HerdrHealth struct {
 // checks the schema against. It is here rather than at the call sites because
 // doctor's job is to answer BEFORE a verb is tried.
 var needs = []string{
-	herdr.CapTabCreate, herdr.CapTabList, herdr.CapTabClose,
-	herdr.CapPaneSplit, herdr.CapPaneRun, herdr.CapPaneRead, herdr.CapPaneList, herdr.CapPaneClose,
-	herdr.CapAgentStart, herdr.CapAgentGet, herdr.CapAgentList, herdr.CapPrompt,
+	herdrclient.CapTabCreate, herdrclient.CapTabList, herdrclient.CapTabClose,
+	herdrclient.CapPaneSplit, herdrclient.CapPaneRun, herdrclient.CapPaneRead, herdrclient.CapPaneList, herdrclient.CapPaneClose,
+	herdrclient.CapAgentStart, herdrclient.CapAgentGet, herdrclient.CapAgentList, herdrclient.CapPrompt,
 }
 
 // BoardHealth is the board's own report of itself, or why it gave none.

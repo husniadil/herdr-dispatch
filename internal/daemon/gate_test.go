@@ -10,7 +10,7 @@ import (
 
 	"github.com/husniadil/herdr-dispatch/internal/codes"
 	"github.com/husniadil/herdr-dispatch/internal/fake"
-	"github.com/husniadil/herdr-dispatch/internal/herdr"
+	"github.com/husniadil/herdr-dispatch/internal/herdrclient"
 	"github.com/husniadil/herdr-dispatch/internal/protocol"
 	"github.com/husniadil/herdr-dispatch/internal/store"
 	"github.com/husniadil/herdr-dispatch/internal/verbs"
@@ -331,7 +331,7 @@ func TestDoctorReportsTheHerdrSchemaItSaw(t *testing.T) {
 	lean, leanFake := newDaemon(t)
 	leanFake.Write(t, fake.HerdrSchemaFile, `{"protocol":1,"requests":["pane.list"]}`)
 	rep, _ = lean.doctor(context.Background())
-	if !contains(rep.Herdr.Missing, herdr.CapTabCreate) {
+	if !contains(rep.Herdr.Missing, herdrclient.CapTabCreate) {
 		t.Errorf("doctor does not name the missing capability: %+v", rep.Herdr)
 	}
 }

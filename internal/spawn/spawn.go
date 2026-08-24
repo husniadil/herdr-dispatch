@@ -34,7 +34,7 @@ import (
 	"time"
 
 	"github.com/husniadil/herdr-dispatch/internal/config"
-	"github.com/husniadil/herdr-dispatch/internal/herdr"
+	"github.com/husniadil/herdr-dispatch/internal/herdrclient"
 	"github.com/husniadil/herdr-dispatch/internal/proxy"
 )
 
@@ -383,7 +383,7 @@ func (e *KeepPaneError) Unwrap() error { return e.Err }
 
 // Pipeline holds the adapters and the bounds of every wait it makes.
 type Pipeline struct {
-	Herdr *herdr.Client
+	Herdr *herdrclient.Client
 	Proxy *proxy.Client
 
 	// SettingsDir is where a codex spawn writes its settings file; empty
@@ -482,7 +482,7 @@ func (r Request) label() string {
 //
 // It is never the pane the worker is split off — this daemon has only its own
 // pane to split from, wherever the task came from.
-func (p *Pipeline) desk(panes []herdr.Agent, req Request) string {
+func (p *Pipeline) desk(panes []herdrclient.Agent, req Request) string {
 	if req.OriginPane != "" {
 		return req.OriginPane
 	}
@@ -505,7 +505,7 @@ func (p *Pipeline) desk(panes []herdr.Agent, req Request) string {
 // compared. Task 40 puts every worker in a worktree of its task's project, so
 // without that bound the first worker for a project would become the desk and
 // every later report for it would be delivered to a worker.
-func (p *Pipeline) inProject(panes []herdr.Agent, project string) string {
+func (p *Pipeline) inProject(panes []herdrclient.Agent, project string) string {
 	if project == "" {
 		return ""
 	}
@@ -651,7 +651,7 @@ func (p *Pipeline) place(ctx context.Context, req Request) (string, error) {
 // operator made is never a candidate, and neither is a tab this dispatcher
 // opened for a DIFFERENT task: the label is the operator's signpost to the
 // work, and a tab holding two tasks names only one of them.
-func (p *Pipeline) roomInOwnTab(ctx context.Context, panes []herdr.Agent, ws, label string) (tab string, held []string) {
+func (p *Pipeline) roomInOwnTab(ctx context.Context, panes []herdrclient.Agent, ws, label string) (tab string, held []string) {
 	tabs, err := p.Herdr.Tabs(ctx)
 	if err != nil {
 		return "", nil
@@ -701,7 +701,7 @@ func (p *Pipeline) logf(format string, args ...any) {
 // failure here — a desk Herdr does not list, a pane list that could not be
 // read, a daemon whose own pane is not listed either — falls back one step at
 // a time and ends at the empty string, which lets Herdr choose.
-func workspaceOf(panes []herdr.Agent, desk, base string) string {
+func workspaceOf(panes []herdrclient.Agent, desk, base string) string {
 	at := make(map[string]string, len(panes))
 	for _, pane := range panes {
 		at[pane.PaneID] = pane.WorkspaceID
@@ -885,7 +885,7 @@ func (p *Pipeline) build(ctx context.Context, req Request, pane, settingsDoc str
 		}
 	}
 
-	err := p.startWhenShellIsFree(ctx, herdr.StartRequest{
+	err := p.startWhenShellIsFree(ctx, herdrclient.StartRequest{
 		Name:      req.Name,
 		Kind:      Kind,
 		Pane:      pane,
@@ -920,7 +920,7 @@ func (p *Pipeline) build(ctx context.Context, req Request, pane, settingsDoc str
 // in the pane's shell, and `pane run` returns as soon as the line is typed,
 // so the eval is still running when the start would otherwise arrive. A pane
 // whose shell is already free costs one attempt and no sleeping.
-func (p *Pipeline) startWhenShellIsFree(ctx context.Context, req herdr.StartRequest) error {
+func (p *Pipeline) startWhenShellIsFree(ctx context.Context, req herdrclient.StartRequest) error {
 	var err error
 	for i, n := 0, attempts(p.shellCeiling(), p.Poll); i < n; i++ {
 		if _, err = p.Herdr.AgentStart(ctx, req); !paneBusy(err) {
@@ -981,7 +981,7 @@ func (p *Pipeline) confirmGoal(ctx context.Context, pane string) error {
 			}
 		}
 		if a, err := p.Herdr.AgentGet(ctx, pane); err == nil {
-			if a.Status == herdr.StatusWorking {
+			if a.Status == herdrclient.StatusWorking {
 				return nil
 			}
 			status = a.Status
@@ -994,7 +994,7 @@ func (p *Pipeline) confirmGoal(ctx context.Context, pane string) error {
 				"the pane is kept because a registered goal means a worker already at work",
 			pane, p.confirmCeiling(), readErr)}
 	}
-	if status != herdr.StatusIdle {
+	if status != herdrclient.StatusIdle {
 		return &KeepPaneError{Pane: pane, Err: fmt.Errorf(
 			"the goal has not registered in pane %s within %s and herdr calls the worker %q, "+
 				"so it is still coming up rather than done with the question; the pane is kept "+
@@ -1009,7 +1009,7 @@ func (p *Pipeline) confirmGoal(ctx context.Context, pane string) error {
 // statusOrUnknown names what herdr said, including when it never answered.
 func statusOrUnknown(status string) string {
 	if status == "" {
-		return herdr.StatusUnknown
+		return herdrclient.StatusUnknown
 	}
 	return status
 }
@@ -1078,12 +1078,12 @@ func tail(text string) string {
 // paneBusy reports whether herdr refused a start because the pane's shell was
 // still occupied — the one refusal worth asking again about.
 func paneBusy(err error) bool {
-	var herr *herdr.Error
+	var herr *herdrclient.Error
 	return errors.As(err, &herr) && herr.Code == PaneBusyCode
 }
 
 func notReady(err error) bool {
-	var herr *herdr.Error
+	var herr *herdrclient.Error
 	if !errors.As(err, &herr) {
 		return false
 	}
