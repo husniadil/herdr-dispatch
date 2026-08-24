@@ -119,20 +119,20 @@ const SettingsFileMode = 0o600
 // roughly 1.4k, both with the condition cut mid-word and the command's own
 // start typed over what followed, the pane showing
 //
-//	htask task submit claude --settings '{"disabl
+//	htask submit claude --settings '{"disabl
 //
 // while throwaway probes typed into a bare shell stayed clean to a megabyte.
 // The fix is to stop typing long lines, not to trim the condition harder.
 //
 // So the pointer carries only what a worker cannot get anywhere else: how to
 // take the task, where to read what it asks for, and the end state. The
-// criteria stay on the board, where `htask task get` reads them whole and no
+// criteria stay on the board, where `htask get` reads them whole and no
 // shell ever types them, and the end state is named so /goal can still judge
 // the transcript and finish.
 func PointerGoal(seq int) string {
-	return fmt.Sprintf("task %d is submitted for review: claim it with htask task claim %d, "+
-		"read its full criteria with htask task get %d, do the work, then run "+
-		"htask task submit %d with a report and evidence. "+
+	return fmt.Sprintf("task %d is submitted for review: claim it with htask claim %d, "+
+		"read its full criteria with htask get %d, do the work, then run "+
+		"htask submit %d with a report and evidence. "+
 		"Reach the dispatcher at $"+DispatcherPaneVar+".", seq, seq, seq, seq)
 }
 
@@ -156,7 +156,7 @@ func PointerGoal(seq int) string {
 //
 // It names WHERE the findings go, and that is not decoration either. Asking
 // for a report and naming no route is how a lane built to catch undelivered
-// claims makes one of its own: htask refuses `task submit` on a row that is
+// claims makes one of its own: htask refuses `htask submit` on a row that is
 // not doing, so a worker whose task is in review cannot amend the report it
 // already sent, and findings with nowhere to go die in the pane while the
 // board stays green.

@@ -85,9 +85,9 @@ func TestDispatchRefusesATaskTheBoardWillNotHandOut(t *testing.T) {
 func TestDispatchRefusesATaskTheBoardDoesNotHave(t *testing.T) {
 	l, f := newLoop(t)
 	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
-	f.Bin(t, "htask", `case "$1 $2" in
-"task list") cat "$HDIS_FAKE_DIR/ready.json" ;;
-"task get") echo '{"error":{"code":"NOT_FOUND","message":"no task 999 in /src/p"}}'; exit 3 ;;
+	f.Bin(t, "htask", `case "$1" in
+"list") cat "$HDIS_FAKE_DIR/ready.json" ;;
+"get") echo '{"error":{"code":"NOT_FOUND","message":"no task 999 in /src/p"}}'; exit 3 ;;
 *) echo '{}' ;;
 esac`)
 
@@ -166,12 +166,12 @@ func TestRetryingAFailedDispatchCannotProduceTwoReservationsOrTwoWorkers(t *test
 	}
 }
 
-// A door that refuses `task get` for a reason of its own, the way a binary
+// A door that refuses `htask get` for a reason of its own, the way a binary
 // built against a different contract does: nothing on stdout to parse, the
 // complaint on stderr, a non-zero exit. The ready list still answers.
-const brokenGet = `case "$1 $2" in
-"task list") cat "$HDIS_FAKE_DIR/ready.json" ;;
-"task get") echo 'unknown flag --as' >&2; exit 2 ;;
+const brokenGet = `case "$1" in
+"list") cat "$HDIS_FAKE_DIR/ready.json" ;;
+"get") echo 'unknown flag --as' >&2; exit 2 ;;
 *) echo '{}' ;;
 esac`
 
@@ -302,7 +302,7 @@ func TestDispatchAndStatusAreSafeAlongsideATick(t *testing.T) {
 // A task id belongs to the board, not to a project. Dispatching one that is
 // ready on another project's board reserves and spawns like any other, and
 // the by-id lookup that validates it looks across every project, exactly as
-// `task list --ready` already does.
+// `htask list --ready` already does.
 func TestDispatchResolvesATaskFiledOnAnotherProjectsBoard(t *testing.T) {
 	l, f := newLoop(t)
 	f.Write(t, "ready.json", `{"tasks":[{"id":"01ZZZ","seq":42,"project":"/src/other","title":"elsewhere","status":"todo"}],"count":1}`)
@@ -326,12 +326,12 @@ func TestDispatchResolvesATaskFiledOnAnotherProjectsBoard(t *testing.T) {
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("second tick: %v", err)
 	}
-	for _, c := range calls(t, f, "task get") {
+	for _, c := range calls(t, f, "get") {
 		if !strings.Contains(c, "--all-projects") {
 			t.Fatalf("a by-id lookup was scoped to one project: %q", c)
 		}
 	}
-	if len(calls(t, f, "task get")) == 0 {
+	if len(calls(t, f, "get")) == 0 {
 		t.Fatal("no by-id lookup was recorded")
 	}
 }
@@ -342,9 +342,9 @@ func TestDispatchResolvesATaskFiledOnAnotherProjectsBoard(t *testing.T) {
 func TestDispatchOfAnIdOnNoBoardDoesNotBlameOneProject(t *testing.T) {
 	l, f := newLoop(t)
 	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
-	f.Bin(t, "htask", `case "$1 $2" in
-"task list") cat "$HDIS_FAKE_DIR/ready.json" ;;
-"task get") echo '{"error":{"code":"NOT_FOUND","message":"no task 01ZZZ"}}'; exit 3 ;;
+	f.Bin(t, "htask", `case "$1" in
+"list") cat "$HDIS_FAKE_DIR/ready.json" ;;
+"get") echo '{"error":{"code":"NOT_FOUND","message":"no task 01ZZZ"}}'; exit 3 ;;
 *) echo '{}' ;;
 esac`)
 
@@ -407,7 +407,7 @@ func TestDispatchOfANumberTheBoardIsNotOffering(t *testing.T) {
 	if got, want := codes.ReasonOf(err), codes.NotReady; got != want {
 		t.Fatalf("dispatch of a number not on offer = %v (%q), want %q", err, got, want)
 	}
-	if got := calls(t, f, "task get"); len(got) != 0 {
+	if got := calls(t, f, "get"); len(got) != 0 {
 		t.Fatalf("the board was asked for a bare number across projects: %v", got)
 	}
 }

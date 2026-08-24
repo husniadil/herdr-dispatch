@@ -131,16 +131,16 @@ func (c *Client) Doctor(ctx context.Context) (Doctor, error) {
 // everything it knows by id stays board-agnostic.
 func (c *Client) GetIn(ctx context.Context, ref, project string) (Task, error) {
 	if project == "" {
-		return Task{}, fmt.Errorf("htask task get %s: nothing names the project the number is unique in", ref)
+		return Task{}, fmt.Errorf("htask get %s: nothing names the project the number is unique in", ref)
 	}
 	var res struct {
 		Task Task `json:"task"`
 	}
-	if err := c.json(ctx, &res, "task", "get", ref, "--project", project, "--json"); err != nil {
+	if err := c.json(ctx, &res, "get", ref, "--project", project, "--json"); err != nil {
 		return Task{}, err
 	}
 	if res.Task.ID == "" {
-		return Task{}, fmt.Errorf("htask task get %s --project %s: no task in the response", ref, project)
+		return Task{}, fmt.Errorf("htask get %s --project %s: no task in the response", ref, project)
 	}
 	return res.Task, nil
 }
@@ -151,7 +151,7 @@ func (c *Client) Ready(ctx context.Context) ([]Task, error) {
 	var page struct {
 		Tasks []Task `json:"tasks"`
 	}
-	if err := c.json(ctx, &page, "task", "list", "--ready", "--all-projects", "--json"); err != nil {
+	if err := c.json(ctx, &page, "list", "--ready", "--all-projects", "--json"); err != nil {
 		return nil, err
 	}
 	return page.Tasks, nil
@@ -159,19 +159,19 @@ func (c *Client) Ready(ctx context.Context) ([]Task, error) {
 
 // Get reads one task by its id or its number, across every project. A task
 // id belongs to the board, not to a repository, and the dispatcher is not
-// scoped to one: the lookup looks exactly as wide as `task list --ready`
+// scoped to one: the lookup looks exactly as wide as `htask list --ready`
 // already does, or a task filed on another project's board reads as a task
-// that does not exist. `task get --json` answers with the row inside an
-// envelope, where `task list` and `doctor` answer flat.
+// that does not exist. `htask get --json` answers with the row inside an
+// envelope, where `htask list` and `doctor` answer flat.
 func (c *Client) Get(ctx context.Context, id string) (Task, error) {
 	var res struct {
 		Task Task `json:"task"`
 	}
-	if err := c.json(ctx, &res, "task", "get", id, "--all-projects", "--json"); err != nil {
+	if err := c.json(ctx, &res, "get", id, "--all-projects", "--json"); err != nil {
 		return Task{}, err
 	}
 	if res.Task.ID == "" {
-		return Task{}, fmt.Errorf("htask task get %s: no task in the response", id)
+		return Task{}, fmt.Errorf("htask get %s: no task in the response", id)
 	}
 	return res.Task, nil
 }
@@ -185,7 +185,7 @@ func (c *Client) Held(ctx context.Context) ([]Task, error) {
 	var page struct {
 		Tasks []Task `json:"tasks"`
 	}
-	if err := c.json(ctx, &page, "task", "list", "--mine", "--all-projects", "--json"); err != nil {
+	if err := c.json(ctx, &page, "list", "--mine", "--all-projects", "--json"); err != nil {
 		return nil, err
 	}
 	return page.Tasks, nil
@@ -197,7 +197,7 @@ func (c *Client) Held(ctx context.Context) ([]Task, error) {
 // this daemon's own principal is holding and nothing else. Pane-gone sweeps,
 // the lease timer and the board's startup reconciliation stay htask's.
 func (c *Client) Release(ctx context.Context, id, note string) error {
-	_, err := c.run(ctx, "task", "release", id, "--all-projects", "--note", note, "--json")
+	_, err := c.run(ctx, "release", id, "--all-projects", "--note", note, "--json")
 	return err
 }
 

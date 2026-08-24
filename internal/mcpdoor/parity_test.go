@@ -48,9 +48,9 @@ var pinnedTools = []string{
 func inProcessDaemon(t *testing.T) (*daemon.Daemon, Caller) {
 	t.Helper()
 	f := testenv.New(t)
-	f.Bin(t, "htask", `case "$1 $2" in
-"task list") echo '{"tasks":[{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"todo"}],"count":1}' ;;
-"task get") echo '{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"todo"}}' ;;
+	f.Bin(t, "htask", `case "$1" in
+"list") echo '{"tasks":[{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"todo"}],"count":1}' ;;
+"get") echo '{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"todo"}}' ;;
 *) echo '{"version":"0.4.0","contract":"0.3","binary":"/bin/htask","socket_live":true,"herdr_reachable":true}' ;;
 esac`)
 	f.Bin(t, "herdr", `echo '{"id":"x","result":{"type":"pane_list","panes":[]}}'`)

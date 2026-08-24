@@ -707,8 +707,8 @@ whole of it.
    retrying on, since the `eval` above is still running when the start would
    otherwise arrive. It carries the profile's argv and a short `/goal`
    condition after the separator. That condition is a **pointer** hdis
-   composes — claim the task with `htask task claim <n>`, read its full
-   criteria with `htask task get <n>`, and finish by submitting it for review
+   composes — claim the task with `htask claim <n>`, read its full
+   criteria with `htask get <n>`, and finish by submitting it for review
    with a report and evidence — and never the board's rendered goal document.
    The line is
    TYPED into the pane, character by character, and a long one intermittently
@@ -720,7 +720,7 @@ whole of it.
    path rather than inline, and what is left of the typed line is held under
    a budget (`spawn.TypedLineBudget`) that a named test measures.
 
-   `htask task goal <id> --one-line` is no longer part of this pipeline. It
+   `htask goal <id> --one-line` is no longer part of this pipeline. It
    remains the operator's paste-ready form for arming `/goal` in a pane by
    hand, where nothing is typed character by character.
 5. If Claude Code's trust-folder dialog appears, exactly one Enter — and only

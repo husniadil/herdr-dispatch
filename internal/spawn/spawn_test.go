@@ -573,9 +573,9 @@ func agentArgsOf(t *testing.T, h *harness) []string {
 func TestTheSpawnConditionIsAShortPointerToTheBoard(t *testing.T) {
 	got := PointerGoal(14)
 	for _, want := range []string{
-		"htask task claim 14",
-		"htask task get 14",
-		"htask task submit 14",
+		"htask claim 14",
+		"htask get 14",
+		"htask submit 14",
 		"review",
 	} {
 		if !strings.Contains(got, want) {

@@ -271,7 +271,7 @@ func TestASubmissionEarnsASelfReviewShotInTheWorkersOwnPane(t *testing.T) {
 		t.Fatalf("the binding does not remember its shot: %+v", w)
 	}
 	// Asking for the check is not judging it.
-	for _, verb := range []string{"task approve", "task reject"} {
+	for _, verb := range []string{"approve", "reject"} {
 		if got := calls(t, f, verb); len(got) != 0 {
 			t.Fatalf("the dispatcher ran %q: %v", verb, got)
 		}
@@ -496,7 +496,7 @@ func TestWithoutAWorktreeNothingIsSpawned(t *testing.T) {
 		t.Fatalf("the operator was not told why: %q", logged.String())
 	}
 	// And the board was left alone.
-	for _, verb := range []string{"task approve", "task reject"} {
+	for _, verb := range []string{"approve", "reject"} {
 		if got := calls(t, f, verb); len(got) != 0 {
 			t.Fatalf("the dispatcher ran %q: %v", verb, got)
 		}

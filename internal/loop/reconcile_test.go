@@ -16,7 +16,7 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/worktree"
 )
 
-// heldByUs makes the board answer `task list --mine` with one row, but only
+// heldByUs makes the board answer `htask list --mine` with one row, but only
 // for the principal the argv actually carries. A peer daemon's principal gets
 // an empty board, which is what `--mine` really does.
 func heldByUs(t *testing.T, f *testenv.Fake, principal string) {
@@ -26,8 +26,8 @@ func heldByUs(t *testing.T, f *testenv.Fake, principal string) {
 for a in "$@"; do
   [ "$a" = "--mine" ] && mine=yes
 done
-case "$1 $2" in
-"task list")
+case "$1" in
+"list")
   if [ "$mine" = yes ]; then
     case " $* " in
       *" --as `+principal+` "*) cat "$HDIS_FAKE_DIR/mine.json" ;;
@@ -36,8 +36,8 @@ case "$1 $2" in
   else
     cat "$HDIS_FAKE_DIR/ready.json"
   fi ;;
-"task get") cat "$HDIS_FAKE_DIR/get.json" ;;
-"task release") echo '{"task":{"id":"01AAA","seq":7,"status":"todo"}}' ;;
+"get") cat "$HDIS_FAKE_DIR/get.json" ;;
+"release") echo '{"task":{"id":"01AAA","seq":7,"status":"todo"}}' ;;
 *) echo '{}' ;;
 esac`)
 }
@@ -64,7 +64,7 @@ func TestARestartAdoptsAStaleReservationWhoseWorkerIsAlive(t *testing.T) {
 	if len(got) != 1 || got[0].TaskID != "01AAA" || got[0].Pane != "wM:p9" {
 		t.Fatalf("the live worker was not adopted: %+v", got)
 	}
-	if rel := calls(t, f, "task release"); len(rel) != 0 {
+	if rel := calls(t, f, "release"); len(rel) != 0 {
 		t.Fatalf("a live worker's task was released: %v", rel)
 	}
 	if !strings.Contains(said.String(), "01AAA") {
@@ -97,7 +97,7 @@ esac`)
 	if got := l.Bindings(); len(got) != 0 {
 		t.Fatalf("a binding was invented for a pane that is not there: %+v", got)
 	}
-	rel := calls(t, f, "task release 01AAA")
+	rel := calls(t, f, "release 01AAA")
 	if len(rel) != 1 {
 		t.Fatalf("the stale hold was not released: %v", f.Calls(t))
 	}
@@ -129,7 +129,7 @@ func TestARestartTellsItsOwnStaleReservationFromAPeers(t *testing.T) {
 			if _, err := l.Adopt(context.Background()); err != nil {
 				t.Fatalf("adopt: %v", err)
 			}
-			rel := calls(t, f, "task release")
+			rel := calls(t, f, "release")
 			if tc.wantOurs && len(rel) != 1 {
 				t.Fatalf("this daemon's own stale hold was left: %v", f.Calls(t))
 			}

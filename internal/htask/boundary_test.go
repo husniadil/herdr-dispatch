@@ -12,7 +12,7 @@ import (
 
 // The dispatcher stops at review. It spawns a verifier to READ what was
 // submitted, and the judgment stays with the operator: no code path in this
-// repo issues `task approve` or `task reject`.
+// repo issues `htask approve` or `htask reject`.
 //
 // The board adapter is the only way anything here reaches htask, so its
 // method set is the whole of what this binary can ask the board for. A review

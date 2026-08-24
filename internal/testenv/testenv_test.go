@@ -23,14 +23,14 @@ func TestAStandInRecordsItsArgvWhole(t *testing.T) {
 	f := New(t)
 	f.Bin(t, "htask", `echo hello`)
 
-	if err := exec.Command("htask", "task", "goal", "7", "--one-line", "with a space").Run(); err != nil {
+	if err := exec.Command("htask", "goal", "7", "--one-line", "with a space").Run(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	argv := f.Argv(t)
 	if len(argv) != 1 {
 		t.Fatalf("calls: %v", argv)
 	}
-	if got, want := argv[0][4], "with a space"; got != want {
+	if got, want := argv[0][3], "with a space"; got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }

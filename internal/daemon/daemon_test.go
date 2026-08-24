@@ -30,10 +30,10 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/worktree"
 )
 
-const htaskScript = `case "$1 $2" in
-"task list") cat "$HDIS_FAKE_DIR/ready.json" ;;
-"task get") cat "$HDIS_FAKE_DIR/get.json" ;;
-"doctor "*|"doctor") cat "$HDIS_FAKE_DIR/doctor.json" ;;
+const htaskScript = `case "$1" in
+"list") cat "$HDIS_FAKE_DIR/ready.json" ;;
+"get") cat "$HDIS_FAKE_DIR/get.json" ;;
+"doctor") cat "$HDIS_FAKE_DIR/doctor.json" ;;
 *) echo '{}' ;;
 esac`
 
@@ -570,7 +570,7 @@ func awaitStartupTick(t *testing.T, f *testenv.Fake) {
 	for time.Now().Before(deadline) {
 		var board, panes bool
 		for _, c := range f.Calls(t) {
-			board = board || strings.Contains(c, "task list --ready")
+			board = board || strings.Contains(c, "list --ready")
 			panes = panes || strings.Contains(c, "pane list")
 		}
 		if board && panes {
@@ -661,7 +661,7 @@ func TestStopShutsTheDaemonDownCleanly(t *testing.T) {
 		t.Errorf("stopping reached out: %q", after[before:])
 	}
 	for _, c := range after {
-		for _, write := range []string{"task claim", "task release", "task submit", "task approve", "task reject", "note "} {
+		for _, write := range []string{"claim", "release", "submit", "approve", "reject", "note "} {
 			if strings.Contains(c, write) {
 				t.Errorf("stopping wrote to the board: %q", c)
 			}
@@ -865,7 +865,7 @@ func TestAServeThatTearsDownLateLeavesTheNewStateDirAlone(t *testing.T) {
 	d, f := newDaemon(t)
 	// A tick that blocks until this test says so, which is what pins Serve
 	// short of its teardown: Serve waits for the tick before it cleans up.
-	f.Bin(t, "htask", `if [ "$1 $2" = "task list" ]; then
+	f.Bin(t, "htask", `if [ "$1" = "list" ]; then
   : > "$HDIS_FAKE_DIR/ticking"
   n=0
   while [ ! -f "$HDIS_FAKE_DIR/release" ] && [ $n -lt 400 ]; do sleep 0.05; n=$((n+1)); done

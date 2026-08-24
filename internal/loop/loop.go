@@ -1297,7 +1297,7 @@ func (l *Loop) nudge(a decide.Action) string {
 		// carry on carries on with work it believes finished, instead of
 		// reading why the review gate sent it back.
 		return fmt.Sprintf("%s came back from review: it was rejected, and the board's row carries the feedback. "+
-			"Read it with `htask task get %s`, address it, then submit again.", name, l.taskNumber(a.TaskID))
+			"Read it with `htask get %s`, address it, then submit again.", name, l.taskNumber(a.TaskID))
 	}
 	if a.Reason == decide.ReasonStalled {
 		// Two facts, and no more than the two: the dispatcher cannot see
@@ -1305,7 +1305,7 @@ func (l *Loop) nudge(a decide.Action) string {
 		return fmt.Sprintf("The board still has %s in doing and your pane is idle, with nothing back from review. "+
 			"Carry on, or release it with a note saying what is left.", name)
 	}
-	return fmt.Sprintf("Your goal is still unclaimed on the board. Run `htask task claim %s` and start on it.", l.taskNumber(a.TaskID))
+	return fmt.Sprintf("Your goal is still unclaimed on the board. Run `htask claim %s` and start on it.", l.taskNumber(a.TaskID))
 }
 
 // notify hands the task to the operator and stops there: verification and

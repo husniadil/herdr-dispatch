@@ -28,8 +28,8 @@ var clock = time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
 //
 // It used to switch on "$1 $2" alone and answer `{}` with exit 0 to anything
 // it had not heard of, which made it a machine for passing tests: a verb this
-// binary got wrong read as an empty board, and `task list --ready` and
-// `task list --mine` were the same call, so a restart reading what it holds
+// binary got wrong read as an empty board, and `htask list --ready` and
+// `htask list --mine` were the same call, so a restart reading what it holds
 // got the ready queue back. Three things fix that, and each closed a way a
 // green test could mean nothing:
 //
@@ -49,14 +49,14 @@ for a in "$@"; do
   [ "$want" = 1 ] && { asked=$a; want=""; continue; }
   [ "$a" = --project ] && want=1
 done
-case "$1 $2" in
-"task list")
+case "$1" in
+"list")
   case " $* " in
   *" --mine "*) cat "$HDIS_FAKE_DIR/mine.json" ;;
   *" --ready "*) cat "$HDIS_FAKE_DIR/ready.json" ;;
-  *) echo '{"error":{"code":"USAGE","message":"this fake serves task list --ready and task list --mine"}}' >&2; exit 2 ;;
+  *) echo '{"error":{"code":"USAGE","message":"this fake serves list --ready and list --mine"}}' >&2; exit 2 ;;
   esac ;;
-"task get")
+"get")
   if [ -n "$asked" ]; then
     if [ -n "$project" ] && [ "$asked" != "$project" ]; then
       echo '{"error":{"code":"NOT_FOUND","message":"no task '"$3"' on '"$asked"'"}}'
@@ -73,8 +73,8 @@ case "$1 $2" in
     esac ;;
   *) cat "$HDIS_FAKE_DIR/get.json" ;;
   esac ;;
-"task goal") cat "$HDIS_FAKE_DIR/goal.txt" ;;
-"task release") echo '{"released":true}' ;;
+"goal") cat "$HDIS_FAKE_DIR/goal.txt" ;;
+"release") echo '{"released":true}' ;;
 "doctor "*|"doctor") cat "$HDIS_FAKE_DIR/doctor.json" ;;
 *) echo "htask: this fake board does not serve '$1 $2'" >&2; exit 1 ;;
 esac`
@@ -208,13 +208,13 @@ func TestATickTakesAReadyTaskToADeliveredGoal(t *testing.T) {
 		t.Fatalf("binding: %+v", b)
 	}
 
-	if got := calls(t, f, "task list --ready --all-projects"); len(got) != 1 {
+	if got := calls(t, f, "list --ready --all-projects"); len(got) != 1 {
 		t.Fatalf("ready was asked for %d times", len(got))
 	}
 	// The board's own goal document never reaches the typed line: the
 	// condition is a pointer hdis composes, and the criteria stay on the
-	// board for the worker to read with `task get`.
-	if got := calls(t, f, "task goal"); len(got) != 0 {
+	// board for the worker to read with `htask get`.
+	if got := calls(t, f, "goal"); len(got) != 0 {
 		t.Fatalf("the board's goal document was rendered for the typed line: %v", got)
 	}
 	start := calls(t, f, "agent start")
@@ -227,7 +227,7 @@ func TestATickTakesAReadyTaskToADeliveredGoal(t *testing.T) {
 		}
 	}
 	// The worker claims for itself; the dispatcher never claims for it.
-	if got := calls(t, f, "task claim"); len(got) != 0 {
+	if got := calls(t, f, "claim"); len(got) != 0 {
 		t.Fatalf("the dispatcher claimed on the worker's behalf: %v", got)
 	}
 }
@@ -271,7 +271,7 @@ func TestReviewIsAnnouncedOnceAndNeverActedOn(t *testing.T) {
 	if got := calls(t, f, "notification show"); len(got) != 1 {
 		t.Fatalf("announced review %d times: %v", len(got), got)
 	}
-	for _, verb := range []string{"task approve", "task reject", "note add"} {
+	for _, verb := range []string{"approve", "reject", "note add"} {
 		if got := calls(t, f, verb); len(got) != 0 {
 			t.Fatalf("the dispatcher ran a review verb: %v", got)
 		}
@@ -343,7 +343,7 @@ func TestAGonePaneOnlyDropsItsBinding(t *testing.T) {
 	if len(l.bindings) != 0 {
 		t.Fatalf("bindings: %+v", l.bindings)
 	}
-	for _, verb := range []string{"task release", "sweep", "pane close"} {
+	for _, verb := range []string{"release", "sweep", "pane close"} {
 		if got := calls(t, f, verb); len(got) != 0 {
 			t.Fatalf("a gone pane triggered %q: %v", verb, got)
 		}
@@ -636,14 +636,14 @@ func TestATickReadsABoundTaskFiledOnAnotherProjectsBoard(t *testing.T) {
 	l, f := newLoop(t)
 	f.Write(t, "ready.json", `{"tasks":[{"id":"01ZZZ","seq":42,"project":"/src/other","title":"elsewhere","status":"todo"}],"count":1}`)
 	f.Write(t, "get.json", `{"task":{"id":"01ZZZ","seq":42,"project":"/src/other","title":"elsewhere","status":"todo"},"ready":true,"dependents":[]}`)
-	f.Bin(t, "htask", `case "$1 $2" in
-"task list") cat "$HDIS_FAKE_DIR/ready.json" ;;
-"task get")
+	f.Bin(t, "htask", `case "$1" in
+"list") cat "$HDIS_FAKE_DIR/ready.json" ;;
+"get")
   case " $* " in
     *" --all-projects "*) cat "$HDIS_FAKE_DIR/get.json" ;;
     *) echo '{"error":{"code":"NOT_FOUND","message":"no task in /src/p"}}'; exit 3 ;;
   esac ;;
-"task goal") cat "$HDIS_FAKE_DIR/goal.txt" ;;
+"goal") cat "$HDIS_FAKE_DIR/goal.txt" ;;
 *) echo '{}' ;;
 esac`)
 
@@ -776,7 +776,7 @@ func TestARejectedWorkerIsToldItsSubmissionCameBackAndWhereToReadWhy(t *testing.
 			t.Fatalf("the prompt does not name %q: %q", want, got)
 		}
 	}
-	if !strings.Contains(got, "htask task get 7") {
+	if !strings.Contains(got, "htask get 7") {
 		t.Fatalf("the prompt does not say where to read the feedback: %q", got)
 	}
 }

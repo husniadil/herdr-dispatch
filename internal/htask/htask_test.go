@@ -57,7 +57,7 @@ EOF`)
 	if len(tasks) != 2 || tasks[0].ID != "01AAA" || tasks[1].Seq != 9 || tasks[0].Project != "/src/a" {
 		t.Fatalf("got %+v", tasks)
 	}
-	want := "task list --ready --all-projects --json --as plugin:hdis"
+	want := "list --ready --all-projects --json --as plugin:hdis"
 	if got := f.Calls(t)[0]; got != want {
 		t.Fatalf("argv: got %q, want %q", got, want)
 	}
@@ -65,7 +65,7 @@ EOF`)
 
 // A claim names a principal; the pane inside it is what a binding is keyed on.
 //
-// `task get --json` wraps the row in an envelope, unlike `task list` and
+// `htask get --json` wraps the row in an envelope, unlike `htask list` and
 // `doctor`, which answer flat. Reading it flat silently yields a zero row,
 // which is worse than an error: the dispatcher holds a binding whose task it
 // believes it knows nothing about, so review is never announced. The body
@@ -83,7 +83,7 @@ EOF`)
 	if task.Status != "doing" || task.Pane() != "wM:p3" {
 		t.Fatalf("got %+v pane %q", task, task.Pane())
 	}
-	if got, want := f.Calls(t)[0], "task get 01AAA --all-projects --json --as plugin:hdis"; got != want {
+	if got, want := f.Calls(t)[0], "get 01AAA --all-projects --json --as plugin:hdis"; got != want {
 		t.Fatalf("argv: got %q, want %q", got, want)
 	}
 	if (Task{}).Pane() != "" {
@@ -144,7 +144,7 @@ func TestTheBoardsErrorEnvelopeIsCarriedAsARefusal(t *testing.T) {
 }
 
 // A task id is unique to the board, not to a project, and the dispatcher is
-// not scoped to one repository: `task list --ready` already looks across
+// not scoped to one repository: `htask list --ready` already looks across
 // every project, and the by-id lookup that validates a dispatch has to look
 // exactly as wide, or a task filed on another project's board reads as a
 // task that does not exist.
@@ -157,7 +157,7 @@ EOF`)
 	if _, err := c.Get(context.Background(), "01AAA"); err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got, want := f.Calls(t)[0], "task get 01AAA --all-projects --json --as plugin:hdis"; got != want {
+	if got, want := f.Calls(t)[0], "get 01AAA --all-projects --json --as plugin:hdis"; got != want {
 		t.Fatalf("argv: got %q, want %q", got, want)
 	}
 }
@@ -191,7 +191,7 @@ EOF`)
 	if len(held) != 1 || held[0].ID != "01AAA" {
 		t.Fatalf("got %+v", held)
 	}
-	want := "task list --mine --all-projects --json --as plugin:hdis@wM:p1"
+	want := "list --mine --all-projects --json --as plugin:hdis@wM:p1"
 	if got := f.Calls(t)[0]; got != want {
 		t.Fatalf("argv: got %q, want %q", got, want)
 	}
@@ -207,7 +207,7 @@ func TestReleaseHandsBackAHoldWithItsReason(t *testing.T) {
 	if err := c.Release(context.Background(), "01AAA", "no worker was ever brought up"); err != nil {
 		t.Fatalf("release: %v", err)
 	}
-	want := "task release 01AAA --all-projects --note no worker was ever brought up --json --as plugin:hdis@wM:p1"
+	want := "release 01AAA --all-projects --note no worker was ever brought up --json --as plugin:hdis@wM:p1"
 	if got := f.Calls(t)[0]; got != want {
 		t.Fatalf("argv: got %q, want %q", got, want)
 	}
@@ -233,7 +233,7 @@ EOF`)
 	if got, want := task.PaneID, "wZ:p2"; got != want {
 		t.Fatalf("pane of origin is %q, want %q", got, want)
 	}
-	if got, want := f.Calls(t)[0], "task get 01AAA --all-projects --json --as plugin:hdis"; got != want {
+	if got, want := f.Calls(t)[0], "get 01AAA --all-projects --json --as plugin:hdis"; got != want {
 		t.Fatalf("argv: got %q, want %q", got, want)
 	}
 }
@@ -279,7 +279,7 @@ EOF2`)
 	if task.ID != "01AAA" || task.Seq != 7 {
 		t.Fatalf("got %+v", task)
 	}
-	if got, want := f.Calls(t)[0], "task get 7 --project /src/p --json --as plugin:hdis"; got != want {
+	if got, want := f.Calls(t)[0], "get 7 --project /src/p --json --as plugin:hdis"; got != want {
 		t.Fatalf("argv: got %q, want %q", got, want)
 	}
 }
@@ -353,7 +353,7 @@ echo '{"tasks":[{"id":"01AAA","seq":7,"project":"/src/a","title":"first","status
 	if len(tasks) != 1 || tasks[0].ID != "01AAA" {
 		t.Fatalf("got %+v", tasks)
 	}
-	want := "task list --ready --all-projects --json --as plugin:hdis@wM:p1"
+	want := "list --ready --all-projects --json --as plugin:hdis@wM:p1"
 	if got := f.Calls(t)[0]; got != want {
 		t.Fatalf("argv: got %q, want %q", got, want)
 	}

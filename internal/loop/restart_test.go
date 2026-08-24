@@ -177,9 +177,9 @@ func TestARestartHoldsABindingWhoseRowCannotBeRead(t *testing.T) {
 		t.Fatalf("tick: %v", err)
 	}
 	f.Write(t, "panes.json", panesWith("working"))
-	f.Bin(t, "htask", `case "$1 $2" in
-"task get") echo "htask: the daemon is not answering" >&2; exit 1 ;;
-"task list") cat "$HDIS_FAKE_DIR/ready.json" ;;
+	f.Bin(t, "htask", `case "$1" in
+"get") echo "htask: the daemon is not answering" >&2; exit 1 ;;
+"list") cat "$HDIS_FAKE_DIR/ready.json" ;;
 *) echo '{}' ;;
 esac`)
 
@@ -389,7 +389,7 @@ func TestARestartAdoptsALivePaneThatAlreadyClaimedItsTask(t *testing.T) {
 	if got := calls(t, f, "tab close"); len(got) != 0 {
 		t.Fatalf("a live worker's pane was closed: %v", got)
 	}
-	if got := calls(t, f, "task release"); len(got) != 0 {
+	if got := calls(t, f, "release"); len(got) != 0 {
 		t.Fatalf("a live worker's task was released: %v", got)
 	}
 	if !strings.Contains(said.String(), "wM:p9") {
@@ -427,7 +427,7 @@ func TestARestartTouchesNothingThatIsNotItsOwn(t *testing.T) {
 		if _, err := l.Adopt(context.Background()); err != nil {
 			t.Fatalf("adopt: %v", err)
 		}
-		if got := calls(t, f, "task release"); len(got) != 0 {
+		if got := calls(t, f, "release"); len(got) != 0 {
 			t.Fatalf("a hold belonging to another daemon was released: %v", got)
 		}
 	})
@@ -488,11 +488,11 @@ func TestARestartReadsTheRowOfAPaneNoBindingNames(t *testing.T) {
 	if strings.Contains(said.String(), "left as it is") {
 		t.Fatalf("the pane the rule exists for was left alone: %q", said.String())
 	}
-	got := calls(t, f, "task get")
+	got := calls(t, f, "get")
 	if len(got) != 1 {
 		t.Fatalf("board reads: %v", got)
 	}
-	if want := "task get 7 --project /src/p --json"; !strings.HasPrefix(got[0], want) {
+	if want := "get 7 --project /src/p --json"; !strings.HasPrefix(got[0], want) {
 		t.Fatalf("the row was asked for as %q, want it scoped to the project the checkout belongs to (%q)", got[0], want)
 	}
 }
@@ -554,7 +554,7 @@ func TestARestartLeavesAPaneWhoseProjectCannotBeRead(t *testing.T) {
 	if !strings.Contains(said.String(), "wM:p9") {
 		t.Fatalf("the operator was not told which pane was left: %q", said.String())
 	}
-	if got := calls(t, f, "task get"); len(got) != 0 {
+	if got := calls(t, f, "get"); len(got) != 0 {
 		t.Fatalf("the board was asked about a task nothing could name: %v", got)
 	}
 }
