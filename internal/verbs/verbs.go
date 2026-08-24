@@ -221,3 +221,14 @@ func ByCLI(path []string) (Verb, bool) {
 	}
 	return Verb{}, false
 }
+
+// Help is the description a caller reads on either door: the one-line summary
+// and the paragraph a caller who cannot ask a follow-up question needs. The
+// MCP tool description and `hdis <verb> --help` are the same words, because a
+// verb explained two ways is a verb that drifts.
+func (v Verb) Help() string {
+	if v.Long == "" {
+		return v.Short
+	}
+	return v.Short + ". " + v.Long
+}

@@ -178,6 +178,10 @@ debugging read, not a source of board facts: task state, claims and leases are
 htask's, and `htask` is where you read them.
 
 `hdis --help` lists the same eight verbs the door serves, for a caller with a
-shell. Add `--json` to
+shell, and `hdis <verb> --help` carries the same description this tool list
+does. Add `--json` to
 any verb for one machine-readable document, and those bytes are the same
-document the MCP tool hands its caller.
+document the MCP tool hands its caller. Every verb also takes `--project` to
+act on one board rather than every board, and `--as cron:<id>` /
+`--as trigger:<id>` / `--as plugin:<id>` to act as a declared principal; your
+own principal is the pane you run in and is never something you declare.

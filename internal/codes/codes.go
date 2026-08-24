@@ -79,7 +79,7 @@ const (
 	// AtCapacity is MaxWorkers already live.
 	AtCapacity Reason = "AT_CAPACITY"
 	// NoBasePane is a daemon with no pane to split a worker off, which is
-	// every daemon started outside a Herdr pane and given no -pane.
+	// every daemon started outside a Herdr pane and given no --pane.
 	NoBasePane Reason = "NO_BASE_PANE"
 	// AlreadyDispatched is a task this daemon is already driving.
 	AlreadyDispatched Reason = "ALREADY_DISPATCHED"
@@ -174,4 +174,13 @@ func ReasonOf(err error) Reason {
 		}
 	}
 	return ""
+}
+
+// Named reports whether err carries a code of this binary's own. Everything
+// that fails inside here does; an error that does not came from a library,
+// and Of would call it Unavailable, which for a caller's own typo is the
+// wrong word and the wrong exit status.
+func Named(err error) bool {
+	var named *Error
+	return errors.As(err, &named)
 }

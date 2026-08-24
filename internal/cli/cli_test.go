@@ -180,17 +180,29 @@ func TestDoctorSaysWhyADispatchWouldRefuse(t *testing.T) {
 	}
 }
 
-func TestUsageListsEveryVerbInTheTable(t *testing.T) {
-	usage := Usage()
-	for _, v := range verbs.All {
-		if !strings.Contains(usage, "hdis "+strings.Join(v.CLI, " ")) {
-			t.Errorf("usage does not list %q", v.Name)
-		}
+// Every verb the registry carries is reachable and listed. The help is
+// cobra's now rather than a block written out by hand, so what is checked is
+// that each verb is THERE: a group's members are listed under the group, and
+// `hdis <verb> --help` carries the arguments the old single block had to
+// spell out in one line.
+func TestTheHelpListsEveryVerbInTheTable(t *testing.T) {
+	root := Root(nil)
+	help, err := execute(root, []string{"--help"})
+	if err != nil {
+		t.Fatalf("hdis --help: %v", err)
 	}
-	for _, want := range []string{"hdis daemon", "hdis mcp", "hdis version", "<task>"} {
-		if !strings.Contains(usage, want) {
-			t.Errorf("usage does not mention %q", want)
+	for _, v := range verbs.All {
+		if !strings.Contains(help, v.CLI[0]) {
+			t.Errorf("the help does not list %q", v.Name)
 		}
+		find(t, Root(nil), v.CLI)
+	}
+	out, err := execute(Root(nil), []string{"dispatch", "--help"})
+	if err != nil {
+		t.Fatalf("hdis dispatch --help: %v", err)
+	}
+	if !strings.Contains(out, "<task>") {
+		t.Errorf("dispatch's help does not name its positional:\n%s", out)
 	}
 }
 
@@ -204,8 +216,12 @@ func TestStopsHelpStatesTheNoDaemonOutcome(t *testing.T) {
 	if !strings.Contains(v.Long, string(codes.NotRunning)) {
 		t.Errorf("stop's help does not name %s: %q", codes.NotRunning, v.Long)
 	}
-	if !strings.Contains(Usage(), "hdis stop") {
-		t.Errorf("usage does not list stop:\n%s", Usage())
+	help, err := execute(Root(nil), []string{"--help"})
+	if err != nil {
+		t.Fatalf("hdis --help: %v", err)
+	}
+	if !strings.Contains(help, "stop") {
+		t.Errorf("the help does not list stop:\n%s", help)
 	}
 }
 

@@ -22,7 +22,7 @@ import (
 func TestDispatchReservesTheTaskAndReturnsBeforeAnythingIsSpawned(t *testing.T) {
 	l, f := newLoop(t)
 
-	res, err := l.Dispatch(context.Background(), "7")
+	res, err := l.Dispatch(context.Background(), "7", "")
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestDispatchReservesTheTaskAndReturnsBeforeAnythingIsSpawned(t *testing.T) 
 // both into one tick must still produce one worker.
 func TestADispatchedTaskIsNotAlsoSpawnedByTheWatchingLoop(t *testing.T) {
 	l, f := newLoop(t)
-	if _, err := l.Dispatch(context.Background(), "01AAA"); err != nil {
+	if _, err := l.Dispatch(context.Background(), "01AAA", ""); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	if err := l.Tick(context.Background()); err != nil {
@@ -73,7 +73,7 @@ func TestDispatchRefusesATaskTheBoardWillNotHandOut(t *testing.T) {
 	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
 	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"doing","claimed_by":"agent:wM:p4"},"ready":false,"dependents":[]}`)
 
-	_, err := l.Dispatch(context.Background(), "7")
+	_, err := l.Dispatch(context.Background(), "7", "")
 	if got, want := codes.ReasonOf(err), codes.NotReady; got != want {
 		t.Fatalf("dispatch of a claimed task = %v (%q), want %q", err, got, want)
 	}
@@ -93,7 +93,7 @@ esac`)
 
 	// By id: a number names no board on its own, and the door says so
 	// without asking, which TestDispatchOfANumberTheBoardIsNotOfferingPins.
-	_, err := l.Dispatch(context.Background(), "01MISSING")
+	_, err := l.Dispatch(context.Background(), "01MISSING", "")
 	if got, want := codes.Of(err), codes.NotFound; got != want {
 		t.Fatalf("dispatch of a missing task = %v (%q), want %q", err, got, want)
 	}
@@ -111,7 +111,7 @@ func TestDispatchNamesTheUnderlyingRefusalWhenTheBoardCannotBeRead(t *testing.T)
 	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
 	f.Bin(t, "htask", brokenGet)
 
-	_, err := l.Dispatch(context.Background(), "01AAA")
+	_, err := l.Dispatch(context.Background(), "01AAA", "")
 	if got := codes.Of(err); got == codes.NotFound {
 		t.Fatalf("a door that refused was reported as %q: %v", got, err)
 	}
@@ -138,7 +138,7 @@ func TestRetryingAFailedDispatchCannotProduceTwoReservationsOrTwoWorkers(t *test
 	f.Bin(t, "htask", brokenGet)
 
 	for i := 0; i < 2; i++ {
-		if _, err := l.Dispatch(context.Background(), "7"); err == nil {
+		if _, err := l.Dispatch(context.Background(), "7", ""); err == nil {
 			t.Fatalf("dispatch %d over a refusing door succeeded", i+1)
 		}
 	}
@@ -149,7 +149,7 @@ func TestRetryingAFailedDispatchCannotProduceTwoReservationsOrTwoWorkers(t *test
 	// The door is whole again and the board offers the task.
 	f.Bin(t, "htask", htaskScript)
 	f.Write(t, "ready.json", readyOne)
-	if _, err := l.Dispatch(context.Background(), "7"); err != nil {
+	if _, err := l.Dispatch(context.Background(), "7", ""); err != nil {
 		t.Fatalf("dispatch after the door recovered: %v", err)
 	}
 	if got := l.Pending(); len(got) != 1 {
@@ -180,7 +180,7 @@ func TestDispatchRefusesWhenTheFleetIsAtMaxWorkers(t *testing.T) {
 	l.Policy.MaxWorkers = 1
 	l.bindings = []decide.Binding{{TaskID: "01ZZZ", Pane: "wM:p8", PromptedAt: clock, Prompts: 1}}
 
-	_, err := l.Dispatch(context.Background(), "7")
+	_, err := l.Dispatch(context.Background(), "7", "")
 	if got, want := codes.ReasonOf(err), codes.AtCapacity; got != want {
 		t.Fatalf("dispatch at capacity = %v (%q), want %q", err, got, want)
 	}
@@ -190,7 +190,7 @@ func TestDispatchRefusesWithoutABasePane(t *testing.T) {
 	l, _ := newLoop(t)
 	l.BasePane = ""
 
-	_, err := l.Dispatch(context.Background(), "7")
+	_, err := l.Dispatch(context.Background(), "7", "")
 	if got, want := codes.ReasonOf(err), codes.NoBasePane; got != want {
 		t.Fatalf("dispatch with no base pane = %v (%q), want %q", err, got, want)
 	}
@@ -198,11 +198,11 @@ func TestDispatchRefusesWithoutABasePane(t *testing.T) {
 
 func TestDispatchRefusesATaskItIsAlreadyDriving(t *testing.T) {
 	l, _ := newLoop(t)
-	if _, err := l.Dispatch(context.Background(), "7"); err != nil {
+	if _, err := l.Dispatch(context.Background(), "7", ""); err != nil {
 		t.Fatalf("first dispatch: %v", err)
 	}
 
-	_, err := l.Dispatch(context.Background(), "7")
+	_, err := l.Dispatch(context.Background(), "7", "")
 	if got, want := codes.ReasonOf(err), codes.AlreadyDispatched; got != want {
 		t.Fatalf("second dispatch = %v (%q), want %q", err, got, want)
 	}
@@ -212,7 +212,7 @@ func TestDispatchRefusesATaskItIsAlreadyDriving(t *testing.T) {
 // worker that claimed it in the meantime is the one doing the work.
 func TestAReservationTheBoardTookBackIsDroppedAtTheNextTick(t *testing.T) {
 	l, f := newLoop(t)
-	if _, err := l.Dispatch(context.Background(), "7"); err != nil {
+	if _, err := l.Dispatch(context.Background(), "7", ""); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
@@ -286,7 +286,7 @@ func TestDispatchAndStatusAreSafeAlongsideATick(t *testing.T) {
 		defer close(done)
 		for i := 0; i < 20; i++ {
 			l.Status(ctx)
-			l.Dispatch(ctx, "7")
+			l.Dispatch(ctx, "7", "")
 			l.Bindings()
 			l.Pending()
 		}
@@ -308,7 +308,7 @@ func TestDispatchResolvesATaskFiledOnAnotherProjectsBoard(t *testing.T) {
 	f.Write(t, "ready.json", `{"tasks":[{"id":"01ZZZ","seq":42,"project":"/src/other","title":"elsewhere","status":"todo"}],"count":1}`)
 	f.Write(t, "get.json", `{"task":{"id":"01ZZZ","seq":42,"project":"/src/other","title":"elsewhere","status":"todo"},"ready":true,"dependents":[]}`)
 
-	res, err := l.Dispatch(context.Background(), "01ZZZ")
+	res, err := l.Dispatch(context.Background(), "01ZZZ", "")
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -348,7 +348,7 @@ func TestDispatchOfAnIdOnNoBoardDoesNotBlameOneProject(t *testing.T) {
 *) echo '{}' ;;
 esac`)
 
-	_, err := l.Dispatch(context.Background(), "01ZZZ")
+	_, err := l.Dispatch(context.Background(), "01ZZZ", "")
 	if got, want := codes.Of(err), codes.NotFound; got != want {
 		t.Fatalf("dispatch of a missing task = %v (%q), want %q", err, got, want)
 	}
@@ -364,7 +364,7 @@ func TestDispatchStillRefusesATaskThatIsNotReadyOnAnotherBoard(t *testing.T) {
 	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
 	f.Write(t, "get.json", `{"task":{"id":"01ZZZ","seq":42,"project":"/src/other","title":"elsewhere","status":"doing","claimed_by":"agent:wM:p4"},"ready":false,"dependents":[]}`)
 
-	_, err := l.Dispatch(context.Background(), "01ZZZ")
+	_, err := l.Dispatch(context.Background(), "01ZZZ", "")
 	if got, want := codes.ReasonOf(err), codes.NotReady; got != want {
 		t.Fatalf("dispatch of a claimed task on another board = %v (%q), want %q", err, got, want)
 	}
@@ -403,7 +403,7 @@ func TestDispatchOfANumberTheBoardIsNotOffering(t *testing.T) {
 	l, f := newLoop(t)
 	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
 
-	_, err := l.Dispatch(context.Background(), "7")
+	_, err := l.Dispatch(context.Background(), "7", "")
 	if got, want := codes.ReasonOf(err), codes.NotReady; got != want {
 		t.Fatalf("dispatch of a number not on offer = %v (%q), want %q", err, got, want)
 	}
@@ -564,7 +564,7 @@ func TestATickSpawnHoldsItsSlotWhileItRuns(t *testing.T) {
 	var seen []string
 	l.Worktrees = duringWorker{Trees: l.Worktrees, hook: func() {
 		seen = l.Pending()
-		_, inside = l.Dispatch(context.Background(), "7")
+		_, inside = l.Dispatch(context.Background(), "7", "")
 	}}
 
 	if err := l.Tick(context.Background()); err != nil {
@@ -621,5 +621,38 @@ func TestASpawnThatKeepsFailingGivesItsSlotBack(t *testing.T) {
 	}
 	if got := l.Bindings(); len(got) != 0 {
 		t.Fatalf("bindings: %+v", got)
+	}
+}
+
+// §4.2: --project narrows the dispatcher to one board. The fleet-wide default
+// is what a daemon driving every project needs, and an operator standing in
+// one repository has to be able to say so — otherwise a bare number, which is
+// unique only inside a project, can never be dispatched at all.
+func TestDispatchScopedToAProjectOnlyOffersThatProjectsRows(t *testing.T) {
+	l, f := newLoop(t)
+	f.Write(t, "ready.json", `{"tasks":[
+		{"id":"01AAA","seq":7,"project":"/src/p","title":"here","status":"todo"},
+		{"id":"01ZZZ","seq":7,"project":"/src/other","title":"elsewhere","status":"todo"}
+	],"count":2}`)
+
+	res, err := l.Dispatch(context.Background(), "7", "/src/other")
+	if err != nil {
+		t.Fatalf("dispatch --project /src/other 7: %v", err)
+	}
+	if res.TaskID != "01ZZZ" || res.Project != "/src/other" {
+		t.Fatalf("a number resolved on the wrong board: %+v", res)
+	}
+}
+
+// A task the named board does not carry is not ready ON THAT BOARD, whatever
+// another board holds. Silently reaching past the scope the caller wrote is
+// how an operator dispatches the wrong repository's task.
+func TestDispatchScopedToAProjectDoesNotReachPastIt(t *testing.T) {
+	l, f := newLoop(t)
+	f.Write(t, "ready.json", `{"tasks":[{"id":"01ZZZ","seq":7,"project":"/src/other","title":"elsewhere","status":"todo"}],"count":1}`)
+	f.Write(t, "get.json", `{"task":{"id":"01ZZZ","seq":7,"project":"/src/other","title":"elsewhere","status":"todo"},"ready":true,"dependents":[]}`)
+
+	if _, err := l.Dispatch(context.Background(), "7", "/src/p"); err == nil {
+		t.Fatal("a task on another board was dispatched under --project /src/p")
 	}
 }

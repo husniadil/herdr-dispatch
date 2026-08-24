@@ -124,17 +124,37 @@ func readSkill(t *testing.T) string {
 // max_workers in the config and then still passing the raw flag through would
 // leave every config test green and the operator's number still dropped.
 func TestTheDaemonTakesItsWorkerCountFromTheConfigUnlessTheFlagIsPassed(t *testing.T) {
-	src, err := os.ReadFile("main.go")
+	// Read across the whole command rather than one file: the choice is
+	// what is pinned, and it does not stop being the choice when the flag
+	// and the policy it feeds are declared in different files.
+	text := sourceOfCommand(t)
+	if !strings.Contains(text, `fs.IntVar(&f.maxWorkers, "max-workers", 0,`) {
+		t.Error(`the max-workers flag carries a default of its own, so an unpassed flag overwrites the config's max_workers on every restart`)
+	}
+	if !strings.Contains(text, "MaxWorkers:   cfg.MaxWorkersOr(f.maxWorkers)") {
+		t.Error("the daemon's worker count is not resolved through cfg.MaxWorkersOr, so the config document's number never reaches the policy")
+	}
+}
+
+// sourceOfCommand is every non-test Go file of this command, concatenated.
+func sourceOfCommand(t *testing.T) string {
+	t.Helper()
+	names, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := string(src)
-	if !strings.Contains(text, `fs.Int("max-workers", 0,`) {
-		t.Error(`the max-workers flag carries a default of its own, so an unpassed flag overwrites the config's max_workers on every restart`)
+	var all strings.Builder
+	for _, name := range names {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		raw, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		all.Write(raw)
 	}
-	if !strings.Contains(text, "MaxWorkers:   cfg.MaxWorkersOr(*maxWorkers)") {
-		t.Error("the daemon's worker count is not resolved through cfg.MaxWorkersOr, so the config document's number never reaches the policy")
-	}
+	return all.String()
 }
 
 // max_workers reads two ways: how many panes may exist, and how many agents

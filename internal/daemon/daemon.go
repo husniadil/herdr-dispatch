@@ -263,6 +263,19 @@ func (d *Daemon) Handle(ctx context.Context, req protocol.Request) (json.RawMess
 	return d.serve(ctx, v, req)
 }
 
+// scope names the boards a call was answered from, so the log records what
+// the caller asked for rather than leaving it to be inferred from a path that
+// happens to be empty.
+func scope(req protocol.Request) string {
+	if req.Project != "" {
+		return "on " + req.Project
+	}
+	if req.AllProjects {
+		return "across every board"
+	}
+	return "across every board by default"
+}
+
 // serve runs one verb that has already been checked and passed the gate. It
 // is separate from Handle because §9.3 re-runs a resolved verb here and MUST
 // NOT put it through the gate again: the resolution is the decision the gate
@@ -273,12 +286,14 @@ func (d *Daemon) serve(ctx context.Context, v verbs.Verb, req protocol.Request) 
 		return encode(d.doctor(ctx))
 	case "dispatch":
 		ref, _ := req.Args["task"].(string)
-		res, err := d.Loop.Dispatch(ctx, ref)
+		// §4.2: the door resolved --project to a canonical path already, so
+		// what arrives here is a board to look on or nothing at all.
+		res, err := d.Loop.Dispatch(ctx, ref, req.Project)
 		if err != nil {
 			d.logf("dispatch %s for %s over %s: %v", ref, req.Caller(), door(req), err)
 			return nil, err
 		}
-		d.logf("task %d %q reserved for %s over %s", res.Seq, res.Title, req.Caller(), door(req))
+		d.logf("task %d %q reserved for %s over %s, %s", res.Seq, res.Title, req.Caller(), door(req), scope(req))
 		d.wake()
 		return encode(res, nil)
 	case "status":

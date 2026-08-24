@@ -77,19 +77,26 @@ type Status struct {
 // and the wait for the goal to show on screen — and no caller on a door can
 // be held that long. The reservation is what stops anything else taking the
 // task in the meantime; the tick does the work and records the binding.
-func (l *Loop) Dispatch(ctx context.Context, ref string) (Reservation, error) {
+// project is the §4.1 canonical board to look on, already resolved by the
+// door; empty means every board, which is this daemon's default.
+func (l *Loop) Dispatch(ctx context.Context, ref, project string) (Reservation, error) {
 	if l.BasePane == "" {
 		return Reservation{}, codes.Refusef(codes.NoBasePane,
-			`this daemon has no pane to split a worker off: start it inside a Herdr pane, pass -pane, or set "pane" in the config`)
+			`this daemon has no pane to split a worker off: start it inside a Herdr pane, pass --pane, or set "pane" in the config`)
 	}
 
 	ready, err := l.Board.Ready(ctx)
 	if err != nil {
 		return Reservation{}, err
 	}
+	// A scoped call is answered from that board's rows alone. Reaching past
+	// the scope the caller wrote is how an operator standing in one
+	// repository dispatches another one's task, and a number means different
+	// tasks on different boards.
+	ready = onBoard(ready, project)
 	row, ok := match(ready, ref)
 	if !ok {
-		return Reservation{}, l.whyNotReady(ctx, ref)
+		return Reservation{}, l.whyNotReady(ctx, ref, project)
 	}
 
 	l.mu.Lock()
@@ -131,8 +138,15 @@ func (l *Loop) Dispatch(ctx context.Context, ref string) (Reservation, error) {
 // does not have. It costs one more call, on the failing path only, and it is
 // the difference between a caller fixing a typo and a caller waiting for a
 // task that will never come.
-func (l *Loop) whyNotReady(ctx context.Context, ref string) error {
+func (l *Loop) whyNotReady(ctx context.Context, ref, project string) error {
 	if seq, isNumber := strconv.Atoi(ref); isNumber == nil {
+		if project != "" {
+			// With a board named, a number DOES resolve, so the refusal can
+			// say which board it looked on rather than sending the operator
+			// to find an id.
+			return codes.Refusef(codes.NotReady,
+				"task %d is not among the tasks %s is offering", seq, project)
+		}
 		// The same wall the restart rule hit, on the other call site: a
 		// number is unique only inside a project, and a door call names no
 		// project the way a pane's checkout does. So the offer list is as
@@ -273,6 +287,20 @@ func pendingIDs(held []store.Reservation) []string {
 
 // match finds the row a caller's reference names: the board's id, or the
 // project number an operator reads.
+// onBoard is the rows of one project, or every row when none was named.
+func onBoard(rows []htask.Task, project string) []htask.Task {
+	if project == "" {
+		return rows
+	}
+	out := []htask.Task{}
+	for _, row := range rows {
+		if row.Project == project {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
 func match(rows []htask.Task, ref string) (htask.Task, bool) {
 	for _, row := range rows {
 		if row.ID == ref || strconv.Itoa(row.Seq) == ref {

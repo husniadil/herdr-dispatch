@@ -41,7 +41,7 @@ func one(t *testing.T, l *Loop, name string) store.Event {
 // exists nowhere but here — so it is on the trail with the task it took.
 func TestReservingATaskIsOnTheTrail(t *testing.T) {
 	l, _ := newLoop(t)
-	if _, err := l.Dispatch(context.Background(), "7"); err != nil {
+	if _, err := l.Dispatch(context.Background(), "7", ""); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	ev := one(t, l, "dispatch.task.reserved")
@@ -80,7 +80,7 @@ func TestAWorkerComingUpIsOnTheTrail(t *testing.T) {
 // change or a change without its event.
 func TestTheTrailIsWrittenWithTheChangeItRecords(t *testing.T) {
 	l, _ := newLoop(t)
-	if _, err := l.Dispatch(context.Background(), "7"); err != nil {
+	if _, err := l.Dispatch(context.Background(), "7", ""); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	state, err := l.Store.Load()
@@ -99,7 +99,7 @@ func TestTheTrailIsWrittenWithTheChangeItRecords(t *testing.T) {
 // asking what happened last night is asking across the restart.
 func TestARestartKeepsTheTrail(t *testing.T) {
 	l, _ := newLoop(t)
-	if _, err := l.Dispatch(context.Background(), "7"); err != nil {
+	if _, err := l.Dispatch(context.Background(), "7", ""); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	next, _ := newLoop(t)

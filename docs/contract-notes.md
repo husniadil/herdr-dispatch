@@ -60,6 +60,7 @@ is written down.
 | §6.6 | No review semantics. The board's review gate is htask's, and this binary stops at review. |
 | §11.5 | Lease liveness and the sweep are htask's; a second writer racing them is the bug. |
 | §11.6 | The manifest declares no `[[panes]]`. |
+| §4.4 | No table here holds user-visible entities. The store is bindings keyed by task id, and a task's project is the board's fact, read from the board. There is no column to add and no partition to default. |
 | §16.1 | Acceptance criteria are a board concept. |
 
 ## Where this plugin diverges, and why
@@ -70,6 +71,8 @@ reason it stands.
 
 | Section | The rule | Where this plugin stands |
 |---|---|---|
+| §4.2 | Project defaults to the caller's working directory | It defaults to EVERY board. One daemon runs per user and drives the whole fleet, so defaulting to the directory the operator happens to be standing in would hide most of what `status` is driving and refuse most of the ready list to `dispatch`. `--project` narrows to one board and is resolved to §4.1's canonical path in the door; `--all-projects` is the explicit spelling of the default, and naming both is refused rather than ranked. `TestTheDefaultScopeIsEveryBoard`, `TestAnExplicitProjectIsResolvedBeforeItIsSent`, `TestNamingOneProjectAndEveryProjectIsRefused`, `TestDispatchScopedToAProjectOnlyOffersThatProjectsRows`, `TestDispatchScopedToAProjectDoesNotReachPastIt`, `TestTheProjectAJobNamesReachesTheLoop` |
+| §4.2 | The scope flags reach every door | They reach the CLI. The MCP door still answers across every board and takes no scope argument, where the sibling injects `project` and `all_projects` into every tool's schema. Nothing is wrong today — every board IS this daemon's default on both doors — but a caller on the MCP door cannot narrow the way a caller on the CLI now can. Closing it means injecting the two properties the way the sibling does, and exempting them from the parity test that reads a tool's schema against the registry's args. |
 | §11.1 | Reach Herdr through `HERDR_BIN_PATH`, or the socket at `HERDR_SOCKET_PATH` | The binary path is now read (`TestTheHerdrBinaryComesFromTheVariableTheContractNames`). `HERDR_SOCKET_PATH` is not, and is a non-divergence in substance: this binary shells out to the CLI and opens no socket of its own, so it hard-codes no socket path — the CLI resolves that variable itself. |
 
 ## The MUSTs that do apply
@@ -82,12 +85,14 @@ reason it stands.
 | §2.2 | A CLI call with no live socket starts the daemon and waits | `TestACallWithNoDaemonStartsOneAndWaitsForIt` |
 | §2.4 | The manifest declares startup, stop and restart | `TestTheManifestCarriesStartupStopAndRestart` |
 | §3.5 | State dir 0700, socket 0600, boundary documented | `TestEnsureStateDirMakesItPrivate`, `TestTheSocketIsCreatedPrivateToTheUser` |
+| §3.2 | A principal is derived, never declared, and only `cron`, `trigger` and `plugin` may be declared with `--as` | `TestAsDeclaresOnlyThePrincipalsThatMayBeDeclared`, `TestWithoutAsThePrincipalIsStillTheProcessesOwnPane` |
 | §5.1 | `state_dir` never from `HERDR_PLUGIN_STATE_DIR` | `TestTheHerdrPluginDirsAreNotRead` |
 | §5.8 | `dump --json` prints the whole store, on both doors | `TestDumpPrintsTheWholeStore`, `TestDumpCarriesTheTrail`, `TestTheServedToolListIsPinned` |
 | §5.5 | An append-only event trail written in the same write as the mutation | `TestTheTrailIsWrittenWithTheChangeItRecords`, `TestAnEventSurvivesARoundTrip` |
 | §8.1 | An event for every state change, named `<name>.<entity>.<verb>` | `TestReservingATaskIsOnTheTrail`, `TestAWorkerComingUpIsOnTheTrail`, `TestAReservationGivenUpOnIsOnTheTrail` |
 | §8.2 | `events [--follow] [--since] [--json]` streams the trail | `TestEventsAnswersTheTrail`, `TestEventsResumesAfterAnID`, `TestFollowingHandsOverAnEventWrittenAfterItOpened`, `TestAStreamEndsWithDoneWhenTheDaemonGoes` |
 | §8.3 | One configurable `on_event` hook, detached, and a hook that fails does not fail the write | `TestTheHookRunsForEveryEventCarryingIt`, `TestAHookThatCannotRunDoesNotFailTheWrite`, `TestEveryEventReachesTheHook` |
+| §6.1 | The three binaries present one flag shape: the CLI is cobra, every verb answers its own `--help`, and the four globals are on the root | `TestEveryVerbTakesTheFourContractGlobals`, `TestEveryVerbAnswersItsOwnHelp`, `TestTheBinaryOffersShellCompletion`, `TestAStrayArgumentToAGroupIsARefusalAndNotItsHelp` |
 | §6.1 | A parity test enumerating both surfaces, failing both ways | `TestTheServedToolListIsPinned`, `TestTheSchemaDeclaresExactlyWhatTheCLITakes` |
 | §7.2 | The door's instructions say what a tool list cannot | `TestTheServerRegistersUnderTheRepositoryAndServesBareVerbs` |
 | §7.3 | Every verb the CLI serves is on the door | `TestStopIsServedWithItsBlastRadiusStated`, `TestTheServedToolListIsPinned` |
@@ -102,6 +107,7 @@ reason it stands.
 | §9.5 | The gate is where a verb is withheld, and no door withholds one | `TestTheServedToolListIsPinned`, `TestNoDocumentSaysAServedVerbIsWithheld` |
 | §6.2 | With `--json`, a failure is one `{"error":{code,message}}` document on stdout | `TestAFailureWithJSONIsTheContractEnvelope`, `TestAFailureExitsWithTheStatusTheContractFixes` |
 | §6.3 | The code is one of the nine, the exit status is the one fixed for it, and a finer name is a sub-reason inside `message` | `TestEverySubReasonAnswersUnderAContractCode`, `TestTheSubReasonsMapOntoTheCodesTheContractFixes`, `TestExitIsTheStatusTheContractFixes`, `TestAFailureExitsWithTheStatusTheContractFixes` |
+| §6.3 | A parse failure of the CLI framework's own is USAGE, not the UNAVAILABLE an unnamed error would fall through to | `TestAnUnknownFlagIsAUsageRefusal`, `TestAStrayArgumentToAGroupIsARefusalAndNotItsHelp` |
 | §10.3 | `doctor` prints the state dir and the config dir | `TestDoctorNamesTheDirectoriesItResolved` |
 | §11.1 | Herdr is reached through `HERDR_BIN_PATH` | `TestTheHerdrBinaryComesFromTheVariableTheContractNames` |
 | §11.2 | `herdr api schema --json` is read once, in both accepted document shapes, and a missing capability is UNSUPPORTED at the verb that needs it, naming it | `TestTheJSONSchemaShapeIsRead`, `TestTheFlatShapeIsAlsoRead`, `TestTheSchemaIsReadOnce`, `TestAMissingCapabilityIsUnsupportedAtTheVerbThatNeedsIt`, `TestEveryVerbThatNeedsACapabilityRefusesWithoutIt` |

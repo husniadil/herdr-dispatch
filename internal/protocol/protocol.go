@@ -26,6 +26,22 @@ type Request struct {
 	// of the verb, which is why it is here and not in the verb's Args: a
 	// tool call answers once, so the MCP door has nothing to set it with.
 	Follow bool `json:"follow,omitempty"`
+	// Project is the §4.1 canonical project the caller named with
+	// --project, already resolved by the door: a relative path is relative
+	// to the CALLER's working directory and the daemon's is somewhere else.
+	// Empty means the caller named no single board.
+	Project string `json:"project,omitempty"`
+	// AllProjects is the dispatcher's own default (§4.4 note in
+	// docs/contract-notes.md): one daemon per user drives every board, so a
+	// call that names no project reads them all. It travels rather than
+	// being inferred from an empty Project, so a door that grows a
+	// different default cannot change what an old call meant.
+	AllProjects bool `json:"all_projects,omitempty"`
+	// As is the §3.2 declared principal, `cron:`, `trigger:` or `plugin:`.
+	// The door has already refused every other kind: agent and human are
+	// DERIVED, and a call that could declare one would be declaring the
+	// fact the rule exists to keep underived.
+	As string `json:"as,omitempty"`
 }
 
 // Response is the one answer. Exactly one of Result and Error is set.
@@ -50,6 +66,12 @@ type Failure struct {
 // Caller names who asked, for the daemon's log. It is a record, never a
 // permission.
 func (r Request) Caller() string {
+	// §3.2: the declared principal is the one exception to derivation, and
+	// it wins over the pane, because a cron job firing from inside a pane is
+	// still the cron job acting and not the agent sitting there.
+	if r.As != "" {
+		return r.As
+	}
 	if r.Pane == "" {
 		return "unknown"
 	}

@@ -40,7 +40,7 @@ func startDaemon(t *testing.T) *safeBuffer {
 	world(t)
 
 	out := &safeBuffer{}
-	cmd := exec.Command(bin, "daemon", "-interval", "1h")
+	cmd := exec.Command(bin, "daemon", "--interval", "1h")
 	cmd.Stdout = out
 	cmd.Stderr = out
 	if err := cmd.Start(); err != nil {

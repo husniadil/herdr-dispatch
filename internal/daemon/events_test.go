@@ -35,7 +35,7 @@ func read(t *testing.T, d *Daemon, args map[string]any) EventsReport {
 // surfaces reach.
 func TestEventsAnswersTheTrail(t *testing.T) {
 	d, _ := newDaemon(t)
-	if _, err := d.Loop.Dispatch(context.Background(), "01AAA"); err != nil {
+	if _, err := d.Loop.Dispatch(context.Background(), "01AAA", ""); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	rep := read(t, d, nil)
@@ -48,7 +48,7 @@ func TestEventsAnswersTheTrail(t *testing.T) {
 // it and never that event again.
 func TestEventsResumesAfterAnID(t *testing.T) {
 	d, _ := newDaemon(t)
-	if _, err := d.Loop.Dispatch(context.Background(), "01AAA"); err != nil {
+	if _, err := d.Loop.Dispatch(context.Background(), "01AAA", ""); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	first := read(t, d, nil).Events[0]
@@ -75,7 +75,7 @@ func TestEventsRefusesAnIDTheTrailHasRotatedPast(t *testing.T) {
 // A limit is a page of the trail, and a page over is not an error.
 func TestEventsTakesALimitAsAWholeNumber(t *testing.T) {
 	d, _ := newDaemon(t)
-	if _, err := d.Loop.Dispatch(context.Background(), "01AAA"); err != nil {
+	if _, err := d.Loop.Dispatch(context.Background(), "01AAA", ""); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	if rep := read(t, d, map[string]any{"limit": float64(1)}); rep.Count != 1 {
@@ -103,7 +103,7 @@ func TestFollowingHandsOverAnEventWrittenAfterItOpened(t *testing.T) {
 		// The stream is opened first and the event written after it, which
 		// is the whole of what a subscription promises.
 		time.Sleep(20 * time.Millisecond)
-		d.Loop.Dispatch(context.Background(), "01AAA")
+		d.Loop.Dispatch(context.Background(), "01AAA", "")
 	}()
 
 	dec := json.NewDecoder(left)
@@ -168,7 +168,7 @@ func TestTheHookRunsForEveryEventCarryingIt(t *testing.T) {
 	d.Loop.Config.OnEvent = []string{hook}
 	d.Loop.OnEvent = d.Emitted
 
-	if _, err := d.Loop.Dispatch(context.Background(), "01AAA"); err != nil {
+	if _, err := d.Loop.Dispatch(context.Background(), "01AAA", ""); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	said := waitForFile(t, out)
@@ -186,7 +186,7 @@ func TestAHookThatCannotRunDoesNotFailTheWrite(t *testing.T) {
 	d.Loop.Config.OnEvent = []string{filepath.Join(t.TempDir(), "no-such-hook")}
 	d.Loop.OnEvent = d.Emitted
 
-	if _, err := d.Loop.Dispatch(context.Background(), "01AAA"); err != nil {
+	if _, err := d.Loop.Dispatch(context.Background(), "01AAA", ""); err != nil {
 		t.Fatalf("the dispatch failed because its hook could not run: %v", err)
 	}
 	if rep := read(t, d, nil); rep.Count != 1 {
@@ -199,7 +199,7 @@ func TestAHookThatCannotRunDoesNotFailTheWrite(t *testing.T) {
 func TestDoctorNamesTheEventHookAndTheTrail(t *testing.T) {
 	d, _ := newDaemon(t)
 	d.Loop.Config.OnEvent = []string{"/bin/true"}
-	if _, err := d.Loop.Dispatch(context.Background(), "01AAA"); err != nil {
+	if _, err := d.Loop.Dispatch(context.Background(), "01AAA", ""); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	rep := d.eventsHealth()
@@ -266,7 +266,7 @@ func waitForFile(t *testing.T, path string) string {
 // back.
 func TestDumpCarriesTheTrail(t *testing.T) {
 	d, _ := newDaemon(t)
-	if _, err := d.Loop.Dispatch(context.Background(), "01AAA"); err != nil {
+	if _, err := d.Loop.Dispatch(context.Background(), "01AAA", ""); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	raw, err := d.Handle(context.Background(), protocol.Request{Verb: "dump"})

@@ -47,6 +47,43 @@ herdr-tasks and herdr-mail have always called it, and a config still carrying
 `make release-check` sets it and is the target herdr-tasks spells the same
 way: a release must not be cut on a suite that silently did not run.
 
+**The CLI is cobra, and takes the four globals the contract fixes.** `hdis`
+was the odd one out: stdlib `flag` with one hand-written usage block, where
+`htask` and `hmail` are both cobra. §6 and §7 have the three binaries present
+one flag shape, and this one could not. What a caller gets now: `--project`,
+`--all-projects` and `--as` beside the `--json` that was already there;
+`hdis <verb> --help` for every verb, carrying the same description the MCP
+tool does, instead of one block for the whole binary; and
+`hdis completion <shell>`, which there was no way to offer before.
+
+Nothing a caller wrote before means something else now, with one exception for
+anyone scripting the daemon: **its flags are `--flag`, not `-flag`.**
+`hdis daemon -interval 1h` is `hdis daemon --interval 1h`, and the same for
+`-config`, `-log`, `-once`, `-pane`, `-max-workers`, `-claim-timeout`,
+`-max-prompts`, `-start-timeout` and `-confirm-ceiling`. The verbs themselves
+never took a single-dash flag. `--json` still reads wherever in the line it is
+written, which it needed a special case to do before and now simply does.
+
+`--project <path>` narrows a call to one board, resolved in the door to §4.1's
+canonical project. It is what makes a bare number dispatchable: a number is
+unique only inside a project, so `hdis dispatch 7` with no board named can
+only match a task the ready list already carries, where
+`hdis --project . dispatch 7` looks on one board. Every call still defaults to
+every board, which is what a daemon driving the whole fleet has to do, and
+`--all-projects` is the explicit spelling of that default; naming both is
+refused rather than ranked. `--as` declares a `cron:`, `trigger:` or `plugin:`
+principal (§3.2) and refuses `agent` and `human`, which are derived from the
+calling process.
+
+One failure was misreported before and is fixed with this: an unknown flag or
+an unknown subcommand now answers `USAGE` and exits 2, where the old CLI gave
+the flag package's own message and exit 1, and where an unnamed error would
+otherwise fall through to `UNAVAILABLE`.
+
+This adds `github.com/spf13/cobra` as this binary's second dependency, pinned
+to the version both siblings already run. The reason is in the README's
+dependency section.
+
 ## 0.2.0 — 2026-08-24
 
 The release that makes `hdis` refuse the way the contract says a plugin

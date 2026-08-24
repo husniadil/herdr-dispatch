@@ -145,7 +145,7 @@ func TestARestartTellsItsOwnStaleReservationFromAPeers(t *testing.T) {
 func TestAReservationOutlivesTheDaemonThatMadeIt(t *testing.T) {
 	l, f := newLoop(t)
 	l.Board = &htask.Client{Principal: htask.PrincipalFor(l.BasePane)}
-	if _, err := l.Dispatch(context.Background(), "7"); err != nil {
+	if _, err := l.Dispatch(context.Background(), "7", ""); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	state, err := l.Store.Load()

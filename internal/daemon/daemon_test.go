@@ -984,3 +984,36 @@ func TestTheSocketIsCreatedPrivateToTheUser(t *testing.T) {
 		t.Errorf("SocketMode is %04o; §3.5 fixes it at 0600", SocketMode)
 	}
 }
+
+// §4.2: the door resolved --project to a canonical path, and the daemon has
+// to hand it to the loop. Without this the flag parses, travels the socket
+// and changes nothing — a caller believing they named one board while every
+// board answers, which is the failure a flag that is quietly dropped always
+// is. The ready row this fake serves is on /src/p, so naming another board
+// must refuse.
+func TestTheProjectAJobNamesReachesTheLoop(t *testing.T) {
+	stateDir(t)
+	d, _ := newDaemon(t)
+
+	_, err := call(t, d, protocol.Request{
+		Verb: "dispatch", Args: map[string]any{"task": "7"}, Project: "/src/elsewhere"})
+	if err == nil {
+		t.Fatal("a task on /src/p was dispatched under --project /src/elsewhere")
+	}
+	if !strings.Contains(err.Error(), "/src/elsewhere") {
+		t.Errorf("the refusal does not name the board it looked on: %v", err)
+	}
+
+	raw, err := call(t, d, protocol.Request{
+		Verb: "dispatch", Args: map[string]any{"task": "7"}, Project: "/src/p"})
+	if err != nil {
+		t.Fatalf("dispatch --project /src/p 7: %v", err)
+	}
+	var res loop.Reservation
+	if err := json.Unmarshal(raw, &res); err != nil {
+		t.Fatalf("dispatch json: %v", err)
+	}
+	if res.TaskID != "01AAA" {
+		t.Fatalf("reservation: %+v", res)
+	}
+}

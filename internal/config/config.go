@@ -468,7 +468,7 @@ type Config struct {
 	// slots are held that way.
 	MaxWorkers int `json:"max_workers"`
 	// Pane is the pane worker panes are split off, for a daemon that was
-	// not started inside one and was given no -pane. Without it, and
+	// not started inside one and was given no --pane. Without it, and
 	// without either of those, nothing can be spawned at all.
 	Pane string `json:"pane"`
 	// GateCommand is the §9.2 policy gate command, argv-style. Absent or

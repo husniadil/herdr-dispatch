@@ -13,6 +13,8 @@ over MCP. The board stays the ledger; this binary is only execution policy.
 herdr plugin install husniadil/herdr-dispatch
 ```
 
+## As a Herdr plugin
+
 `herdr-plugin.toml` at the root is what Herdr installs: it compiles
 `./bin/hdis`, starts the daemon through `scripts/start.sh` — which detaches it,
 so it outlives the pane that opened it — and offers **Stop the dispatcher** and
@@ -99,29 +101,29 @@ bindings, whatever the shell line that started it redirected. Every line goes
 to stdout as well, so an operator running it in the foreground sees exactly
 what the file gets; the one exception is a daemon a door started, whose
 stdout IS that file already, where writing to both would double every line.
-`-log` moves the file and defaults to that path, so a redirect stays possible
+`--log` moves the file and defaults to that path, so a redirect stays possible
 and is never required. A log that cannot be opened is said on stdout and the
 daemon starts anyway — refusing to dispatch because a file will not open is
 worse than dispatching where the lines can still be read. `hdis doctor` names
 the file that was actually opened, and says `stdout only` when none was.
 
-`hdis daemon -h` lists the knobs:
+`hdis daemon --help` lists the knobs:
 
 | Flag | What it sets |
 | --- | --- |
-| `-config <path>` | The config document. Defaults to `<config_dir>/dispatch.toml`. |
-| `-log <path>` | The file the log is appended to. |
-| `-interval <duration>` | How often to tick. |
-| `-once` | Run one tick and exit, instead of listening. Nothing serves either door in this mode. |
-| `-pane <id>` | The pane worker panes are split off. |
-| `-max-workers <n>` | How many workers may be live at once; `0` means the config's `max_workers`. |
-| `-claim-timeout <duration>` | How long a delivered goal may go unclaimed before a nudge. |
-| `-max-prompts <n>` | How many times one task's goal may be delivered before giving up. |
-| `-start-timeout <duration>` | How long herdr waits for a worker to become interactive. |
-| `-confirm-ceiling <duration>` | How long to wait for a delivered goal to show on the worker's screen. |
+| `--config <path>` | The config document. Defaults to `<config_dir>/dispatch.toml`. |
+| `--log <path>` | The file the log is appended to. |
+| `--interval <duration>` | How often to tick. |
+| `--once` | Run one tick and exit, instead of listening. Nothing serves either door in this mode. |
+| `--pane <id>` | The pane worker panes are split off. |
+| `--max-workers <n>` | How many workers may be live at once; `0` means the config's `max_workers`. |
+| `--claim-timeout <duration>` | How long a delivered goal may go unclaimed before a nudge. |
+| `--max-prompts <n>` | How many times one task's goal may be delivered before giving up. |
+| `--start-timeout <duration>` | How long herdr waits for a worker to become interactive. |
+| `--confirm-ceiling <duration>` | How long to wait for a delivered goal to show on the worker's screen. |
 
 Worker panes are splits of a base pane, so the daemon needs one: it takes
-`HERDR_PANE_ID` when it was started inside a Herdr pane, `-pane` when it was
+`HERDR_PANE_ID` when it was started inside a Herdr pane, `--pane` when it was
 given one, and the config's `"pane"` key otherwise. Without any of the three
 it still comes up and still answers both doors, but it does not tick and
 every dispatch refuses with `UNSUPPORTED: NO_BASE_PANE`. Every spawn it could reach for
@@ -171,6 +173,35 @@ hdis dispatch 7
 hdis status --json
 ```
 
+### The four globals
+
+The CLI is cobra, as `htask` and `hmail` are, so the three binaries present
+one flag shape and a caller writes the same four flags at each of them without
+looking up which plugin they are talking to. They are persistent flags on the
+root, so every verb takes them and every verb answers `--help` with its own
+arguments.
+
+| Flag | What it does |
+| --- | --- |
+| `--json` | One JSON document on stdout (§6.2), wherever in the line it is written. |
+| `--project <path>` | Act on one board. Resolved here, in the door, to the §4.1 canonical project, because a relative path is relative to the caller's working directory and the daemon's is somewhere else. |
+| `--all-projects` | Act across every board, which is this daemon's default. Naming it together with `--project` is refused rather than ranked. |
+| `--as <principal>` | Act as a `cron:`, `trigger:` or `plugin:` principal (§3.2). `agent` and `human` are derived from the calling process and cannot be declared. |
+
+`--project` is what makes a bare number dispatchable. A number is unique only
+inside a project, so `hdis dispatch 7` with no board named can only match a
+task the ready list already carries; `hdis --project . dispatch 7` looks on
+one board, where 7 means one task. Everything else defaults to every board:
+one daemon runs per user and drives the whole fleet, and scoping `status` to
+whichever directory the operator happens to be standing in would hide most of
+what it is driving.
+
+Shell completion comes with cobra:
+
+```sh
+hdis completion zsh > "${fpath[1]}/_hdis"
+```
+
 A door that finds no live socket starts the daemon and waits for it, bounded
 at three seconds, rather than fail. A daemon started that way has no terminal
 to write to, and its log goes where every daemon's does.
@@ -193,7 +224,7 @@ It refuses with a name rather than a sentence to parse. The code is one of the
 contract's own nine (§6.3), and the sub-reason this binary refused for is the
 first word of the message, so nothing a caller could branch on before is lost:
 `USAGE` when no task was named; `CONFLICT` as `NOT_READY` when the board will
-not hand the task out, as `AT_CAPACITY` when `-max-workers` are already live
+not hand the task out, as `AT_CAPACITY` when `--max-workers` are already live
 or reserved, or as `ALREADY_DISPATCHED` when this daemon is already driving
 it; `UNSUPPORTED` as `NO_BASE_PANE` when there is nowhere to put a worker;
 `NOT_FOUND` when the board has no such task; and `UNAVAILABLE` when the board
@@ -437,7 +468,7 @@ exists to prevent.
 Seven keys sit at the top level beside `default`, `profiles` and `projects`:
 `proxy` names the codex provider's launcher, `pane` names the base pane a
 daemon uses when it was not started inside a Herdr pane and was given no
-`-pane`, `max_workers` is how many workers may be live at once,
+`--pane`, `max_workers` is how many workers may be live at once,
 `gate_command` is the §9 policy gate command, `on_event` is the §8.3 event
 hook, `[layout]` carries `min_pane_columns` and `max_panes_per_tab`, and
 `[verify]` is the verification lane.
@@ -1277,7 +1308,7 @@ a stop run with the ambient one would reach for the operator's own socket.
 
 ## Dependencies
 
-The standard library, and one thing that earned its way in:
+The standard library, and two things that earned their way in:
 
 - **`github.com/modelcontextprotocol/go-sdk`** — the MCP door serves a wire
   protocol with a specified handshake, tool schemas and error envelope, and
@@ -1285,6 +1316,14 @@ The standard library, and one thing that earned its way in:
   is substantial work whose only reward is being subtly incompatible with the
   callers the door exists for. It is pinned to the version the board plugin
   already runs, so one machine holds one copy.
+
+- **`github.com/spf13/cobra`** — §6 and §7 expect the three sibling binaries
+  to present the same flag shape, and both siblings already are cobra. The
+  hand-written `flag` CLI could not give it: `flag.Parse` stops at the first
+  positional, so `--json` had to be scraped out of argv before anything parsed
+  it; there was one usage block for the whole binary rather than help per
+  verb; and there was no completion at all. It is pinned to the version the
+  board plugin already runs, so one machine holds one copy.
 
 Anything else that earns its way in gets its reason recorded here too.
 

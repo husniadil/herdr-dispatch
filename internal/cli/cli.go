@@ -6,7 +6,6 @@ package cli
 import (
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -19,173 +18,33 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/codes"
 	"github.com/husniadil/herdr-dispatch/internal/daemon"
 	"github.com/husniadil/herdr-dispatch/internal/loop"
-	"github.com/husniadil/herdr-dispatch/internal/protocol"
 	"github.com/husniadil/herdr-dispatch/internal/store"
-	"github.com/husniadil/herdr-dispatch/internal/verbs"
 )
 
 // Door names this surface in the daemon's log.
 const Door = "cli"
 
-// Request builds the daemon request for one subcommand, and reports whether
-// the caller asked for the answer as it came.
-func Request(v verbs.Verb, argv []string) (protocol.Request, bool, error) {
-	// --json is taken out of argv before anything else parses it. Go's flag
-	// package stops at the first non-flag word, so `hdis dispatch 41 --json`
-	// left --json sitting in the positionals and the call was refused for an
-	// argument it does not take — while `hdis --json dispatch 41` worked. A
-	// flag that means the same thing wherever it is written is the whole of
-	// what §6.2 promises a machine caller.
-	asJSON := WantsJSON(argv)
-	argv = withoutJSON(argv)
-	// --follow is the CLI's own flag for the same reason --json is: it is a
-	// property of the connection rather than an argument of the verb, and
-	// there is no tool call that could set it (§8.2 with §7.1).
-	follow := WantsFollow(argv)
-	argv = withoutFollow(argv)
-
-	fs := flag.NewFlagSet("hdis "+strings.Join(v.CLI, " "), flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	// A switch is a flag on this door and a boolean field on the other. It
-	// is registered from the same table the MCP schema is rendered from, so
-	// the two doors cannot drift over what a verb takes.
-	switches := map[string]*bool{}
-	// An argument the verb does not take positionally is a flag on this
-	// door and a named field on the other, registered from the same table
-	// the MCP schema is rendered from so the two cannot drift over what a
-	// verb takes.
-	words := map[string]*string{}
-	counts := map[string]*int{}
-	for _, a := range v.Args {
-		switch {
-		case a.Type == verbs.Bool:
-			switches[a.Name] = fs.Bool(a.Name, false, a.Desc)
-		case a.Positional:
-		case a.Type == verbs.Int:
-			counts[a.Name] = fs.Int(a.Name, 0, a.Desc)
-		default:
-			words[a.Name] = fs.String(a.Name, "", a.Desc)
-		}
-	}
-	if err := fs.Parse(argv); err != nil {
-		return protocol.Request{}, false, codes.Refusef(codes.Invalid, "%s: %v", strings.Join(v.CLI, " "), err)
-	}
-
-	req := protocol.Request{
-		Verb:   v.Name,
-		Follow: follow,
-		Args:   map[string]any{},
-		// The pane this door runs in, recorded by the daemon and granting
-		// nothing. A caller on another harness has none, and needs none.
-		Pane: os.Getenv("HERDR_PANE_ID"),
-		Door: Door,
-	}
-	// Only a switch the caller actually wrote is sent. A false the caller
-	// never typed is an argument the daemon would then have to tell apart
-	// from one they did.
-	fs.Visit(func(f *flag.Flag) {
-		switch {
-		case switches[f.Name] != nil:
-			req.Args[f.Name] = *switches[f.Name]
-		case words[f.Name] != nil:
-			req.Args[f.Name] = *words[f.Name]
-		case counts[f.Name] != nil:
-			req.Args[f.Name] = *counts[f.Name]
-		}
-	})
-	rest := fs.Args()
-	for _, a := range v.Args {
-		if !a.Positional {
-			continue
-		}
-		if len(rest) == 0 {
-			if a.Required {
-				return protocol.Request{}, false, codes.Refusef(codes.Invalid,
-					"%s needs <%s>", strings.Join(v.CLI, " "), a.Name)
-			}
-			continue
-		}
-		req.Args[a.Name], rest = rest[0], rest[1:]
-	}
-	if len(rest) > 0 {
-		return protocol.Request{}, false, codes.Refusef(codes.Invalid,
-			"%s takes no argument %q", strings.Join(v.CLI, " "), rest[0])
-	}
-	return req, asJSON, nil
-}
-
 // WantsJSON reads --json out of a raw argv, wherever in it the caller wrote
-// the flag. A value that is not an explicit false counts as asking for a
-// document: a machine caller that asked for JSON should be told in JSON even
-// when what it wrote was refused.
+// the flag. It has to be known BEFORE cobra parses, because cobra's own parse
+// failures are among the failures §6.2 makes answer with one document, and at
+// that moment the flag exists only in argv. A value that is not an explicit
+// false counts as asking for a document: cobra will refuse a bad value
+// itself, and a machine caller that asked for JSON should be told in JSON.
 func WantsJSON(argv []string) bool {
 	on := false
 	for _, a := range argv {
 		switch {
 		case a == "--":
 			return on
-		case a == "--json", a == "-json":
+		case a == "--json":
 			on = true
-		case strings.HasPrefix(a, "--json="), strings.HasPrefix(a, "-json="):
+		case strings.HasPrefix(a, "--json="):
 			_, v, _ := strings.Cut(a, "=")
 			b, err := strconv.ParseBool(v)
 			on = err != nil || b
 		}
 	}
 	return on
-}
-
-// WantsFollow reads --follow out of a raw argv, the same way --json is read.
-func WantsFollow(argv []string) bool {
-	on := false
-	for _, a := range argv {
-		switch {
-		case a == "--":
-			return on
-		case a == "--follow", a == "-follow":
-			on = true
-		case strings.HasPrefix(a, "--follow="), strings.HasPrefix(a, "-follow="):
-			_, v, _ := strings.Cut(a, "=")
-			b, err := strconv.ParseBool(v)
-			on = err != nil || b
-		}
-	}
-	return on
-}
-
-// withoutFollow is argv with every --follow out of it.
-func withoutFollow(argv []string) []string {
-	out := make([]string, 0, len(argv))
-	for i, a := range argv {
-		if a == "--" {
-			return append(out, argv[i:]...)
-		}
-		switch {
-		case a == "--follow", a == "-follow",
-			strings.HasPrefix(a, "--follow="), strings.HasPrefix(a, "-follow="):
-			continue
-		}
-		out = append(out, a)
-	}
-	return out
-}
-
-// withoutJSON is argv with every --json out of it, so what is left is the
-// verb's own arguments in the order the verb declares them.
-func withoutJSON(argv []string) []string {
-	out := make([]string, 0, len(argv))
-	for i, a := range argv {
-		if a == "--" {
-			return append(out, argv[i:]...)
-		}
-		switch {
-		case a == "--json", a == "-json",
-			strings.HasPrefix(a, "--json="), strings.HasPrefix(a, "-json="):
-			continue
-		}
-		out = append(out, a)
-	}
-	return out
 }
 
 // WriteError prints the §6.2 failure document: with --json, one envelope on
@@ -216,26 +75,24 @@ func message(err error) string {
 	return err.Error()
 }
 
-// Run sends one subcommand to the daemon and writes the answer.
-func Run(v verbs.Verb, argv []string, out io.Writer) error {
-	req, asJSON, err := Request(v, argv)
-	if err != nil {
-		return err
-	}
-	c := &client.Client{NoStart: v.NoAutostart}
-	if req.Follow {
+// Send performs one parsed call: it asks the daemon and writes the answer. It
+// is the Runner the binary hands Root, and the only place in this door that
+// opens the socket.
+func Send(c Call) error {
+	cl := &client.Client{NoStart: c.Verb.NoAutostart}
+	if c.Req.Follow {
 		// A stream has no single answer to print, so each event is written
 		// as it arrives and the call returns when the daemon says the
 		// stream is over or the caller goes away.
-		return c.Stream(req, func(raw json.RawMessage) error {
-			return WriteEvent(raw, asJSON, out)
+		return cl.Stream(c.Req, func(raw json.RawMessage) error {
+			return WriteEvent(raw, c.AsJSON, os.Stdout)
 		})
 	}
-	result, err := c.Call(req)
+	result, err := cl.Call(c.Req)
 	if err != nil {
 		return err
 	}
-	return Write(v.Name, result, asJSON, out)
+	return Write(c.Verb.Name, result, c.AsJSON, os.Stdout)
 }
 
 // Write prints one answer: as it came when the caller asked for that, and as
@@ -367,57 +224,6 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 	return nil
 }
 
-// WriteEvent prints one event: as it came for a machine caller, and as a line
-// an operator reads otherwise. It is the one renderer both the bounded read
-// and the --follow stream go through, so a followed event and a read one look
-// the same.
-func WriteEvent(raw json.RawMessage, asJSON bool, out io.Writer) error {
-	if asJSON {
-		_, err := fmt.Fprintln(out, string(raw))
-		return err
-	}
-	var ev store.Event
-	if err := json.Unmarshal(raw, &ev); err != nil {
-		return err
-	}
-	line := fmt.Sprintf("%s  %-34s %-26s %s",
-		time.UnixMilli(ev.AtMS).UTC().Format(time.RFC3339), ev.Name, ev.EntityID, ev.ID)
-	if detail := detailLine(ev.Detail); detail != "" {
-		line += "  " + detail
-	}
-	_, err := fmt.Fprintln(out, line)
-	return err
-}
-
-// detailLine is the event's own fields, in a stable order, so two events of
-// the same kind print the same way.
-func detailLine(detail map[string]any) string {
-	if len(detail) == 0 {
-		return ""
-	}
-	keys := make([]string, 0, len(detail))
-	for k := range detail {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	parts := make([]string, 0, len(keys))
-	for _, k := range keys {
-		parts = append(parts, fmt.Sprintf("%s=%v", k, detail[k]))
-	}
-	return strings.Join(parts, " ")
-}
-
-// mustJSON re-renders one event for the shared renderer. It cannot fail on a
-// document the daemon already encoded once, and an empty one renders as an
-// event with no fields rather than taking the whole read down.
-func mustJSON(ev store.Event) json.RawMessage {
-	raw, err := json.Marshal(ev)
-	if err != nil {
-		return json.RawMessage("{}")
-	}
-	return raw
-}
-
 // HeldPhrase is what both status and doctor call a worker slot spent on a
 // pane that has submitted and is waiting for a human. It is deliberately one
 // phrase: an operator who sees nothing moving reads the same words wherever
@@ -431,32 +237,6 @@ func held(n int) string {
 		return ""
 	}
 	return fmt.Sprintf(" (%d %s)", n, HeldPhrase)
-}
-
-// Usage is the help both the bare command and `hdis help` print, listed from
-// the verb table so a new verb appears here without being written out.
-func Usage() string {
-	var b strings.Builder
-	b.WriteString("hdis — the dispatcher for the htask board.\n\nUsage:\n")
-	for _, v := range verbs.All {
-		line := strings.Join(v.CLI, " ")
-		for _, a := range v.Args {
-			if a.Positional {
-				line += " <" + a.Name + ">"
-			}
-		}
-		fmt.Fprintf(&b, "  hdis %-18s %s\n", line, v.Short)
-	}
-	for _, extra := range [][2]string{
-		{"daemon", "Own the tick and answer both doors (`run` is the same)"},
-		{"mcp", "Serve the same verbs over stdio MCP"},
-		{"version", "Print the version"},
-	} {
-		fmt.Fprintf(&b, "  hdis %-18s %s\n", extra[0], extra[1])
-	}
-	b.WriteString("\nEvery verb takes --json, and `hdis events` also takes --follow.\n" +
-		"Run `hdis daemon -h` for the dispatcher's knobs.\n")
-	return b.String()
 }
 
 // verifyLane is the verification lane in a line: on says what a submission
@@ -502,4 +282,53 @@ func or(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+// WriteEvent prints one event: as the daemon's own bytes when the caller
+// asked for JSON, and as a line an operator reads otherwise.
+func WriteEvent(raw json.RawMessage, asJSON bool, out io.Writer) error {
+	if asJSON {
+		_, err := fmt.Fprintln(out, string(raw))
+		return err
+	}
+	var ev store.Event
+	if err := json.Unmarshal(raw, &ev); err != nil {
+		return err
+	}
+	line := fmt.Sprintf("%s  %-34s %-26s %s",
+		time.UnixMilli(ev.AtMS).UTC().Format(time.RFC3339), ev.Name, ev.EntityID, ev.ID)
+	if detail := detailLine(ev.Detail); detail != "" {
+		line += "  " + detail
+	}
+	_, err := fmt.Fprintln(out, line)
+	return err
+}
+
+// detailLine is the event's own fields, in a stable order, so two events of
+// the same kind print the same way.
+func detailLine(detail map[string]any) string {
+	if len(detail) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(detail))
+	for k := range detail {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%v", k, detail[k]))
+	}
+	return strings.Join(parts, " ")
+}
+
+// mustJSON re-renders one event for the shared renderer. It cannot fail on a
+// document the daemon already encoded once, and an empty one renders as an
+// event with no fields rather than taking the whole read down.
+func mustJSON(ev store.Event) json.RawMessage {
+	raw, err := json.Marshal(ev)
+	if err != nil {
+		return json.RawMessage("{}")
+	}
+	return raw
 }

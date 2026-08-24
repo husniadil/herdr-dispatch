@@ -76,8 +76,11 @@ negotiable in either direction:
   fails before the code that makes it pass.
 - No `panic` in production code paths; errors carry what the operator needs
   to act.
-- Dependency budget: one library, the official MCP go-sdk
-  (`github.com/modelcontextprotocol/go-sdk`), which the MCP door is built on.
+- Dependency budget: two libraries. The official MCP go-sdk
+  (`github.com/modelcontextprotocol/go-sdk`), which the MCP door is built on,
+  and `github.com/spf13/cobra`, which the CLI is built on, because §6/§7 have
+  the three sibling binaries present one flag shape and both siblings are
+  already cobra. Both are pinned to the versions the board plugin runs.
   Everything else is the standard library, and the next dependency earns its
   way in with the reason recorded in the README.
 - Lowercase conventional commits, no emojis, no co-author lines.

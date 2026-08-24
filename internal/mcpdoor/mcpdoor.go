@@ -92,10 +92,7 @@ func tool(v verbs.Verb) *mcp.Tool {
 	if len(required) > 0 {
 		schema["required"] = required
 	}
-	description := v.Short
-	if v.Long != "" {
-		description += ". " + v.Long
-	}
+	description := v.Help()
 	return &mcp.Tool{Name: v.Name, Description: description, InputSchema: schema}
 }
 
