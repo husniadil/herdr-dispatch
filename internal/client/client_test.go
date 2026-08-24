@@ -46,6 +46,11 @@ func world(t *testing.T) {
 	t.Setenv("HERDR_PANE_ID", "")
 
 	f := fake.New(t)
+	// The fake `herdr` on PATH is not enough on its own: §11.1 has the
+	// client read HERDR_BIN_PATH at construction, and an operator's shell
+	// exports it, so a daemon started here would call the operator's live
+	// Herdr — and adopt a base pane off their real screen.
+	t.Setenv("HERDR_BIN_PATH", filepath.Join(f.Dir, "herdr"))
 	f.Bin(t, "htask", `case "$1" in
 doctor) echo '{"version":"0.4.0","contract":"0.3","binary":"/bin/htask","socket_live":true,"herdr_reachable":true}' ;;
 *) echo '{"tasks":[],"count":0}' ;;

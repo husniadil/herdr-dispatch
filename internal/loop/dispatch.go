@@ -80,7 +80,10 @@ type Status struct {
 // project is the §4.1 canonical board to look on, already resolved by the
 // door; empty means every board, which is this daemon's default.
 func (l *Loop) Dispatch(ctx context.Context, ref, project string) (Reservation, error) {
-	if l.BasePane == "" {
+	// A daemon that inherited no pane asks Herdr for one here rather than
+	// refusing outright: the plugin-started daemon has none to inherit,
+	// and the pane it will use may not have existed when it started.
+	if l.EnsureBase(ctx) == "" {
 		return Reservation{}, codes.Refusef(codes.NoBasePane,
 			`this daemon has no pane to split a worker off: start it inside a Herdr pane, pass --pane, or set "pane" in the config`)
 	}
@@ -186,7 +189,7 @@ func (l *Loop) Status(ctx context.Context) (Status, error) {
 
 	l.mu.Lock()
 	st := Status{
-		BasePane:   l.BasePane,
+		BasePane:   l.Base(),
 		MaxWorkers: l.Policy.MaxWorkers,
 		Workers:    []Worker{},
 		Pending:    pendingIDs(l.pending),

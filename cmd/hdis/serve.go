@@ -100,8 +100,9 @@ func serve(f *daemonFlags) error {
 		}
 	}
 	if pane == "" {
-		log.Print(`no base pane: nothing will be spawned and dispatch will refuse. ` +
-			`Run inside a Herdr pane, pass --pane, or set "pane" in the config.`)
+		log.Print(`no base pane inherited: a live pane will be adopted as one on the ` +
+			`first tick that finds one, and until then nothing is spawned and dispatch refuses. ` +
+			`Run inside a Herdr pane, pass --pane, or set "pane" in the config to name one outright.`)
 	}
 
 	l := &loop.Loop{

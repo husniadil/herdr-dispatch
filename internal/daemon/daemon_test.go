@@ -528,6 +528,34 @@ func TestADaemonWithNoBasePaneDoesNotTick(t *testing.T) {
 	<-served
 }
 
+// The plugin-started daemon's whole story: it comes up before Herdr has a
+// pane, so it inherits none and adopts none on its first round; once a pane
+// exists it adopts one and the loop starts running against the board.
+func TestAPaneLessDaemonAdoptsABaseAndStartsTicking(t *testing.T) {
+	stateDir(t)
+	d, f := newDaemon(t)
+	d.Loop.BasePane = ""
+	d.Interval = 20 * time.Millisecond
+	ln, err := Listen()
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	served := serve(t, d, ctx, ln)
+	defer func() { cancel(); <-served }()
+
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"w1K:p1","workspace_id":"w1K","tab_id":"w1K:t1","agent_status":"idle"}]}}`)
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if d.Loop.Base() == "w1K:p1" {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("the daemon never adopted a base pane; base = %q", d.Loop.Base())
+}
+
 // awaitStartupTick waits until the tick a starting daemon always runs has
 // made every call it is going to make.
 //

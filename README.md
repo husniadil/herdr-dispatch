@@ -125,10 +125,21 @@ the file that was actually opened, and says `stdout only` when none was.
 Worker panes are splits of a base pane, so the daemon needs one: it takes
 `HERDR_PANE_ID` when it was started inside a Herdr pane, `--pane` when it was
 given one, and the config's `"pane"` key otherwise. Without any of the three
-it still comes up and still answers both doors, but it does not tick and
-every dispatch refuses with `UNSUPPORTED: NO_BASE_PANE`. Every spawn it could reach for
-would fail on the same missing pane, once per interval forever, and a log of
-one error repeated is a log nobody reads.
+it ADOPTS one — the lowest live pane id that is neither one of its own
+workers nor sitting in a tab it opened — and it asks Herdr for that once per
+interval, and again on any dispatch, until there is one to take. That is what
+a daemon Herdr's own plugin manager started at boot has: no `HERDR_PANE_ID`,
+and no `"pane"` in the config on purpose, because a pane id is not durable
+across Herdr restarts and one written down is wrong the first time the
+machine comes back. Adopting names a pane that already exists; nothing is
+opened, because a dispatcher that made itself a pane would put one on the
+operator's screen that nobody asked for.
+
+Until a pane can be adopted the daemon still comes up and still answers both
+doors, but it does not tick and every dispatch refuses with
+`UNSUPPORTED: NO_BASE_PANE`. Every spawn it could reach for would fail on the
+same missing pane, once per interval forever, and a log of one error repeated
+is a log nobody reads. `doctor` names the state: `base pane none yet`.
 
 At startup it reads `htask doctor --json` and says what is unreachable. It
 says it rather than obeying it: a board that is down comes back, and `doctor`

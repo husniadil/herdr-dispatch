@@ -187,23 +187,30 @@ func (d *Daemon) Cleanup(ln net.Listener) {
 
 // tick runs the loop on its interval, and early whenever a dispatch asks.
 //
-// A daemon with no pane to split a worker off does not tick at all. Every
+// A daemon with no pane to split a worker off does not run the loop. Every
 // spawn it could reach for would fail on the same missing pane, once per
 // interval for as long as it runs, and a log of one error repeated is a log
 // nobody reads. Both doors still answer, and dispatch says why with a name.
+//
+// What it does instead is ask Herdr for a pane to adopt, once per interval.
+// A daemon Herdr's plugin manager started at boot has no pane to inherit and
+// none in its config, and the screen it will work on may not exist yet when
+// it comes up; asking again is what turns that from a daemon refusing
+// forever into one that starts working the moment there is somewhere to work.
 func (d *Daemon) tick(ctx context.Context) {
-	if d.Loop.BasePane == "" {
-		d.logf("no base pane: not ticking, and dispatch will refuse with %s", codes.NoBasePane)
-		<-ctx.Done()
-		return
-	}
 	t := time.NewTicker(d.Interval)
 	defer t.Stop()
+	said := false
 	for {
 		// A tick that fails is reported and the next one still runs: the
 		// board being unreachable for a moment is not a reason to stop
 		// dispatching for good.
-		if err := d.Loop.Tick(ctx); err != nil && ctx.Err() == nil {
+		if d.Loop.EnsureBase(ctx) == "" {
+			if !said {
+				d.logf("no base pane: not ticking, and dispatch will refuse with %s until one can be adopted", codes.NoBasePane)
+				said = true
+			}
+		} else if err := d.Loop.Tick(ctx); err != nil && ctx.Err() == nil {
 			d.logf("%v", err)
 		}
 		select {
@@ -497,7 +504,7 @@ func (d *Daemon) doctor(ctx context.Context) (DoctorReport, error) {
 		Socket:         config.SocketPath(),
 		StateDir:       config.StateDir(),
 		ConfigDir:      config.ConfigDir(),
-		BasePane:       d.Loop.BasePane,
+		BasePane:       d.Loop.Base(),
 		MaxWorkers:     d.Loop.Policy.MaxWorkers,
 		Interval:       d.Interval.String(),
 		Workers:        len(d.Loop.Bindings()),

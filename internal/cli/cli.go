@@ -113,7 +113,7 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 		fmt.Fprintf(out, "  contract    %s satisfied by this plugin\n", rep.Contract)
 		fmt.Fprintf(out, "  state dir   %s\n", rep.StateDir)
 		fmt.Fprintf(out, "  config dir  %s\n", rep.ConfigDir)
-		fmt.Fprintf(out, "  base pane   %s\n", or(rep.BasePane, "none: nothing is spawned and dispatch refuses"))
+		fmt.Fprintf(out, "  base pane   %s\n", or(rep.BasePane, "none yet: one is adopted when a live pane can be, and until then nothing is spawned and dispatch refuses"))
 		fmt.Fprintf(out, "  workers     %d live%s, %d reserved, max %d\n",
 			rep.Workers, held(rep.AwaitingReview), rep.Pending, rep.MaxWorkers)
 		fmt.Fprintf(out, "  tick        every %s\n", rep.Interval)

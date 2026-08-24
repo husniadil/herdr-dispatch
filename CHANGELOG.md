@@ -7,6 +7,17 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+**Changed: a daemon with no base pane now adopts one instead of refusing for
+good.** `HERDR_PANE_ID`, `--pane` and the config's `"pane"` key are unchanged
+and still win. What is new is the answer when none of the three gives one: the
+daemon asks Herdr once per interval, and again on any dispatch, and takes the
+lowest live pane id that is neither one of its own workers nor in a tab it
+opened. It opens nothing. This is what a daemon Herdr's plugin manager starts
+at boot needs — it has no `HERDR_PANE_ID`, and naming a pane in the config is
+wrong because pane ids are not durable across Herdr restarts. `NO_BASE_PANE`
+is unchanged as the refusal while there is still nothing to adopt; `doctor`
+now says `base pane none yet` rather than `none` there.
+
 **Changed: the socket verbs `parked_list` and `parked_resolve` are now
 `parked.list` and `parked.resolve`.** The MCP tool names do NOT move: they are
 `parked_list` and `parked_resolve`, as released. What changed is where the

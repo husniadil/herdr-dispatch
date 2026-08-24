@@ -72,7 +72,9 @@ type Loop struct {
 	Store *store.Bindings
 
 	// BasePane is the pane worker panes are split off, normally the
-	// dispatcher's own.
+	// dispatcher's own. It is set once at construction from what the
+	// daemon inherited, and once more by EnsureBase when it inherited
+	// nothing — so it is read through Base and never off the field.
 	BasePane string
 	// Now is time.Now unless a test replaces it.
 	Now func() time.Time
@@ -89,6 +91,12 @@ type Loop struct {
 	// bindings are read and written from more than one at a time. Nothing
 	// slow is done under this lock: a spawn runs to minutes, and it runs
 	// with the lock released.
+	// baseMu guards BasePane alone, which is written by whichever
+	// goroutine first adopts one and read by all of them. It is its own
+	// lock rather than mu because a base is read while mu is held; the
+	// order is always mu then baseMu.
+	baseMu sync.Mutex
+
 	mu       sync.Mutex
 	bindings []decide.Binding
 	// pending is the reservations an on-demand dispatch took and no tick has
@@ -634,11 +642,16 @@ func (l *Loop) retirePane(ctx context.Context, pane string) {
 
 // principal is the board principal this daemon writes with, which carries
 // its own pane.
+//
+// A daemon that started with no pane and adopted one later keeps the bare
+// principal it opened the board with. It is fixed for the process on
+// purpose: a principal that changed mid-run would leave rows written under
+// one name and released under another.
 func (l *Loop) principal() string {
 	if l.Board != nil && l.Board.Principal != "" {
 		return l.Board.Principal
 	}
-	return htask.PrincipalFor(l.BasePane)
+	return htask.PrincipalFor(l.Base())
 }
 
 // release hands back every task the board says this dispatcher is holding
@@ -1096,7 +1109,7 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 	pane, err := l.Spawn.Run(ctx, spawn.Request{
 		Name:       workerName(row.Seq),
 		Label:      spawn.TabLabel(row.Seq),
-		BasePane:   l.BasePane,
+		BasePane:   l.Base(),
 		OriginPane: row.PaneID,
 		Project:    row.Project,
 		Cwd:        tree,
