@@ -181,11 +181,15 @@ output, not a backlog kept in sync by hand.
 (task 62). Fixed by this task: the gate config key, the `release-check`
 target, and the README `## Install` section.
 
-**herdr-tasks** — no `TASKS_CONFIG_DIR` / `TASKS_STATE_DIR` env override, and
-`HTASK_E2E_REQUIRED` is prefixed by the binary name where `htask` is the only
-thing that reads it. Fixed by this task.
+**herdr-tasks** — `HTASK_E2E_REQUIRED` was prefixed by the binary name where
+`htask` is the only thing that reads it; it is `TASKS_E2E_REQUIRED` now, fixed
+by this task. Nothing else open.
 
-**herdr-mail** — `HMAIL_STATE_DIR` is prefixed by the binary name where it
-names a directory, and is now `MAIL_STATE_DIR`; `MAIL_CONFIG_DIR` was missing.
-Both fixed by this task. Still open: no `internal/e2e` layer-3 suite and so no
-`e2e` or `release-check` target, filed on its own board.
+**herdr-mail** — no `internal/e2e` layer-3 suite, and so no `e2e` or
+`release-check` target. Filed on its own board as herdr-mail task 8. Nothing
+else open.
+
+The environment prefixes were the audit's one false lead: all three already
+build theirs from a `config.EnvPrefix` constant carrying the short name, so
+`DISPATCH_`, `TASKS_` and `MAIL_` were never out of line. A grep for the
+literal string finds nothing, which is not the same as finding nothing.
