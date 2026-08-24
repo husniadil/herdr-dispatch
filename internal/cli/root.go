@@ -244,11 +244,23 @@ func (g *globals) request(v verbs.Verb, args map[string]any) (protocol.Request, 
 // operator happens to be standing in would hide most of the fleet from
 // `status` and refuse most of the ready list to `dispatch`.
 func (g *globals) scope() (string, bool, error) {
-	if g.project != "" && g.allProjects {
+	return Scope(g.project, g.allProjects)
+}
+
+// Scope turns a named project and an every-board switch into the pair the
+// daemon reads. It is exported because the MCP door injects the same two as
+// tool arguments (§4.2), and a second copy of this policy is how the two
+// doors would come to disagree about what "no scope" means.
+func Scope(project string, allProjects bool) (string, bool, error) {
+	if project != "" && allProjects {
+		// Named for both doors, because both reach this: the CLI spells the
+		// pair --project / --all-projects and the MCP door spells it
+		// project / all_projects.
 		return "", false, codes.Refusef(codes.Invalid,
-			"--project names one board and --all-projects names every board; pass one")
+			"project names one board and all_projects names every board; pass one "+
+				"(--project / --all-projects on the CLI)")
 	}
-	if g.project == "" {
+	if project == "" {
 		return "", true, nil
 	}
 	// §4.2 resolves an explicit --project HERE, in the door, because a
@@ -256,9 +268,9 @@ func (g *globals) scope() (string, bool, error) {
 	// daemon's is somewhere else entirely. §4.1 is what canonical means: the
 	// git common dir's parent, so every worktree of a repository answers
 	// with one project.
-	proj, err := (&worktree.Manager{}).Project(context.Background(), g.project)
+	proj, err := (&worktree.Manager{}).Project(context.Background(), project)
 	if err != nil {
-		return "", false, codes.Refusef(codes.Invalid, "cannot resolve the project %q: %v", g.project, err)
+		return "", false, codes.Refusef(codes.Invalid, "cannot resolve the project %q: %v", project, err)
 	}
 	return proj, false, nil
 }

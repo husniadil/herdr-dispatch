@@ -14,6 +14,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/husniadil/herdr-dispatch/internal/cli"
 	"github.com/husniadil/herdr-dispatch/internal/client"
 	"github.com/husniadil/herdr-dispatch/internal/codes"
 	"github.com/husniadil/herdr-dispatch/internal/daemon"
@@ -88,6 +89,15 @@ func tool(v verbs.Verb) *mcp.Tool {
 			required = append(required, a.Name)
 		}
 	}
+	// The scope pair, mirrored from the CLI's global flags so that parity is
+	// about the whole surface and not only the per-verb half (§4.2). --json
+	// and --as are deliberately absent: a tool call already answers with a
+	// structured document, and §3.2 derives a principal from the calling
+	// process rather than reading one off a call.
+	props[argProject] = map[string]any{"type": "string",
+		"description": "The board to act on; defaults to every board (§4.2)"}
+	props[argAllProjects] = map[string]any{"type": "boolean",
+		"description": "Act across every board, which is this daemon's default"}
 	schema := map[string]any{"type": "object", "properties": props}
 	if len(required) > 0 {
 		schema["required"] = required
@@ -108,9 +118,25 @@ func handlerFor(v verbs.Verb, call Caller) mcp.ToolHandler {
 		if err := check(v, args); err != nil {
 			return failure(err), nil
 		}
+		// The scope is the door's to resolve and never the verb's, so it
+		// leaves Args before the daemon sees them: an argument no verb
+		// declares would be refused there.
+		named, _ := args[argProject].(string)
+		everyBoard, _ := args[argAllProjects].(bool)
+		delete(args, argProject)
+		delete(args, argAllProjects)
+		project, allProjects, err := cli.Scope(named, everyBoard)
+		if err != nil {
+			return failure(err), nil
+		}
 		raw, err := call(protocol.Request{
 			Verb: v.Name,
 			Args: args,
+			// Resolved here, in the door: a relative path is the CALLER's,
+			// and this process is the only one that knows what it was
+			// relative to (§4.1).
+			Project:     project,
+			AllProjects: allProjects,
 			// The pane this door was spawned in, if it was spawned in one. A
 			// caller on another harness has none; the daemon records what it
 			// is given and grants nothing for it.
@@ -140,8 +166,22 @@ func check(v verbs.Verb, args map[string]any) error {
 	for _, a := range v.Args {
 		declared[a.Name] = a
 	}
+	// The two the door injects into every schema rather than the registry
+	// declaring them, held to the types the schema published.
+	for name, want := range map[string]string{argProject: verbs.String, argAllProjects: verbs.Bool} {
+		raw, ok := args[name]
+		if !ok || raw == nil {
+			continue
+		}
+		if err := daemon.CheckArg(v, verbs.Arg{Name: name, Type: want}, raw); err != nil {
+			return err
+		}
+	}
 	for name := range args {
 		if _, ok := declared[name]; !ok {
+			if name == argProject || name == argAllProjects {
+				continue
+			}
 			return codes.Refusef(codes.Invalid, "%s takes no argument named %q", v.Name, name)
 		}
 	}
@@ -181,3 +221,11 @@ func failure(err error) *mcp.CallToolResult {
 		Content: []mcp.Content{&mcp.TextContent{Text: string(body)}},
 	}
 }
+
+// The scope arguments every tool takes, mirroring the CLI's global flags.
+// They are constants because tool() publishes them and check() enforces them,
+// and a typo in one place would make the door promise what it does not keep.
+const (
+	argProject     = "project"
+	argAllProjects = "all_projects"
+)

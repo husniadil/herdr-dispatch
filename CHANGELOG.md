@@ -24,6 +24,14 @@ the same job of putting stand-in binaries on PATH for a test, and
 `docs/repo-standard.md` now names it in the package table so a third spelling
 is recognisable as one.
 
+**Added: every MCP tool takes `project` and `all_projects`.** The scope the
+CLI has carried since the cobra move reaches the MCP door: each tool's schema
+now publishes the two properties, a relative `project` is resolved to the
+canonical §4.1 path in the door rather than against the daemon's working
+directory, and naming both is refused rather than ranked. A caller that names
+neither is answered exactly as before, because every board is still this
+daemon's default on both doors.
+
 **Changed: the socket verbs `parked_list` and `parked_resolve` are now
 `parked.list` and `parked.resolve`.** The MCP tool names do NOT move: they are
 `parked_list` and `parked_resolve`, as released. What changed is where the

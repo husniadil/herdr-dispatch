@@ -26,6 +26,7 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/spawn"
 	"github.com/husniadil/herdr-dispatch/internal/testenv"
 	"github.com/husniadil/herdr-dispatch/internal/verbs"
+	"github.com/husniadil/herdr-dispatch/internal/worktree"
 )
 
 // pinnedTools is the tool list this door publishes. Adding, renaming or
@@ -191,8 +192,18 @@ func TestTheSchemaDeclaresExactlyWhatTheCLITakes(t *testing.T) {
 		if err := json.Unmarshal(raw, &schema); err != nil {
 			t.Fatalf("schema for %q: %v", v.Name, err)
 		}
-		if len(schema.Properties) != len(v.Args) {
-			t.Errorf("tool %q declares %d arguments and the CLI takes %d", v.Name, len(schema.Properties), len(v.Args))
+		// The two scope arguments are injected into every tool rather than
+		// declared by a verb: they are the CLI's --project and
+		// --all-projects, and TestEveryToolTakesTheScopeArguments is what
+		// holds them. Everything else in the schema comes from the registry.
+		declared := len(schema.Properties)
+		for _, name := range []string{argProject, argAllProjects} {
+			if _, ok := schema.Properties[name]; ok {
+				declared--
+			}
+		}
+		if declared != len(v.Args) {
+			t.Errorf("tool %q declares %d arguments and the CLI takes %d", v.Name, declared, len(v.Args))
 		}
 		for _, a := range v.Args {
 			if _, ok := schema.Properties[a.Name]; !ok {
@@ -255,6 +266,10 @@ func TestBothDoorsBuildTheSameRequest(t *testing.T) {
 		mcpArgs, _ := json.Marshal(fromMCP.Args)
 		if string(cliArgs) != string(mcpArgs) {
 			t.Errorf("%s: the cli sends %s and the mcp door %s", tc.verb, cliArgs, mcpArgs)
+		}
+		if fromCLI.Project != fromMCP.Project || fromCLI.AllProjects != fromMCP.AllProjects {
+			t.Errorf("%s: the cli scopes to %q/all=%t and the mcp door to %q/all=%t",
+				tc.verb, fromCLI.Project, fromCLI.AllProjects, fromMCP.Project, fromMCP.AllProjects)
 		}
 		if fromCLI.Pane != fromMCP.Pane {
 			t.Errorf("%s: the doors derive different panes, %q and %q", tc.verb, fromCLI.Pane, fromMCP.Pane)
@@ -446,4 +461,134 @@ func TestStopIsServedWithItsBlastRadiusStated(t *testing.T) {
 			t.Errorf("stop's description does not say %s (looked for %q)", what, want)
 		}
 	}
+}
+
+// §4.2 on this door: the two scope arguments the CLI's --project and
+// --all-projects become are injected into every tool's schema, so a caller on
+// MCP can narrow to one board the way a caller on the CLI can.
+func TestEveryToolTakesTheScopeArguments(t *testing.T) {
+	_, call := inProcessDaemon(t)
+	sess := session(t, call)
+	tools, err := sess.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(tools.Tools) == 0 {
+		t.Fatal("no tools served")
+	}
+	for _, tl := range tools.Tools {
+		props := properties(t, tl)
+		for name, want := range map[string]string{argProject: "string", argAllProjects: "boolean"} {
+			var prop struct {
+				Type string `json:"type"`
+			}
+			raw, ok := props[name]
+			if !ok {
+				t.Errorf("tool %q takes no %q argument", tl.Name, name)
+				continue
+			}
+			if err := json.Unmarshal(raw, &prop); err != nil {
+				t.Fatalf("tool %q, argument %q: %v", tl.Name, name, err)
+			}
+			if prop.Type != want {
+				t.Errorf("tool %q declares %q as %q, want %q", tl.Name, name, prop.Type, want)
+			}
+		}
+	}
+}
+
+// The default is every board on this door too, which is what makes the
+// injection additive: a caller that names no scope is answered exactly as it
+// was before the arguments existed.
+func TestTheMCPDoorDefaultsToEveryBoard(t *testing.T) {
+	req := scopedCall(t, map[string]any{})
+	if req.Project != "" || !req.AllProjects {
+		t.Fatalf("default scope = %q / all=%t, want every board", req.Project, req.AllProjects)
+	}
+}
+
+// §4.2: an explicit project is resolved to §4.1's canonical path HERE, in the
+// door, because a relative path is the CALLER's and the daemon's working
+// directory is somewhere else entirely.
+func TestAnExplicitProjectIsResolvedInTheMCPDoor(t *testing.T) {
+	want, err := (&worktree.Manager{}).Project(context.Background(), ".")
+	if err != nil {
+		t.Skipf("no git project here: %v", err)
+	}
+	req := scopedCall(t, map[string]any{argProject: "."})
+	if req.Project != want {
+		t.Fatalf("project = %q, want the canonical %q", req.Project, want)
+	}
+	if req.AllProjects {
+		t.Fatal("a named project came through as every board")
+	}
+}
+
+// Naming one board and every board is refused rather than ranked, the same
+// way the CLI refuses --project with --all-projects.
+func TestNamingOneBoardAndEveryBoardIsRefusedOnTheMCPDoor(t *testing.T) {
+	_, call := inProcessDaemon(t)
+	sess := session(t, call)
+	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "status", Arguments: map[string]any{argProject: ".", argAllProjects: true}})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError || !strings.Contains(text(res), string(codes.Invalid)) {
+		t.Fatalf("naming both: %s", text(res))
+	}
+}
+
+// The injected arguments are held to the types the schema publishes, the same
+// way the declared ones are.
+func TestTheScopeArgumentsAreHeldToTheirTypes(t *testing.T) {
+	_, call := inProcessDaemon(t)
+	sess := session(t, call)
+	for _, args := range []map[string]any{
+		{argProject: 7},
+		{argAllProjects: "yes"},
+	} {
+		res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{Name: "status", Arguments: args})
+		if err != nil {
+			t.Fatalf("CallTool %v: %v", args, err)
+		}
+		if !res.IsError || !strings.Contains(text(res), string(codes.Invalid)) {
+			t.Fatalf("%v was taken: %s", args, text(res))
+		}
+	}
+}
+
+// scopedCall makes one call through the door and hands back the request it
+// built, so a test can read what the scope resolved to.
+func scopedCall(t *testing.T, args map[string]any) protocol.Request {
+	t.Helper()
+	var got protocol.Request
+	sess := session(t, func(req protocol.Request) (json.RawMessage, error) {
+		got = req
+		return json.RawMessage(`{}`), nil
+	})
+	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{Name: "status", Arguments: args})
+	if err != nil {
+		t.Fatalf("CallTool %v: %v", args, err)
+	}
+	if res.IsError {
+		t.Fatalf("CallTool %v: %s", args, text(res))
+	}
+	return got
+}
+
+// properties reads one tool's published schema properties.
+func properties(t *testing.T, tl *mcp.Tool) map[string]json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(tl.InputSchema)
+	if err != nil {
+		t.Fatalf("schema for %q: %v", tl.Name, err)
+	}
+	var schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatalf("schema for %q: %v", tl.Name, err)
+	}
+	return schema.Properties
 }
