@@ -247,7 +247,7 @@ func (l *Loop) Adopt(ctx context.Context) (int, error) {
 	// reserved and never spawned for, and a checkout under this daemon's own
 	// state dir. Both are resolved here, on facts read now.
 	l.release(ctx)
-	l.reap(ctx)
+	l.reap(ctx, rowsAlive, agents)
 	return len(kept), nil
 }
 
@@ -267,7 +267,12 @@ type ourPane struct {
 	// tab is the tab the pane sits in, when it is one this dispatcher
 	// opened. A pane in the operator's own tab carries none, so nothing a
 	// restart does can close it.
-	tab     string
+	tab string
+	// cwd is where herdr says the pane is working. It is what recovers the
+	// checkout of a worker no binding survived to name: the reap removes
+	// what no binding names, so a binding written without one is a live
+	// worker's tree deleted out from under it.
+	cwd     string
 	binding *decide.Binding
 }
 
@@ -319,7 +324,7 @@ func (l *Loop) ourPanes(ctx context.Context, alive []herdr.Agent, agents []herdr
 			continue
 		}
 		at[a.PaneID] = len(out)
-		out = append(out, ourPane{pane: a.PaneID, kind: kind, ref: strconv.Itoa(seq), project: project, tab: ourTab[a.PaneID]})
+		out = append(out, ourPane{pane: a.PaneID, kind: kind, ref: strconv.Itoa(seq), project: project, tab: ourTab[a.PaneID], cwd: a.Cwd})
 	}
 	for i := range held {
 		b := held[i]
@@ -495,20 +500,60 @@ func (l *Loop) reconcile(ctx context.Context, p ourPane) (decide.Binding, htask.
 		if b.Tab == "" {
 			b.Tab = p.tab
 		}
+		if b.Worktree == "" {
+			b.Worktree, b.Branch = l.checkoutOf(p, row.Seq)
+		}
 		return b, row, true
 	}
 	// A live pane working a live row that no binding names. The goal reached
 	// it — the row it is on says so — so it counts as delivered once, from
 	// now: the claim timeout has nothing earlier to measure from.
 	l.logf("task %s: pane %s is working it and no binding named it; adopting the worker a restart lost", row.ID, p.pane)
+	tree, branch := l.checkoutOf(p, row.Seq)
 	return decide.Binding{
 		TaskID:     row.ID,
 		Pane:       p.pane,
 		Kind:       p.kind,
 		Tab:        p.tab,
+		Worktree:   tree,
+		Branch:     branch,
 		PromptedAt: l.now(),
 		Prompts:    1,
 	}, row, true
+}
+
+// checkoutOf is the checkout a pane is working in and the branch it is on,
+// when that checkout is one this daemon handed out. It is Herdr's word about
+// the pane's cwd, read against this daemon's own worktree root and its own
+// naming, so nothing outside that root is ever claimed as a binding's.
+//
+// A pane working somewhere else — the project directory itself, a tree the
+// operator made — answers with nothing, and a binding that names no checkout
+// owns none: the retire that drops it removes nothing, which is the right
+// answer for a directory this daemon did not create.
+func (l *Loop) checkoutOf(p ourPane, seq int) (string, string) {
+	if l.Worktrees == nil || p.cwd == "" {
+		return "", ""
+	}
+	root := l.Worktrees.RootDir()
+	if root == "" {
+		return "", ""
+	}
+	rel, err := filepath.Rel(root, p.cwd)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "", ""
+	}
+	dir, _, _ := strings.Cut(rel, string(filepath.Separator))
+	if !strings.HasPrefix(dir, worktree.WorkPrefix) {
+		return "", ""
+	}
+	if seq <= 0 {
+		// The board could not say which task number this is, so the branch
+		// cannot be named. The checkout still can, and it is the half the
+		// reap reads.
+		return filepath.Join(root, dir), ""
+	}
+	return filepath.Join(root, dir), worktree.Branch(seq)
 }
 
 // read asks the board about one pane's task, addressed the way that pane can
@@ -635,7 +680,7 @@ func (l *Loop) release(ctx context.Context) {
 // daemon creates its own checkouts in, and only entries carrying the prefix
 // this daemon names them with. A directory under that root that hdis did not
 // create is not hdis's to remove.
-func (l *Loop) reap(ctx context.Context) {
+func (l *Loop) reap(ctx context.Context, alive, agents []herdr.Agent) {
 	if l.Worktrees == nil || l.Worktrees.RootDir() == "" {
 		return
 	}
@@ -655,6 +700,22 @@ func (l *Loop) reap(ctx context.Context) {
 		}
 	}
 	l.mu.Unlock()
+	// Herdr's word about where a live pane is working is the second half of
+	// the predicate, and the half that makes it true. A binding is a record
+	// this daemon can lose — a restart that adopted a pane before it read a
+	// checkout, a store written before the create — and losing one is not
+	// evidence that the agent is gone. A directory somebody is alive inside
+	// is never this daemon's to remove.
+	// Both of Herdr's answers carry a cwd and neither carries every pane:
+	// `pane list` has the panes whose agent Herdr has since dropped, and
+	// `agent list` has the working directory of an agent it still holds.
+	// The union is what "somebody is alive in there" means.
+	var live []string
+	for _, row := range append(append([]herdr.Agent(nil), alive...), agents...) {
+		if row.Cwd != "" {
+			live = append(live, row.Cwd)
+		}
+	}
 
 	for _, e := range entries {
 		if !e.IsDir() || !strings.HasPrefix(e.Name(), worktree.Prefix) {
@@ -664,11 +725,28 @@ func (l *Loop) reap(ctx context.Context) {
 		if named[dir] {
 			continue
 		}
+		// A worker cd's around inside its own checkout, so the pane's cwd
+		// is the directory or anything under it.
+		if inhabited(dir, live) {
+			continue
+		}
 		l.logf("worktree %s: no binding names it, so the agent it belonged to is gone; removing it", dir)
 		if err := l.Worktrees.Remove(ctx, dir); err != nil {
 			l.logf("worktree %s could not be removed: %v", dir, err)
 		}
 	}
+}
+
+// inhabited reports whether a live pane is working in a directory or below
+// it.
+func inhabited(dir string, live []string) bool {
+	for _, cwd := range live {
+		rel, err := filepath.Rel(dir, cwd)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 // markUnadopted records that the start-up reconciliation did not happen, so
@@ -998,7 +1076,12 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 		// tick may try again. The checkout it would have worked in goes with
 		// it; the branch stays, because a branch costs nothing and a second
 		// attempt continues the one it already has.
-		if rmErr := l.Worktrees.Remove(ctx, tree); rmErr != nil {
+		// On a fresh context, because a shutdown that cancels a spawn
+		// in flight is exactly how this path is reached, and a removal
+		// that inherits the canceled context leaves the checkout behind.
+		down, stop := cleanup(ctx)
+		defer stop()
+		if rmErr := l.Worktrees.Remove(down, tree); rmErr != nil {
 			l.logf("task %s: %v", row.ID, rmErr)
 		}
 		return err
@@ -1248,4 +1331,13 @@ func (l *Loop) logf(format string, args ...any) {
 		return
 	}
 	log.Printf(format, args...)
+}
+
+// cleanup is the context a teardown compensation runs on: detached from the
+// caller's cancellation, bounded so a wedged herdr or git cannot hold a
+// shutdown open. Its whole reason is the shutdown case — the caller's
+// context is already canceled by the time the compensation is reached, and
+// every call made on it fails before it leaves the process.
+func cleanup(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), spawn.CleanupCeiling)
 }

@@ -574,7 +574,14 @@ func (p *Pipeline) Run(ctx context.Context, req Request) (string, error) {
 			// work already, and Claude Code re-reads it during a session.
 			return pane, err
 		}
-		if closeErr := p.Retire(ctx, pane); closeErr != nil {
+		// The compensation runs on a context the caller's cancellation
+		// cannot reach. A shutdown is exactly when this path is taken, and
+		// a retire that inherits the canceled context does nothing at all:
+		// the pane and its agent survive a daemon that has already written
+		// them off. See cleanup.
+		down, stop := cleanup(ctx)
+		defer stop()
+		if closeErr := p.Retire(down, pane); closeErr != nil {
 			return "", fmt.Errorf("%w (and the pane could not be retired: %v)", err, closeErr)
 		}
 		return "", err
@@ -1082,3 +1089,16 @@ func notReady(err error) bool {
 	}
 	return startCodesMeaningNotReady[herr.Code]
 }
+
+// cleanup is the context a teardown compensation runs on: detached from the
+// caller's cancellation, bounded so a wedged herdr cannot hold a shutdown
+// open. Its whole reason is the shutdown case — the caller's context is
+// already canceled by the time the compensation is reached, and every call
+// made on it fails before it leaves the process.
+func cleanup(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), CleanupCeiling)
+}
+
+// CleanupCeiling bounds a teardown compensation. It is the wait an operator
+// is asked to sit through at shutdown, so it is short.
+const CleanupCeiling = 10 * time.Second

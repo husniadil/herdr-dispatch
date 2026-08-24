@@ -1811,3 +1811,30 @@ func TestThePromptedGoalBudgetIsTheOperatorsMeasurement(t *testing.T) {
 			"or record a new measurement here", PromptedGoalBudget)
 	}
 }
+
+// A shutdown cancels the context under an in-flight spawn. The pane is
+// already up by then, so the compensation that takes it back down is the
+// only thing standing between the operator and a worker hdis believes it
+// closed: it has to run on a context the shutdown did not cancel, or the
+// pane and its agent survive a daemon that has forgotten them.
+func TestACanceledSpawnStillRetiresThePaneItBroughtUp(t *testing.T) {
+	h := newHarness(t, []string{promptBox, goalActive}, "exec sleep 1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// The cancel lands while `agent start` is in flight, which is the
+	// window the race was measured in: herdr's child is killed, the build
+	// fails, and the pane it was building into is still there.
+	time.AfterFunc(200*time.Millisecond, cancel)
+
+	pane, err := h.pipe.Run(ctx, req(claudeProfile()))
+	if err == nil {
+		t.Fatal("a canceled spawn reported success")
+	}
+	if pane != "" {
+		t.Fatalf("a pane the spawn could not build was handed back: %q", pane)
+	}
+	verbs := h.verbs(t)
+	if count(verbs, "pane close")+count(verbs, "tab close") == 0 {
+		t.Fatalf("the pane the spawn brought up was never retired: %v (err: %v)", verbs, err)
+	}
+}
