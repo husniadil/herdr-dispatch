@@ -471,11 +471,13 @@ type Config struct {
 	// not started inside one and was given no -pane. Without it, and
 	// without either of those, nothing can be spawned at all.
 	Pane string `json:"pane"`
-	// Gate is the §9.2 policy gate command, argv-style. Absent or empty is
-	// the unconfigured gate, which allows; anything else is a command that
-	// reads {subject, verb, target} on stdin and prints a decision, and any
-	// failure to get a well-formed one denies.
-	Gate []string `json:"gate"`
+	// GateCommand is the §9.2 policy gate command, argv-style. Absent or
+	// empty is the unconfigured gate, which allows; anything else is a
+	// command that reads {subject, verb, target} on stdin and prints a
+	// decision, and any failure to get a well-formed one denies. The key is
+	// `gate_command`, the spelling herdr-tasks and herdr-mail already use
+	// and docs/repo-standard.md fixes for all three.
+	GateCommand []string `json:"gate_command"`
 	// OnEvent is the §8.3 hook: one command, argv-style, run detached with
 	// all three stdio closed for every event this dispatcher writes. Absent
 	// or empty is no hook, which is a dispatcher whose trail is read with
@@ -504,6 +506,13 @@ func Parse(b []byte) (Config, error) {
 		if _, named := verify["profile"]; named {
 			return Config{}, fmt.Errorf("hdis config: verify.profile names a verifier pane that no longer launches; the verification lane is a self-review shot in the worker's own pane, so remove the field")
 		}
+	}
+	// The old spelling of the policy gate key. DisallowUnknownFields would
+	// refuse it anyway, but "unknown field" does not say what to write
+	// instead, and a gate that quietly stops running is what §9.2 exists to
+	// prevent.
+	if _, named := doc["gate"]; named {
+		return Config{}, fmt.Errorf("hdis config: the policy gate key is `gate_command`, which is what herdr-tasks and herdr-mail call it; rename the `gate` key")
 	}
 	raw, err := json.Marshal(doc)
 	if err != nil {
@@ -557,9 +566,9 @@ func Parse(b []byte) (Config, error) {
 	// A gate configured to the empty string is not an unconfigured gate: it
 	// is a command nobody can run, and §9.2 makes that deny every time. An
 	// operator who meant to turn the gate off deletes the key.
-	for i, word := range c.Gate {
+	for i, word := range c.GateCommand {
 		if strings.TrimSpace(word) == "" {
-			return Config{}, fmt.Errorf("hdis config: gate word %d is empty; remove the gate key to leave the policy gate unconfigured, which allows (§9.2)", i)
+			return Config{}, fmt.Errorf("hdis config: gate_command word %d is empty; remove the gate_command key to leave the policy gate unconfigured, which allows (§9.2)", i)
 		}
 	}
 	// An empty word in the hook is a command nobody can run, and it would

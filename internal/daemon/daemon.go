@@ -671,7 +671,7 @@ func (d *Daemon) Policy() *gate.Gate {
 	if d.Loop == nil {
 		return gate.New(nil)
 	}
-	return gate.New(d.Loop.Config.Gate)
+	return gate.New(d.Loop.Config.GateCommand)
 }
 
 // pass is §9.1: every verb that changes the world goes through one gate

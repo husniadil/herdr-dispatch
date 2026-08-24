@@ -258,6 +258,10 @@ func buildHdis(t *testing.T, root string) string {
 // missing one is a loud SKIP: this layer is not part of the gate, and a
 // machine without the board is a machine where it cannot run rather than one
 // where it failed.
+//
+// DISPATCH_E2E_REQUIRED turns that skip into a failure, which is what
+// `make release-check` sets. A release must not be cut on a suite that
+// silently did not run.
 func buildHtask(t *testing.T, root string) string {
 	t.Helper()
 	src := os.Getenv("DISPATCH_E2E_HTASK_SRC")
@@ -269,8 +273,12 @@ func buildHtask(t *testing.T, root string) string {
 		src = filepath.Join(filepath.Dir(here), "herdr-tasks")
 	}
 	if _, err := os.Stat(filepath.Join(src, "cmd", "htask")); err != nil {
-		t.Skipf("no herdr-tasks checkout at %s, so there is no real board to drive: "+
-			"clone it beside this repository or set DISPATCH_E2E_HTASK_SRC (%v)", src, err)
+		msg := "no herdr-tasks checkout at %s, so there is no real board to drive: " +
+			"clone it beside this repository or set DISPATCH_E2E_HTASK_SRC (%v)"
+		if os.Getenv("DISPATCH_E2E_REQUIRED") != "" {
+			t.Fatalf(msg, src, err)
+		}
+		t.Skipf(msg, src, err)
 	}
 	// Into a directory of its own, because it goes on PATH: `hdis` shells out
 	// to `htask` by name, which is the integration surface under test.

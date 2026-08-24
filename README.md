@@ -7,61 +7,11 @@ the worker, and hands off at review — where the board's own review gate takes
 over. Any agent can also ask it for a worker on demand, through its CLI or
 over MCP. The board stays the ledger; this binary is only execution policy.
 
-## Running it
+## Install
 
 ```sh
-make install
-hdis daemon        # or `hdis run`, which is the same thing
+herdr plugin install husniadil/herdr-dispatch
 ```
-
-One binary is the daemon and both doors. The daemon owns the tick and the
-bindings; the CLI and the MCP server are thin clients of it and hold nothing
-of their own. There is one daemon per user, elected by a lock at
-`$XDG_STATE_HOME/dispatch/dispatch.lock`, answering on a private socket at
-`$XDG_STATE_HOME/dispatch/dispatch.sock`. A second one refuses to start with
-`CONFLICT: ALREADY_RUNNING` rather than driving the same board alongside the
-first.
-
-**The daemon opens its own log.** It appends to
-`$XDG_STATE_HOME/dispatch/dispatch.log`, beside the socket, the lock and the
-bindings, whatever the shell line that started it redirected. Every line goes
-to stdout as well, so an operator running it in the foreground sees exactly
-what the file gets; the one exception is a daemon a door started, whose
-stdout IS that file already, where writing to both would double every line.
-`-log` moves the file and defaults to that path, so a redirect stays possible
-and is never required. A log that cannot be opened is said on stdout and the
-daemon starts anyway — refusing to dispatch because a file will not open is
-worse than dispatching where the lines can still be read. `hdis doctor` names
-the file that was actually opened, and says `stdout only` when none was.
-
-`hdis daemon -h` lists the knobs:
-
-| Flag | What it sets |
-| --- | --- |
-| `-config <path>` | The config document. Defaults to `<config_dir>/dispatch.toml`. |
-| `-log <path>` | The file the log is appended to. |
-| `-interval <duration>` | How often to tick. |
-| `-once` | Run one tick and exit, instead of listening. Nothing serves either door in this mode. |
-| `-pane <id>` | The pane worker panes are split off. |
-| `-max-workers <n>` | How many workers may be live at once; `0` means the config's `max_workers`. |
-| `-claim-timeout <duration>` | How long a delivered goal may go unclaimed before a nudge. |
-| `-max-prompts <n>` | How many times one task's goal may be delivered before giving up. |
-| `-start-timeout <duration>` | How long herdr waits for a worker to become interactive. |
-| `-confirm-ceiling <duration>` | How long to wait for a delivered goal to show on the worker's screen. |
-
-Worker panes are splits of a base pane, so the daemon needs one: it takes
-`HERDR_PANE_ID` when it was started inside a Herdr pane, `-pane` when it was
-given one, and the config's `"pane"` key otherwise. Without any of the three
-it still comes up and still answers both doors, but it does not tick and
-every dispatch refuses with `UNSUPPORTED: NO_BASE_PANE`. Every spawn it could reach for
-would fail on the same missing pane, once per interval forever, and a log of
-one error repeated is a log nobody reads.
-
-At startup it reads `htask doctor --json` and says what is unreachable. It
-says it rather than obeying it: a board that is down comes back, and `doctor`
-and `status` are exactly what an operator wants to ask while it is down.
-
-## As a Herdr plugin
 
 `herdr-plugin.toml` at the root is what Herdr installs: it compiles
 `./bin/hdis`, starts the daemon through `scripts/start.sh` — which detaches it,
@@ -127,6 +77,60 @@ this daemon writes with, `plugin:hdis@<its own pane>`, which is declared to
 htask through `--as` and scrubbed of `HERDR_PANE_ID` first so the board can
 tell a plugin from an agent. That is htask's rule, tested here, and it is the
 whole of this plugin's stake in §3.
+
+## Running it
+
+```sh
+make install
+hdis daemon        # or `hdis run`, which is the same thing
+```
+
+One binary is the daemon and both doors. The daemon owns the tick and the
+bindings; the CLI and the MCP server are thin clients of it and hold nothing
+of their own. There is one daemon per user, elected by a lock at
+`$XDG_STATE_HOME/dispatch/dispatch.lock`, answering on a private socket at
+`$XDG_STATE_HOME/dispatch/dispatch.sock`. A second one refuses to start with
+`CONFLICT: ALREADY_RUNNING` rather than driving the same board alongside the
+first.
+
+**The daemon opens its own log.** It appends to
+`$XDG_STATE_HOME/dispatch/dispatch.log`, beside the socket, the lock and the
+bindings, whatever the shell line that started it redirected. Every line goes
+to stdout as well, so an operator running it in the foreground sees exactly
+what the file gets; the one exception is a daemon a door started, whose
+stdout IS that file already, where writing to both would double every line.
+`-log` moves the file and defaults to that path, so a redirect stays possible
+and is never required. A log that cannot be opened is said on stdout and the
+daemon starts anyway — refusing to dispatch because a file will not open is
+worse than dispatching where the lines can still be read. `hdis doctor` names
+the file that was actually opened, and says `stdout only` when none was.
+
+`hdis daemon -h` lists the knobs:
+
+| Flag | What it sets |
+| --- | --- |
+| `-config <path>` | The config document. Defaults to `<config_dir>/dispatch.toml`. |
+| `-log <path>` | The file the log is appended to. |
+| `-interval <duration>` | How often to tick. |
+| `-once` | Run one tick and exit, instead of listening. Nothing serves either door in this mode. |
+| `-pane <id>` | The pane worker panes are split off. |
+| `-max-workers <n>` | How many workers may be live at once; `0` means the config's `max_workers`. |
+| `-claim-timeout <duration>` | How long a delivered goal may go unclaimed before a nudge. |
+| `-max-prompts <n>` | How many times one task's goal may be delivered before giving up. |
+| `-start-timeout <duration>` | How long herdr waits for a worker to become interactive. |
+| `-confirm-ceiling <duration>` | How long to wait for a delivered goal to show on the worker's screen. |
+
+Worker panes are splits of a base pane, so the daemon needs one: it takes
+`HERDR_PANE_ID` when it was started inside a Herdr pane, `-pane` when it was
+given one, and the config's `"pane"` key otherwise. Without any of the three
+it still comes up and still answers both doors, but it does not tick and
+every dispatch refuses with `UNSUPPORTED: NO_BASE_PANE`. Every spawn it could reach for
+would fail on the same missing pane, once per interval forever, and a log of
+one error repeated is a log nobody reads.
+
+At startup it reads `htask doctor --json` and says what is unreachable. It
+says it rather than obeying it: a board that is down comes back, and `doctor`
+and `status` are exactly what an operator wants to ask while it is down.
 
 ## The two doors
 
@@ -326,12 +330,13 @@ inferred: `doctor` and `status` only read, and `parked resolve` is the answer
 to a gate that has already spoken — gating it would let a gate park its own
 resolution and strand every deferred call.
 
-The gate is **configured, not built in** (§9.2). With no `gate` key the gate
-allows everything, which is what most fleets want and what `hdis doctor` says
-on its `gate` line. Set it to a command and every gated call runs it:
+The gate is **configured, not built in** (§9.2). With no `gate_command` key
+the gate allows everything, which is what most fleets want and what `hdis
+doctor` says on its `gate` line. Set it to a command and every gated call runs
+it:
 
 ```toml
-gate = ["/usr/local/bin/fleet-policy", "check"]
+gate_command = ["/usr/local/bin/fleet-policy", "check"]
 ```
 
 The command reads one JSON document on stdin — `{"subject","verb","target"}`,
@@ -432,10 +437,10 @@ exists to prevent.
 Seven keys sit at the top level beside `default`, `profiles` and `projects`:
 `proxy` names the codex provider's launcher, `pane` names the base pane a
 daemon uses when it was not started inside a Herdr pane and was given no
-`-pane`, `max_workers` is how many workers may be live at once, `gate` is the
-§9 policy gate command, `on_event` is the §8.3 event hook, `[layout]` carries
-`min_pane_columns` and `max_panes_per_tab`, and `[verify]` is the verification
-lane.
+`-pane`, `max_workers` is how many workers may be live at once,
+`gate_command` is the §9 policy gate command, `on_event` is the §8.3 event
+hook, `[layout]` carries `min_pane_columns` and `max_panes_per_tab`, and
+`[verify]` is the verification lane.
 
 The lane is off unless the document turns it on. On, every task a worker of
 this daemon's submits earns one self-review shot in that worker's OWN pane —

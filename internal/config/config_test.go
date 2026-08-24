@@ -481,3 +481,43 @@ max_panes_per_tab = 3
 		t.Errorf("an explicit count was overwritten: %d", named.Layout.MaxPanesPerTab)
 	}
 }
+
+// The policy gate key is `gate_command` in herdr-tasks and herdr-mail, and
+// docs/repo-standard.md makes that the spelling all three plugins share. This
+// repo spelled it `gate`, and an operator who learned the key on one board had
+// it silently do nothing on this one.
+func TestThePolicyGateKeyIsGateCommand(t *testing.T) {
+	c, err := Parse([]byte(`
+default = "w"
+gate_command = ["/bin/true"]
+
+[profiles.w]
+provider = "claude"
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got, want := strings.Join(c.GateCommand, " "), "/bin/true"; got != want {
+		t.Errorf("gate_command = %q, want %q", got, want)
+	}
+}
+
+// A document carrying the old spelling is refused by name. DisallowUnknownFields
+// would refuse it anyway, but "unknown field \"gate\"" does not tell an operator
+// what to write instead, and a gate that quietly stops running is the failure
+// §9.2 exists to prevent.
+func TestTheOldGateKeyIsRefusedByName(t *testing.T) {
+	_, err := Parse([]byte(`
+default = "w"
+gate = ["/bin/true"]
+
+[profiles.w]
+provider = "claude"
+`))
+	if err == nil {
+		t.Fatal("a document naming the old `gate` key was accepted")
+	}
+	if !strings.Contains(err.Error(), "gate_command") {
+		t.Errorf("the refusal does not name the key to use: %v", err)
+	}
+}

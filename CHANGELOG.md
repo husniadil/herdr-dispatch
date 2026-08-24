@@ -35,6 +35,18 @@ Nothing a caller had before moved: no verb, argument, JSON field or code
 changed shape. The store document gained an `events` array, and a document
 written without one still loads.
 
+The three sibling plugins — `hdis`, `htask`, `hmail` — are now maintained
+against one written standard,
+[`docs/repo-standard.md`](docs/repo-standard.md). One operator-facing name
+moves here to match it: the §9.2 policy gate command is configured as
+`gate_command = [...]` and no longer as `gate = [...]`. That is what
+herdr-tasks and herdr-mail have always called it, and a config still carrying
+`gate` is refused by name rather than accepted with the gate quietly off.
+
+`DISPATCH_E2E_REQUIRED=1` is new and turns layer 3's loud skip into a failure.
+`make release-check` sets it and is the target herdr-tasks spells the same
+way: a release must not be cut on a suite that silently did not run.
+
 ## 0.2.0 — 2026-08-24
 
 The release that makes `hdis` refuse the way the contract says a plugin

@@ -26,7 +26,7 @@ func gateScript(t *testing.T, d *Daemon, body string) string {
 	if err := os.WriteFile(path, []byte("#!/bin/sh\ncat > "+seen+"\n"+body+"\n"), 0o755); err != nil {
 		t.Fatalf("write gate: %v", err)
 	}
-	d.Loop.Config.Gate = []string{path}
+	d.Loop.Config.GateCommand = []string{path}
 	return seen
 }
 
@@ -77,7 +77,7 @@ func TestAGateThatDeniesRefusesTheDispatchWithItsReason(t *testing.T) {
 func TestAGateThatCannotAnswerDeniesTheDispatch(t *testing.T) {
 	stateDir(t)
 	d, _ := newDaemon(t)
-	d.Loop.Config.Gate = []string{filepath.Join(t.TempDir(), "no-such-gate")}
+	d.Loop.Config.GateCommand = []string{filepath.Join(t.TempDir(), "no-such-gate")}
 
 	_, err := call(t, d, protocol.Request{Verb: "dispatch", Args: map[string]any{"task": "7"}})
 	if got := codes.Of(err); got != codes.Denied {

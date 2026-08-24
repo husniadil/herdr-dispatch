@@ -42,6 +42,13 @@ e2e: build
 # $GOPATH/bin was ~/go/bin (not on PATH), so the copy put `hdis` somewhere
 # nothing could run it. An agent that cannot reach the CLI is not choosing the
 # MCP door; it is being handed one surface.
+# The same layer 3, with the skip turned into a failure. A release must not be
+# cut on a suite that silently did not run, so this is what goes before a tag —
+# and it is the target herdr-tasks spells the same way.
+.PHONY: release-check
+release-check: test-full build
+	DISPATCH_E2E_REQUIRED=1 go test -tags e2e -count=1 -v ./internal/e2e/...
+
 install:
 	go install ./cmd/hdis
 
