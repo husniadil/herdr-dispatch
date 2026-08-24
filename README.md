@@ -1133,7 +1133,7 @@ on its own: the project comes from the checkout the pane is working in, which
 git names by way of the repository a worktree was cut from. A worker in its
 worktree, and a pane opened before worktrees existed and still sitting in the
 project, both answer the same way, and the row
-is then read as `task get <number> --project <project>`. A read by ID stays
+is then read as `htask get <number> --project <project>`. A read by ID stays
 board-agnostic and keeps `--all-projects`, because an ID belongs to no
 project; the board refuses a bare number across projects by design, and
 nothing here asks it to stop. The persisted bindings are a hint on top of that, never the frame: they
@@ -1258,7 +1258,7 @@ worker's judgment of it rather than silence.
 
 **And it names where the findings go**, because asking for a report and naming
 no route is how a lane built to catch undelivered claims makes one of its own.
-`htask` refuses `task submit` on a row that is not `doing`, so a worker whose
+`htask` refuses `submit` on a row that is not `doing`, so a worker whose
 task is in review cannot amend the report it already sent; findings with
 nowhere to go die in the pane while the board stays green. The route is the
 mail door at `$HDIS_DISPATCHER_PANE`, the desk that owns the work. It beats a

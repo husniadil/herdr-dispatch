@@ -28,8 +28,8 @@ var clock = time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
 //
 // It used to switch on "$1 $2" alone and answer `{}` with exit 0 to anything
 // it had not heard of, which made it a machine for passing tests: a verb this
-// binary got wrong read as an empty board, and `htask list --ready` and
-// `htask list --mine` were the same call, so a restart reading what it holds
+// binary got wrong read as an empty board, and `task list --ready` and
+// `task list --mine` were the same call, so a restart reading what it holds
 // got the ready queue back. Three things fix that, and each closed a way a
 // green test could mean nothing:
 //
@@ -54,7 +54,7 @@ case "$1" in
   case " $* " in
   *" --mine "*) cat "$HDIS_FAKE_DIR/mine.json" ;;
   *" --ready "*) cat "$HDIS_FAKE_DIR/ready.json" ;;
-  *) echo '{"error":{"code":"USAGE","message":"this fake serves list --ready and list --mine"}}' >&2; exit 2 ;;
+  *) echo '{"error":{"code":"USAGE","message":"this fake serves task list --ready and task list --mine"}}' >&2; exit 2 ;;
   esac ;;
 "get")
   if [ -n "$asked" ]; then
@@ -76,7 +76,7 @@ case "$1" in
 "goal") cat "$HDIS_FAKE_DIR/goal.txt" ;;
 "release") echo '{"released":true}' ;;
 "doctor "*|"doctor") cat "$HDIS_FAKE_DIR/doctor.json" ;;
-*) echo "htask: this fake board does not serve '$1 $2'" >&2; exit 1 ;;
+*) echo "htask: this fake board does not serve '$1' (task verbs are top-level: 'get', not 'task get')" >&2; exit 1 ;;
 esac`
 
 // `pane read` answers with the terminal's own text and no JSON, which is what
@@ -213,7 +213,7 @@ func TestATickTakesAReadyTaskToADeliveredGoal(t *testing.T) {
 	}
 	// The board's own goal document never reaches the typed line: the
 	// condition is a pointer hdis composes, and the criteria stay on the
-	// board for the worker to read with `htask get`.
+	// board for the worker to read with `task get`.
 	if got := calls(t, f, "goal"); len(got) != 0 {
 		t.Fatalf("the board's goal document was rendered for the typed line: %v", got)
 	}

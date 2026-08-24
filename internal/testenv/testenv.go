@@ -60,6 +60,24 @@ fi
 // it offers at all.
 func NoHerdrSchema(t *testing.T) { t.Setenv("HDIS_FAKE_NO_SCHEMA", "1") }
 
+// htaskFlatPrelude refuses the dead `htask task <verb>` group ahead of
+// whatever the test's own script does. htask hoisted those verbs to the top
+// level, and the real binary still answers the old spelling as a HIDDEN ALIAS
+// for one transition window — which is precisely why no fake may. A fake that
+// answered both would keep passing after this adapter regressed to the dead
+// form, and would keep passing right up to the day the aliases are deleted
+// upstream, at which point the failure lands in production instead of the
+// gate. Most fake htask scripts end in a permissive `*)` that answers an
+// unknown verb with `{}`, so without this the old form reads as SUCCESS.
+//
+// Only the `task` group. `note` stayed a group, spelled with a space, and
+// `htask note add` is a live form that must pass straight through.
+const htaskFlatPrelude = `if [ "$1" = task ]; then
+  echo "htask: unknown command \"task\" for \"htask\": the task verbs are top-level, so this is '$2', not 'task $2'" >&2
+  exit 1
+fi
+`
+
 // Bin writes an executable /bin/sh script under the given name. The script
 // runs with $HDIS_FAKE_DIR set, and "$@" carries the argv it was called with.
 func (f *Fake) Bin(t *testing.T, name, script string) {
@@ -67,6 +85,9 @@ func (f *Fake) Bin(t *testing.T, name, script string) {
 	path := filepath.Join(f.Dir, name)
 	if name == "herdr" {
 		script = herdrSchemaPrelude + script
+	}
+	if name == "htask" {
+		script = htaskFlatPrelude + script
 	}
 	body := "#!/bin/sh\nprintf '%s\\037' \"$@\" >> \"$HDIS_FAKE_DIR/calls.log\"\nprintf '\\n' >> \"$HDIS_FAKE_DIR/calls.log\"\n" + script + "\n"
 	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {

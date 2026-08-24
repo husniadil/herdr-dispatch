@@ -166,7 +166,7 @@ func TestRetryingAFailedDispatchCannotProduceTwoReservationsOrTwoWorkers(t *test
 	}
 }
 
-// A door that refuses `htask get` for a reason of its own, the way a binary
+// A door that refuses `task get` for a reason of its own, the way a binary
 // built against a different contract does: nothing on stdout to parse, the
 // complaint on stderr, a non-zero exit. The ready list still answers.
 const brokenGet = `case "$1" in
@@ -302,7 +302,7 @@ func TestDispatchAndStatusAreSafeAlongsideATick(t *testing.T) {
 // A task id belongs to the board, not to a project. Dispatching one that is
 // ready on another project's board reserves and spawns like any other, and
 // the by-id lookup that validates it looks across every project, exactly as
-// `htask list --ready` already does.
+// `task list --ready` already does.
 func TestDispatchResolvesATaskFiledOnAnotherProjectsBoard(t *testing.T) {
 	l, f := newLoop(t)
 	f.Write(t, "ready.json", `{"tasks":[{"id":"01ZZZ","seq":42,"project":"/src/other","title":"elsewhere","status":"todo"}],"count":1}`)

@@ -12,7 +12,7 @@ import (
 
 // The dispatcher stops at review. It spawns a verifier to READ what was
 // submitted, and the judgment stays with the operator: no code path in this
-// repo issues `htask approve` or `htask reject`.
+// repo issues `task approve` or `task reject`.
 //
 // The board adapter is the only way anything here reaches htask, so its
 // method set is the whole of what this binary can ask the board for. A review
@@ -166,5 +166,88 @@ func TestEveryBoardCallGoesThroughTheOneScrubbedSpawn(t *testing.T) {
 	}
 	if !scrubbed {
 		t.Fatal("the one spawn does not set cmd.Env = envWithoutPane(...); a board call that inherits the daemon's environment declares a plugin principal and carries a pane anyway")
+	}
+}
+
+// htask's task-group verbs moved to the CLI top level: `htask claim 12`, not
+// `htask task claim 12`. The note group kept its space-spelled form, so `htask
+// note add` is untouched and this guard must not catch it.
+//
+// Two shapes carry the old form, and both are caught here because both are
+// wrong in the same way. An ARGV builds it out of adjacent string arguments,
+// `"task", "get"`, which is what internal/htask spawns. A SENTENCE spells it
+// in prose, `htask task get <n>`, which is what a goal, a re-prompt, a
+// notification or the README hands a worker to type. A sentence that teaches
+// the dead form is the same defect as an argv that runs it: the worker types
+// what it was told, and the hidden alias that answers is the thing this move
+// exists to let die.
+//
+// Production files and the README, because those are what ship. A test naming
+// the old form to prove the fake refuses it is the boundary held, not crossed.
+func TestNoSourceFileEmitsTheOldTaskGroupForm(t *testing.T) {
+	root := filepath.Join("..", "..")
+	// The verbs that hoisted. `note` is absent on purpose: it stayed a group.
+	const verbs = `create|get|list|claim|touch|release|submit|amend|approve|` +
+		`reject|cancel|update|delete|archive|goal`
+	shapes := []struct {
+		what string
+		re   *regexp.Regexp
+	}{
+		// `htask task get`, in prose or a comment.
+		{"a sentence", regexp.MustCompile(`htask task (` + verbs + `)\b`)},
+		// `"task", "get"` — adjacent argv strings, however they are spaced.
+		{"an argv", regexp.MustCompile(`"task",\s*"(` + verbs + `)"`)},
+		// The same argv spelled as one string, `"task get"`.
+		{"an argv", regexp.MustCompile(`"task (` + verbs + `)\b`)},
+	}
+	// One exemption, and only one. internal/spawn quotes a PANE TRANSCRIPT
+	// from a live run that predates the flattening: the line the pane really
+	// showed when a long typed condition came out cut mid-word. It is
+	// evidence of a length defect, quoted verbatim, and rewriting the verb
+	// inside it to today's spelling would make the comment lie about what was
+	// observed. It teaches nobody the dead form because it is displayed as
+	// breakage. The guard still holds its shape: exactly this file, exactly
+	// one occurrence. A second one, or the form appearing in another file,
+	// fails and gets read by a human.
+	exempt := map[string]int{
+		filepath.Join(root, "internal", "spawn", "spawn.go"): 1,
+	}
+	read := 0
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if name := info.Name(); path != root && strings.HasPrefix(name, ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		goSrc := strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go")
+		if !goSrc && filepath.Base(path) != "README.md" {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		read++
+		allowed := exempt[path]
+		for _, s := range shapes {
+			for _, m := range s.re.FindAll(body, -1) {
+				if allowed > 0 {
+					allowed--
+					continue
+				}
+				t.Errorf("%s emits %s with the old task-group form, %q: the verb is top-level now", path, s.what, m)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	if read < 10 {
+		t.Fatalf("the walk read %d files, so it guarded nothing", read)
 	}
 }

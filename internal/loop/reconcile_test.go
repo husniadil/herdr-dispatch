@@ -16,7 +16,7 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/worktree"
 )
 
-// heldByUs makes the board answer `htask list --mine` with one row, but only
+// heldByUs makes the board answer `task list --mine` with one row, but only
 // for the principal the argv actually carries. A peer daemon's principal gets
 // an empty board, which is what `--mine` really does.
 func heldByUs(t *testing.T, f *testenv.Fake, principal string) {

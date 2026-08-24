@@ -65,7 +65,7 @@ EOF`)
 
 // A claim names a principal; the pane inside it is what a binding is keyed on.
 //
-// `htask get --json` wraps the row in an envelope, unlike `htask list` and
+// `task get --json` wraps the row in an envelope, unlike `task list` and
 // `doctor`, which answer flat. Reading it flat silently yields a zero row,
 // which is worse than an error: the dispatcher holds a binding whose task it
 // believes it knows nothing about, so review is never announced. The body
@@ -144,7 +144,7 @@ func TestTheBoardsErrorEnvelopeIsCarriedAsARefusal(t *testing.T) {
 }
 
 // A task id is unique to the board, not to a project, and the dispatcher is
-// not scoped to one repository: `htask list --ready` already looks across
+// not scoped to one repository: `task list --ready` already looks across
 // every project, and the by-id lookup that validates a dispatch has to look
 // exactly as wide, or a task filed on another project's board reads as a
 // task that does not exist.

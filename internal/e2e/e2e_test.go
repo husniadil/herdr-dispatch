@@ -143,7 +143,7 @@ func TestADispatchReservesARealBoardsTask(t *testing.T) {
 			Title string `json:"title"`
 		} `json:"task"`
 	}
-	w.json(t, &created, w.htask, "create", "do the e2e thing", "--json")
+	w.json(t, &created, w.htask, "task", "create", "do the e2e thing", "--json")
 	if created.Task.ID == "" {
 		t.Fatal("the real board created no task")
 	}
@@ -198,7 +198,7 @@ func TestDispatchingATaskTheRealBoardDoesNotHaveIsNotFound(t *testing.T) {
 	w := setup(t)
 	// One real task, so the board and both daemons are up and the refusal is
 	// about this id rather than about an empty world.
-	w.run(t, w.project, w.htask, "create", "something else", "--json")
+	w.run(t, w.project, w.htask, "task", "create", "something else", "--json")
 
 	out, code := w.try(t, w.hdis, "dispatch", "01JZZZZZZZZZZZZZZZZZZZZZZZ", "--json")
 	if code != 3 {

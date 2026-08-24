@@ -33,7 +33,7 @@ import (
 const htaskScript = `case "$1" in
 "list") cat "$HDIS_FAKE_DIR/ready.json" ;;
 "get") cat "$HDIS_FAKE_DIR/get.json" ;;
-"doctor") cat "$HDIS_FAKE_DIR/doctor.json" ;;
+"doctor "*|"doctor") cat "$HDIS_FAKE_DIR/doctor.json" ;;
 *) echo '{}' ;;
 esac`
 
