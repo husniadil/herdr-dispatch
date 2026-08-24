@@ -190,7 +190,7 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 				return err
 			}
 		}
-	case "parked_list":
+	case "parked.list":
 		var rep daemon.ParkedReport
 		if err := json.Unmarshal(result, &rep); err != nil {
 			return err
@@ -208,7 +208,7 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 				fmt.Fprintf(out, "%s  and the verb did not run: %s\n", strings.Repeat(" ", len(p.ID)), p.Error)
 			}
 		}
-	case "parked_resolve":
+	case "parked.resolve":
 		var res daemon.ParkedResolution
 		if err := json.Unmarshal(result, &res); err != nil {
 			return err

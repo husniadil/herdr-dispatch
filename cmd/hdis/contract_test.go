@@ -63,8 +63,8 @@ func TestTheSkillTeachesWhatTheRegistrySays(t *testing.T) {
 		t.Fatal("the skill has no sentence naming the MCP tools")
 	}
 	for _, v := range verbs.All {
-		if !strings.Contains(list, "`"+v.Name+"`") {
-			t.Errorf("the skill does not name the MCP tool %q", v.Name)
+		if !strings.Contains(list, "`"+v.MCP+"`") {
+			t.Errorf("the skill does not name the MCP tool %q", v.MCP)
 		}
 	}
 }

@@ -7,6 +7,20 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+**Changed: the socket verbs `parked_list` and `parked_resolve` are now
+`parked.list` and `parked.resolve`.** The MCP tool names do NOT move: they are
+`parked_list` and `parked_resolve`, as released. What changed is where the
+tool name comes from. `Verb` carries an `MCP` field holding it, so the
+namespaced verb is dotted on the socket the way both sibling plugins spell
+theirs, and an absence from the agent surface is a decision written beside the
+verb rather than a transformation applied at the door. A caller on the CLI or
+the MCP door changes nothing. A caller writing socket requests by hand sends
+`"verb":"parked.list"` instead of `"verb":"parked_list"`.
+
+**Changed: `internal/herdr` is `internal/herdrclient`.** Internal package, no
+consumer surface; the name is the one herdr-tasks and herdr-mail give the same
+`herdr <verb>` adapter.
+
 **Added: an event trail, `hdis events`, and the `on_event` hook (§8.1, §8.2,
 §8.3).** Every state change this dispatcher owns is now recorded: a task
 reserved or given back, a worker spawned, adopted, prompted, retired or gone,

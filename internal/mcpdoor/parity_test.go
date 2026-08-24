@@ -150,15 +150,15 @@ func TestNeitherDoorCarriesAVerbTheOtherLacks(t *testing.T) {
 		if _, ok := verbs.ByCLI(v.CLI); !ok {
 			t.Errorf("verb %q has no CLI subcommand", v.Name)
 		}
-		tl, ok := served[v.Name]
+		tl, ok := served[v.MCP]
 		if !ok {
 			t.Errorf("verb %q is a CLI subcommand and no MCP tool", v.Name)
 			continue
 		}
-		if tl.Name != v.Name {
-			t.Errorf("tool %q is served for verb %q: the tool name is the bare verb", tl.Name, v.Name)
+		if tl.Name != v.MCP {
+			t.Errorf("tool %q is served for verb %q: the tool name is the one the verb declares, %q", tl.Name, v.Name, v.MCP)
 		}
-		delete(served, v.Name)
+		delete(served, v.MCP)
 	}
 	for name := range served {
 		t.Errorf("tool %q is served and is no verb in the table", name)
@@ -180,7 +180,7 @@ func TestTheSchemaDeclaresExactlyWhatTheCLITakes(t *testing.T) {
 		byName[tl.Name] = tl
 	}
 	for _, v := range verbs.All {
-		raw, err := json.Marshal(byName[v.Name].InputSchema)
+		raw, err := json.Marshal(byName[v.MCP].InputSchema)
 		if err != nil {
 			t.Fatalf("schema for %q: %v", v.Name, err)
 		}
@@ -225,7 +225,7 @@ func TestBothDoorsBuildTheSameRequest(t *testing.T) {
 		// here because htask and hmail spell the same operator verdict
 		// that way, and a caller should not have to remember which
 		// plugin calls it what.
-		{"parked_resolve", []string{"--reject", "pk-1"}, map[string]any{"id": "pk-1", "reject": true}},
+		{"parked.resolve", []string{"--reject", "pk-1"}, map[string]any{"id": "pk-1", "reject": true}},
 	}
 	for _, tc := range cases {
 		v, ok := verbs.ByName(tc.verb)
@@ -244,7 +244,7 @@ func TestBothDoorsBuildTheSameRequest(t *testing.T) {
 			return json.RawMessage(`{}`), nil
 		}
 		sess := session(t, catch)
-		if _, err := sess.CallTool(context.Background(), &mcp.CallToolParams{Name: v.Name, Arguments: tc.args}); err != nil {
+		if _, err := sess.CallTool(context.Background(), &mcp.CallToolParams{Name: v.MCP, Arguments: tc.args}); err != nil {
 			t.Fatalf("mcp %s: %v", tc.verb, err)
 		}
 

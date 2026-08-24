@@ -317,10 +317,10 @@ func (d *Daemon) serve(ctx context.Context, v verbs.Verb, req protocol.Request) 
 		return encode(rep, nil)
 	case "events":
 		return encode(d.events(req))
-	case "parked_list":
+	case "parked.list":
 		held := d.Loop.Parked()
 		return encode(ParkedReport{Parked: held, Count: len(held)}, nil)
-	case "parked_resolve":
+	case "parked.resolve":
 		return encode(d.resolveParked(ctx, req))
 	case "stop":
 		if d.halt == nil {

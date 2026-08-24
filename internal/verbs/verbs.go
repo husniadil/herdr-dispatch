@@ -29,10 +29,15 @@ type Arg struct {
 
 // Verb is one operation, in every surface it appears in.
 type Verb struct {
-	// Name is the verb on the socket, and the MCP tool name: the door serves
-	// bare verbs, so a caller reads dispatch as herdr-dispatch's dispatch
-	// rather than as a name that repeats the binary.
+	// Name is the verb on the socket, dotted for a namespaced verb:
+	// parked.list, the way both siblings spell theirs.
 	Name string
+	// MCP is the tool name: the verb alone, with dots as underscores. The
+	// door serves bare verbs, so a caller reads dispatch as herdr-dispatch's
+	// dispatch rather than as a name that repeats the binary. It is a field
+	// and not a transformation applied at the door, so an absence from the
+	// agent surface is a decision written beside the verb.
+	MCP string
 	// CLI is the subcommand path, e.g. {"status"}.
 	CLI []string
 	// Short is the one-line help both doors show.
@@ -75,13 +80,13 @@ func GatedVerbs() []string {
 // All is the registry. Order is the order the CLI lists them in.
 var All = []Verb{
 	{
-		Name: "doctor", CLI: []string{"doctor"},
+		Name: "doctor", MCP: "doctor", CLI: []string{"doctor"},
 		Short: "Report whether the dispatcher can work at all",
 		Long: "Answers with the daemon's version, its base pane, the board's " +
 			"reachability and herdr's. Run it first when a dispatch refuses.",
 	},
 	{
-		Name: "dispatch", CLI: []string{"dispatch"},
+		Name: "dispatch", MCP: "dispatch", CLI: []string{"dispatch"},
 		Short: "Bring a worker up for one ready task, now",
 		Long: "Reserves the task for the next tick and returns at once: bringing " +
 			"a worker up takes minutes, and this call does not wait for it. Read " +
@@ -100,7 +105,7 @@ var All = []Verb{
 		Gated:   "dispatch.dispatch",
 	},
 	{
-		Name: "stop", CLI: []string{"stop"},
+		Name: "stop", MCP: "stop", CLI: []string{"stop"},
 		Short: "Ask the running daemon to shut down",
 		Long: "The daemon stops ticking, closes its socket, drops its lock and " +
 			"exits; it writes nothing to the board on the way out, and the tasks " +
@@ -117,7 +122,7 @@ var All = []Verb{
 		Gated:       "dispatch.stop",
 	},
 	{
-		Name: "status", CLI: []string{"status"},
+		Name: "status", MCP: "status", CLI: []string{"status"},
 		Short: "List what the dispatcher is driving",
 		Long: "One row per binding: the task, the pane its worker lives in, when " +
 			"the goal was delivered, how often, whether review was announced, " +
@@ -126,7 +131,7 @@ var All = []Verb{
 			"past that branch, which is what makes a fast-forward merge refuse.",
 	},
 	{
-		Name: "dump", CLI: []string{"dump"},
+		Name: "dump", MCP: "dump", CLI: []string{"dump"},
 		Short: "Print the whole store as JSON",
 		Long: "Everything this daemon remembers across restarts, in one " +
 			"document (§5.8): the bindings, the reservations no tick has " +
@@ -137,7 +142,7 @@ var All = []Verb{
 			"from htask.",
 	},
 	{
-		Name: "events", CLI: []string{"events"},
+		Name: "events", MCP: "events", CLI: []string{"events"},
 		Short: "Read the append-only trail of what the dispatcher did",
 		Long: "The §8.1 events this dispatcher owns and nothing else records: a task " +
 			"reserved or given back, a worker spawned, adopted, prompted, retired or " +
@@ -156,7 +161,7 @@ var All = []Verb{
 		},
 	},
 	{
-		Name: "parked_list", CLI: []string{"parked", "list"},
+		Name: "parked.list", MCP: "parked_list", CLI: []string{"parked", "list"},
 		Short: "List the actions the policy gate deferred to the operator",
 		Long: "A gate that answers defer parks the call instead of performing " +
 			"it (§9.3) and refuses with DENIED carrying the parked_id. This is " +
@@ -166,7 +171,7 @@ var All = []Verb{
 			"finished business — the operator decided and the verb did not run.",
 	},
 	{
-		Name: "parked_resolve", CLI: []string{"parked", "resolve"},
+		Name: "parked.resolve", MCP: "parked_resolve", CLI: []string{"parked", "resolve"},
 		Short: "Let a parked action through, or reject it",
 		Long: "Re-runs the parked verb under the subject the gate stopped, never " +
 			"the resolver's (§9.3), and skips the gate, because the resolution " +

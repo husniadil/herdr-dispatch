@@ -93,7 +93,7 @@ func tool(v verbs.Verb) *mcp.Tool {
 		schema["required"] = required
 	}
 	description := v.Help()
-	return &mcp.Tool{Name: v.Name, Description: description, InputSchema: schema}
+	return &mcp.Tool{Name: v.MCP, Description: description, InputSchema: schema}
 }
 
 // handlerFor turns a tool call into the same daemon call the CLI makes.

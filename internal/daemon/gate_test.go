@@ -176,7 +176,7 @@ func TestResolvingRunsTheVerbWithoutAskingTheGateAgain(t *testing.T) {
 	}
 
 	raw, err := call(t, d, protocol.Request{
-		Verb: "parked_resolve", Args: map[string]any{"id": id}, Pane: "wM:p1"})
+		Verb: "parked.resolve", Args: map[string]any{"id": id}, Pane: "wM:p1"})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestRefusingAParkedActionNeverRunsTheVerb(t *testing.T) {
 	id := codes.ParkedOf(err)
 
 	if _, err := call(t, d, protocol.Request{
-		Verb: "parked_resolve", Args: map[string]any{"id": id, "reject": true}}); err != nil {
+		Verb: "parked.resolve", Args: map[string]any{"id": id, "reject": true}}); err != nil {
 		t.Fatalf("reject: %v", err)
 	}
 	if got := d.Loop.Pending(); len(got) != 0 {
@@ -233,10 +233,10 @@ func TestAParkedActionResolvesOnlyOnce(t *testing.T) {
 	_, err := call(t, d, protocol.Request{Verb: "dispatch", Args: map[string]any{"task": "7"}})
 	id := codes.ParkedOf(err)
 
-	if _, err := call(t, d, protocol.Request{Verb: "parked_resolve", Args: map[string]any{"id": id}}); err != nil {
+	if _, err := call(t, d, protocol.Request{Verb: "parked.resolve", Args: map[string]any{"id": id}}); err != nil {
 		t.Fatalf("first resolve: %v", err)
 	}
-	_, err = call(t, d, protocol.Request{Verb: "parked_resolve", Args: map[string]any{"id": id}})
+	_, err = call(t, d, protocol.Request{Verb: "parked.resolve", Args: map[string]any{"id": id}})
 	if got := codes.Of(err); got != codes.Conflict {
 		t.Fatalf("the second resolve = %v (%s), want CONFLICT", err, got)
 	}
@@ -245,7 +245,7 @@ func TestAParkedActionResolvesOnlyOnce(t *testing.T) {
 func TestResolvingAnUnknownRowIsNotFound(t *testing.T) {
 	stateDir(t)
 	d, _ := newDaemon(t)
-	_, err := call(t, d, protocol.Request{Verb: "parked_resolve", Args: map[string]any{"id": "pk-nope"}})
+	_, err := call(t, d, protocol.Request{Verb: "parked.resolve", Args: map[string]any{"id": "pk-nope"}})
 	if got := codes.Of(err); got != codes.NotFound {
 		t.Fatalf("resolve of an unknown row = %v (%s), want NOT_FOUND", err, got)
 	}
@@ -264,7 +264,7 @@ func TestAResolvedActionWhoseVerbFailedStaysInFrontOfTheOperator(t *testing.T) {
 	}
 	// The board has task 7 and nothing called "nosuch", so the re-run fails
 	// on the board's own answer rather than on anything the gate did.
-	if _, err := call(t, d, protocol.Request{Verb: "parked_resolve", Args: map[string]any{"id": id}}); err == nil {
+	if _, err := call(t, d, protocol.Request{Verb: "parked.resolve", Args: map[string]any{"id": id}}); err == nil {
 		t.Fatal("a dispatch of a task the board does not have succeeded")
 	}
 	held := d.Loop.Parked()
@@ -363,7 +363,7 @@ func TestDumpPrintsTheWholeStore(t *testing.T) {
 		t.Fatalf("parked = %+v", held)
 	}
 	if _, err := call(t, d, protocol.Request{
-		Verb: "parked_resolve", Args: map[string]any{"id": held[0].ID}}); err != nil {
+		Verb: "parked.resolve", Args: map[string]any{"id": held[0].ID}}); err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
 

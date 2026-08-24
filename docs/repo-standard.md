@@ -175,11 +175,11 @@ TOML library, no config library, and no logging library.
 Each is filed on the board of the repo it belongs to. This list is the audit's
 output, not a backlog kept in sync by hand.
 
-**herdr-dispatch** — `internal/cli` is stdlib `flag` rather than cobra (task
-59); no `events` verb (task 58); `internal/herdr` should be `herdrclient`, and
-`parked_list`/`parked_resolve` should be dotted `Name` with an `MCP` field
-(task 62). Fixed by this task: the gate config key, the `release-check`
-target, and the README `## Install` section.
+**herdr-dispatch** — nothing open. `internal/cli` was stdlib `flag` rather
+than cobra (task 59) and there was no `events` verb (task 58); `internal/herdr`
+is `herdrclient` and `parked.list`/`parked.resolve` are dotted `Name` with an
+`MCP` field (task 62). Fixed by the audit's own task: the gate config key, the
+`release-check` target, and the README `## Install` section.
 
 **herdr-tasks** — `HTASK_E2E_REQUIRED` was prefixed by the binary name where
 `htask` is the only thing that reads it; it is `TASKS_E2E_REQUIRED` now, fixed

@@ -13,11 +13,16 @@ func TestEveryVerbIsWholeOnBothDoors(t *testing.T) {
 		if len(v.CLI) == 0 {
 			t.Errorf("verb %q has no CLI subcommand", v.Name)
 		}
-		// The MCP tool name IS the verb, and the CLI path is the same verb
-		// written as words. Reading one off the other is what keeps
-		// `parked list` and `parked_list` the same thing on both doors.
-		if want := strings.Join(v.CLI, "_"); v.Name != want {
-			t.Errorf("verb %q is served over CLI as %q, which is the tool name %q", v.Name, strings.Join(v.CLI, " "), want)
+		// The socket verb is the CLI path dotted and the tool name is the
+		// same path underscored, and both are written down rather than
+		// derived at a door. Reading them off the CLI path here is what
+		// keeps `parked list`, `parked.list` and `parked_list` the same
+		// thing on all three surfaces.
+		if want := strings.Join(v.CLI, "."); v.Name != want {
+			t.Errorf("verb %q is served over CLI as %q, so the socket verb is %q", v.Name, strings.Join(v.CLI, " "), want)
+		}
+		if want := strings.Join(v.CLI, "_"); v.MCP != want {
+			t.Errorf("verb %q publishes the tool name %q, want %q", v.Name, v.MCP, want)
 		}
 		for _, a := range v.Args {
 			if a.Name == "" || a.Desc == "" {
@@ -110,7 +115,7 @@ func TestTheTableIsTheEightVerbsAndNoMore(t *testing.T) {
 	for _, v := range All {
 		got = append(got, v.Name)
 	}
-	want := []string{"doctor", "dispatch", "stop", "status", "dump", "events", "parked_list", "parked_resolve"}
+	want := []string{"doctor", "dispatch", "stop", "status", "dump", "events", "parked.list", "parked.resolve"}
 	if len(got) != len(want) {
 		t.Fatalf("verbs = %v, want %v", got, want)
 	}
