@@ -10,8 +10,8 @@ import (
 
 	"github.com/husniadil/herdr-dispatch/internal/codes"
 	"github.com/husniadil/herdr-dispatch/internal/config"
-	"github.com/husniadil/herdr-dispatch/internal/fake"
 	"github.com/husniadil/herdr-dispatch/internal/protocol"
+	"github.com/husniadil/herdr-dispatch/internal/testenv"
 )
 
 // build compiles the real binary before the fakes take over PATH, because the
@@ -45,7 +45,7 @@ func world(t *testing.T) {
 	// A daemon started here must not inherit the operator's own pane.
 	t.Setenv("HERDR_PANE_ID", "")
 
-	f := fake.New(t)
+	f := testenv.New(t)
 	// The fake `herdr` on PATH is not enough on its own: §11.1 has the
 	// client read HERDR_BIN_PATH at construction, and an operator's shell
 	// exports it, so a daemon started here would call the operator's live

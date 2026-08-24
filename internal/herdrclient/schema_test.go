@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/husniadil/herdr-dispatch/internal/codes"
-	"github.com/husniadil/herdr-dispatch/internal/fake"
+	"github.com/husniadil/herdr-dispatch/internal/testenv"
 )
 
 // §11.2 fixes the document's shape: request methods are the `const` values
@@ -16,7 +16,7 @@ import (
 func TestTheJSONSchemaShapeIsRead(t *testing.T) {
 	c, f := client(t)
 	f.Bin(t, "herdr", `echo '{"id":"x","result":{"type":"ok"}}'`)
-	f.Write(t, fake.HerdrSchemaFile, `{"protocol":7,"schemas":{
+	f.Write(t, testenv.HerdrSchemaFile, `{"protocol":7,"schemas":{
 	  "request":{"oneOf":[
 	    {"properties":{"method":{"const":"pane.send_input"}}},
 	    {"properties":{"method":{"const":"agent.get"}}}]},
@@ -49,7 +49,7 @@ func TestTheJSONSchemaShapeIsRead(t *testing.T) {
 func TestTheFlatShapeIsAlsoRead(t *testing.T) {
 	c, f := client(t)
 	f.Bin(t, "herdr", `echo '{"id":"x","result":{"type":"ok"}}'`)
-	f.Write(t, fake.HerdrSchemaFile, `{"protocol":2,"requests":["tab.create"],"events":["pane_exited"]}`)
+	f.Write(t, testenv.HerdrSchemaFile, `{"protocol":2,"requests":["tab.create"],"events":["pane_exited"]}`)
 	s, err := c.Schema(context.Background())
 	if err != nil {
 		t.Fatalf("schema: %v", err)
@@ -88,7 +88,7 @@ func TestTheSchemaIsReadOnce(t *testing.T) {
 func TestAMissingCapabilityIsUnsupportedAtTheVerbThatNeedsIt(t *testing.T) {
 	c, f := client(t)
 	// A Herdr with everything but tab.create.
-	f.Write(t, fake.HerdrSchemaFile, `{"protocol":1,"requests":["pane.send_input","pane.read","agent.get"]}`)
+	f.Write(t, testenv.HerdrSchemaFile, `{"protocol":1,"requests":["pane.send_input","pane.read","agent.get"]}`)
 	f.Bin(t, "herdr", `echo '{"id":"x","result":{"type":"ok"}}'`)
 
 	_, _, err := c.TabCreate(context.Background(), "wM", "/src/p", "hdis-7")
@@ -138,7 +138,7 @@ func TestEveryVerbThatNeedsACapabilityRefusesWithoutIt(t *testing.T) {
 					offered = append(offered, `"`+cap+`"`)
 				}
 			}
-			f.Write(t, fake.HerdrSchemaFile, `{"requests":[`+strings.Join(offered, ",")+`]}`)
+			f.Write(t, testenv.HerdrSchemaFile, `{"requests":[`+strings.Join(offered, ",")+`]}`)
 			f.Bin(t, "herdr", `echo '{"id":"x","result":{"type":"ok"}}'`)
 
 			err := tc.call(c)
@@ -157,7 +157,7 @@ func TestEveryVerbThatNeedsACapabilityRefusesWithoutIt(t *testing.T) {
 // forever over one unreachable call.
 func TestAnUnreadableSchemaIsNotRememberedAsAnAnswer(t *testing.T) {
 	c, f := client(t)
-	fake.NoHerdrSchema(t)
+	testenv.NoHerdrSchema(t)
 	f.Bin(t, "herdr", `echo "herdr: no server" >&2; exit 1`)
 	ctx := context.Background()
 	if _, err := c.Schema(ctx); err == nil {
@@ -166,7 +166,7 @@ func TestAnUnreadableSchemaIsNotRememberedAsAnAnswer(t *testing.T) {
 	if c.Seen() != nil {
 		t.Fatal("a failed read was cached as the answer")
 	}
-	f.Bin(t, "herdr", `if [ "$1 $2" = "api schema" ]; then echo '`+fake.DefaultHerdrSchema+`'; exit 0; fi
+	f.Bin(t, "herdr", `if [ "$1 $2" = "api schema" ]; then echo '`+testenv.DefaultHerdrSchema+`'; exit 0; fi
 echo '{"id":"x","result":{"type":"ok"}}'`)
 	if err := c.Require(ctx, CapPaneRun); err != nil {
 		t.Errorf("the next call did not ask again: %v", err)
@@ -178,7 +178,7 @@ echo '{"id":"x","result":{"type":"ok"}}'`)
 // would refuse every verb with UNSUPPORTED and blame Herdr for it.
 func TestASchemaListingNoRequestsIsUnavailableRatherThanEmpty(t *testing.T) {
 	c, f := client(t)
-	f.Write(t, fake.HerdrSchemaFile, `{"protocol":1}`)
+	f.Write(t, testenv.HerdrSchemaFile, `{"protocol":1}`)
 	_, err := c.Schema(context.Background())
 	if got := codes.Of(err); got != codes.Unavailable {
 		t.Fatalf("an empty schema = %v (%s), want UNAVAILABLE", err, got)

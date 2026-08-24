@@ -18,7 +18,6 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/codes"
 	"github.com/husniadil/herdr-dispatch/internal/config"
 	"github.com/husniadil/herdr-dispatch/internal/decide"
-	"github.com/husniadil/herdr-dispatch/internal/fake"
 	"github.com/husniadil/herdr-dispatch/internal/herdrclient"
 	"github.com/husniadil/herdr-dispatch/internal/htask"
 	"github.com/husniadil/herdr-dispatch/internal/loop"
@@ -26,6 +25,7 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/proxy"
 	"github.com/husniadil/herdr-dispatch/internal/spawn"
 	"github.com/husniadil/herdr-dispatch/internal/store"
+	"github.com/husniadil/herdr-dispatch/internal/testenv"
 	"github.com/husniadil/herdr-dispatch/internal/version"
 	"github.com/husniadil/herdr-dispatch/internal/worktree"
 )
@@ -78,9 +78,9 @@ func stateDir(t *testing.T) string {
 	return dir
 }
 
-func newDaemon(t *testing.T) (*Daemon, *fake.Fake) {
+func newDaemon(t *testing.T) (*Daemon, *testenv.Fake) {
 	t.Helper()
-	f := fake.New(t)
+	f := testenv.New(t)
 	f.Bin(t, "htask", htaskScript)
 	f.Bin(t, "herdr", herdrScript)
 	// A git that answers for a project which is not a real repository: it
@@ -564,7 +564,7 @@ func TestAPaneLessDaemonAdoptsABaseAndStartsTicking(t *testing.T) {
 // there is nothing to act on afterwards, so those two reads ARE the whole of
 // that tick. Both seen means the tick has no call left to make, and a test
 // that wants to attribute later calls to something else can take its mark.
-func awaitStartupTick(t *testing.T, f *fake.Fake) {
+func awaitStartupTick(t *testing.T, f *testenv.Fake) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {

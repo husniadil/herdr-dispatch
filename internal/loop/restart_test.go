@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/husniadil/herdr-dispatch/internal/decide"
-	"github.com/husniadil/herdr-dispatch/internal/fake"
 	"github.com/husniadil/herdr-dispatch/internal/htask"
+	"github.com/husniadil/herdr-dispatch/internal/testenv"
 	"github.com/husniadil/herdr-dispatch/internal/worktree"
 )
 
@@ -353,7 +353,7 @@ func TestARestartRetiresNoPaneItDidNotStrand(t *testing.T) {
 }
 
 // agentsAre makes herdr's `agent list` name the panes this daemon opened.
-func agentsAre(t *testing.T, f *fake.Fake, agents string) {
+func agentsAre(t *testing.T, f *testenv.Fake, agents string) {
 	t.Helper()
 	f.Write(t, "agents.json", `{"id":"x","result":{"type":"agent_list","agents":[`+agents+`]}}`)
 }

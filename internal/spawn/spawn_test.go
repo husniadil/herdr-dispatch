@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/husniadil/herdr-dispatch/internal/config"
-	"github.com/husniadil/herdr-dispatch/internal/fake"
 	"github.com/husniadil/herdr-dispatch/internal/herdrclient"
 	"github.com/husniadil/herdr-dispatch/internal/proxy"
+	"github.com/husniadil/herdr-dispatch/internal/testenv"
 )
 
 const (
@@ -70,7 +70,7 @@ const (
 )
 
 type harness struct {
-	*fake.Fake
+	*testenv.Fake
 	pipe *Pipeline
 }
 
@@ -78,7 +78,7 @@ type harness struct {
 // bounded poll costs no wall-clock time.
 func newHarness(t *testing.T, reads []string, start string) *harness {
 	t.Helper()
-	f := fake.New(t)
+	f := testenv.New(t)
 	f.Bin(t, "herdr", herdrScript)
 	f.Write(t, "split.json", `{"id":"x","result":{"type":"pane_info","pane":{"pane_id":"wM:p9","workspace_id":"wM","tab_id":"wM:t1","terminal_id":"x","focused":false,"agent_status":"unknown","revision":1}}}`)
 	// What `herdr tab create` really answers with: the tab, and the pane

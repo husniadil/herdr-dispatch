@@ -10,16 +10,16 @@ import (
 	"testing"
 
 	"github.com/husniadil/herdr-dispatch/internal/decide"
-	"github.com/husniadil/herdr-dispatch/internal/fake"
 	"github.com/husniadil/herdr-dispatch/internal/htask"
 	"github.com/husniadil/herdr-dispatch/internal/store"
+	"github.com/husniadil/herdr-dispatch/internal/testenv"
 	"github.com/husniadil/herdr-dispatch/internal/worktree"
 )
 
 // heldByUs makes the board answer `task list --mine` with one row, but only
 // for the principal the argv actually carries. A peer daemon's principal gets
 // an empty board, which is what `--mine` really does.
-func heldByUs(t *testing.T, f *fake.Fake, principal string) {
+func heldByUs(t *testing.T, f *testenv.Fake, principal string) {
 	t.Helper()
 	f.Write(t, "mine.json", `{"tasks":[{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"doing","claimed_by":"`+principal+`"}],"count":1}`)
 	f.Bin(t, "htask", `mine=no
@@ -175,7 +175,7 @@ func TestAReservationOutlivesTheDaemonThatMadeIt(t *testing.T) {
 // it takes the directory named last on the line. A fake that only exits zero
 // deletes nothing, and a reap test standing on one passes whether the code
 // removed anything or not.
-func removingGit(t *testing.T, f *fake.Fake) {
+func removingGit(t *testing.T, f *testenv.Fake) {
 	t.Helper()
 	f.Bin(t, "git", `for a in "$@"; do last=$a; done
 [ "$3" = worktree ] && rm -rf "$last"

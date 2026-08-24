@@ -13,12 +13,12 @@ import (
 
 	"github.com/husniadil/herdr-dispatch/internal/config"
 	"github.com/husniadil/herdr-dispatch/internal/decide"
-	"github.com/husniadil/herdr-dispatch/internal/fake"
 	"github.com/husniadil/herdr-dispatch/internal/herdrclient"
 	"github.com/husniadil/herdr-dispatch/internal/htask"
 	"github.com/husniadil/herdr-dispatch/internal/proxy"
 	"github.com/husniadil/herdr-dispatch/internal/spawn"
 	"github.com/husniadil/herdr-dispatch/internal/store"
+	"github.com/husniadil/herdr-dispatch/internal/testenv"
 	"github.com/husniadil/herdr-dispatch/internal/worktree"
 )
 
@@ -126,15 +126,15 @@ worktree)
 esac
 exit 0`
 
-func fakeGit(t *testing.T, f *fake.Fake) string {
+func fakeGit(t *testing.T, f *testenv.Fake) string {
 	t.Helper()
 	f.Bin(t, "git", gitScript)
 	return filepath.Join(f.Dir, "git")
 }
 
-func newLoop(t *testing.T) (*Loop, *fake.Fake) {
+func newLoop(t *testing.T) (*Loop, *testenv.Fake) {
 	t.Helper()
-	f := fake.New(t)
+	f := testenv.New(t)
 	f.Bin(t, "htask", htaskScript)
 	f.Bin(t, "herdr", herdrScript)
 	f.Write(t, "ready.json", readyOne)
@@ -179,7 +179,7 @@ provider = "claude"
 	return l, f
 }
 
-func calls(t *testing.T, f *fake.Fake, prefix string) []string {
+func calls(t *testing.T, f *testenv.Fake, prefix string) []string {
 	t.Helper()
 	var out []string
 	for _, c := range f.Calls(t) {
@@ -542,7 +542,7 @@ func TestAKeptPaneStillGoallessPastTheLargerCeilingIsGivenUp(t *testing.T) {
 
 // codexLoop is the same loop with the codex profile, so its spawns write the
 // settings file the typed line no longer carries.
-func codexLoop(t *testing.T) (*Loop, *fake.Fake, string) {
+func codexLoop(t *testing.T) (*Loop, *testenv.Fake, string) {
 	t.Helper()
 	l, f := newLoop(t)
 	cfg, err := config.Parse([]byte(`default = "worker"
@@ -732,7 +732,7 @@ func doingRow(feedback string) string {
 
 // idlePane makes the spawned worker's pane read idle, which is what the
 // stalled rule and the rejected rule are both decided from.
-func idlePane(t *testing.T, f *fake.Fake) {
+func idlePane(t *testing.T, f *testenv.Fake) {
 	t.Helper()
 	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
 }

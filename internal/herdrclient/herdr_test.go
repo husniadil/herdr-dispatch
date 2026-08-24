@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/husniadil/herdr-dispatch/internal/fake"
+	"github.com/husniadil/herdr-dispatch/internal/testenv"
 )
 
-func client(t *testing.T) (*Client, *fake.Fake) {
+func client(t *testing.T) (*Client, *testenv.Fake) {
 	t.Helper()
-	return &Client{}, fake.New(t)
+	return &Client{}, testenv.New(t)
 }
 
 // A worker pane is a split of the dispatcher's own, and its id comes back in

@@ -14,12 +14,12 @@ import (
 
 	"github.com/husniadil/herdr-dispatch/internal/config"
 	"github.com/husniadil/herdr-dispatch/internal/decide"
-	"github.com/husniadil/herdr-dispatch/internal/fake"
 	"github.com/husniadil/herdr-dispatch/internal/herdrclient"
 	"github.com/husniadil/herdr-dispatch/internal/htask"
 	"github.com/husniadil/herdr-dispatch/internal/proxy"
 	"github.com/husniadil/herdr-dispatch/internal/spawn"
 	"github.com/husniadil/herdr-dispatch/internal/store"
+	"github.com/husniadil/herdr-dispatch/internal/testenv"
 	"github.com/husniadil/herdr-dispatch/internal/worktree"
 )
 
@@ -116,7 +116,7 @@ func cwdOf(t *testing.T, argv []string) string {
 
 // splits returns the argv of every recorded `tab create`: one per agent this
 // dispatcher brought up.
-func splits(t *testing.T, f *fake.Fake) [][]string {
+func splits(t *testing.T, f *testenv.Fake) [][]string {
 	t.Helper()
 	var out [][]string
 	for _, argv := range f.Argv(t) {
@@ -140,16 +140,16 @@ func paneList(entries ...string) string {
 
 // newVerifyLoop is newLoop with the verification lane on and a herdr that can
 // hand out more than one pane.
-func newVerifyLoop(t *testing.T, enabled bool) (*Loop, *fake.Fake, string) {
+func newVerifyLoop(t *testing.T, enabled bool) (*Loop, *testenv.Fake, string) {
 	t.Helper()
 	return newVerifyLoopIn(t, enabled, gitRepo(t))
 }
 
 // newVerifyLoopIn is newVerifyLoop with the project named, so a case can
 // hand it a directory that is not a repository.
-func newVerifyLoopIn(t *testing.T, enabled bool, project string) (*Loop, *fake.Fake, string) {
+func newVerifyLoopIn(t *testing.T, enabled bool, project string) (*Loop, *testenv.Fake, string) {
 	t.Helper()
-	f := fake.New(t)
+	f := testenv.New(t)
 	f.Bin(t, "htask", htaskScript)
 	f.Bin(t, "herdr", herdrTwoPanes)
 	f.Write(t, "tabs.json", `{"id":"x","result":{"type":"tab_list","tabs":[]}}`)
@@ -196,7 +196,7 @@ enabled = true
 
 // submitted moves the board's one task into review and leaves the worker's
 // pane alive, which is the state the verification lane acts on.
-func submitted(t *testing.T, f *fake.Fake, project string) {
+func submitted(t *testing.T, f *testenv.Fake, project string) {
 	t.Helper()
 	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
 	f.Write(t, "get.json", row(project, "review", "agent:wM:p9"))

@@ -9,14 +9,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/husniadil/herdr-dispatch/internal/fake"
+	"github.com/husniadil/herdr-dispatch/internal/testenv"
 	"github.com/husniadil/herdr-dispatch/internal/worktree"
 )
 
 // inCheckout puts one live worker pane in a checkout under this daemon's own
 // worktree root, which is the state a restart finds after a spawn whose
 // binding never landed.
-func inCheckout(t *testing.T, f *fake.Fake, root string) string {
+func inCheckout(t *testing.T, f *testenv.Fake, root string) string {
 	t.Helper()
 	dir := filepath.Join(root, worktree.WorkPrefix+"7-abc")
 	if err := os.MkdirAll(dir, 0o700); err != nil {

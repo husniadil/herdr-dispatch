@@ -8,12 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/husniadil/herdr-dispatch/internal/fake"
+	"github.com/husniadil/herdr-dispatch/internal/testenv"
 )
 
-func client(t *testing.T) (*Client, *fake.Fake) {
+func client(t *testing.T) (*Client, *testenv.Fake) {
 	t.Helper()
-	return &Client{}, fake.New(t)
+	return &Client{}, testenv.New(t)
 }
 
 // Discovery goes through `doctor --json`, and every call names hdis as its
@@ -363,7 +363,7 @@ echo '{"tasks":[{"id":"01AAA","seq":7,"project":"/src/a","title":"first","status
 }
 
 // childEnv reads the environment the fake binary saw, as name to value.
-func childEnv(t *testing.T, f *fake.Fake) map[string]string {
+func childEnv(t *testing.T, f *testenv.Fake) map[string]string {
 	t.Helper()
 	b, err := os.ReadFile(f.Path("env.txt"))
 	if err != nil {

@@ -5,13 +5,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/husniadil/herdr-dispatch/internal/fake"
+	"github.com/husniadil/herdr-dispatch/internal/testenv"
 )
 
 // The proxy prints its settings document pretty, and herdr refuses a newline
 // in an agent argument outright, so it is compacted before it travels.
 func TestSettingsAreCompactedToOneLine(t *testing.T) {
-	f := fake.New(t)
+	f := testenv.New(t)
 	f.Bin(t, "proxenos", `cat <<'EOF'
 {
   "env": {
@@ -42,7 +42,7 @@ EOF`)
 // A down daemon is step zero's failure, and the operator gets the daemon's
 // own words: they name the socket and say how to start it.
 func TestADownDaemonFailsWithItsOwnMessage(t *testing.T) {
-	f := fake.New(t)
+	f := testenv.New(t)
 	f.Bin(t, "proxenos", `cat >&2 <<'EOF'
 Error: the daemon is not answering (could not reach the daemon at /tmp/proxenos.sock),
 so there is no configuration to start this with. Start it with 'proxenos run'.
@@ -64,7 +64,7 @@ exit 1`)
 // unparseable one cannot be compacted, and an uncompacted one is a newline
 // herdr will refuse later, further from the cause.
 func TestUnreadableSettingsAreRefusedHere(t *testing.T) {
-	f := fake.New(t)
+	f := testenv.New(t)
 	f.Bin(t, "proxenos", `echo "not json at all"`)
 
 	if _, err := (&Client{}).Settings(context.Background()); err == nil {

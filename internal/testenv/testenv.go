@@ -1,8 +1,8 @@
-// Package fake puts stand-in `htask`, `herdr` and `proxenos` binaries
+// Package testenv puts stand-in `htask`, `herdr` and `proxenos` binaries
 // on PATH for a test. Every case in this repo that shells out answers its own
 // calls this way: the operator's live board, herdr server and proxy daemon are
 // never reachable from a test, and the gate needs none of them installed.
-package fake
+package testenv
 
 import (
 	"os"

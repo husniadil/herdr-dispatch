@@ -18,13 +18,13 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/config"
 	"github.com/husniadil/herdr-dispatch/internal/daemon"
 	"github.com/husniadil/herdr-dispatch/internal/decide"
-	"github.com/husniadil/herdr-dispatch/internal/fake"
 	"github.com/husniadil/herdr-dispatch/internal/herdrclient"
 	"github.com/husniadil/herdr-dispatch/internal/htask"
 	"github.com/husniadil/herdr-dispatch/internal/loop"
 	"github.com/husniadil/herdr-dispatch/internal/protocol"
 	"github.com/husniadil/herdr-dispatch/internal/proxy"
 	"github.com/husniadil/herdr-dispatch/internal/spawn"
+	"github.com/husniadil/herdr-dispatch/internal/testenv"
 	"github.com/husniadil/herdr-dispatch/internal/verbs"
 )
 
@@ -46,7 +46,7 @@ var pinnedTools = []string{
 // socket: both doors are tested against the same Handle the socket serves.
 func inProcessDaemon(t *testing.T) (*daemon.Daemon, Caller) {
 	t.Helper()
-	f := fake.New(t)
+	f := testenv.New(t)
 	f.Bin(t, "htask", `case "$1 $2" in
 "task list") echo '{"tasks":[{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"todo"}],"count":1}' ;;
 "task get") echo '{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"todo"}}' ;;
