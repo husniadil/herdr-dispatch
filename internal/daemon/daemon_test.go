@@ -1045,3 +1045,85 @@ func TestTheProjectAJobNamesReachesTheLoop(t *testing.T) {
 		t.Fatalf("reservation: %+v", res)
 	}
 }
+
+// doctor said whether the board and Herdr were reachable but not the proxy,
+// so the first thing an operator learned about a down proxenos was a failed
+// codex spawn. It answers here now, before one is tried.
+func TestDoctorReportsTheProxyItCanReach(t *testing.T) {
+	stateDir(t)
+	d, f := newDaemon(t)
+	f.Bin(t, "proxenos", `echo '{"auth":{"account":"work-codex"}}'`)
+
+	rep := doctorOf(t, d)
+	if !rep.Proxy.Installed || !rep.Proxy.Reachable {
+		t.Fatalf("proxy report: %+v", rep.Proxy)
+	}
+	if got, want := rep.Proxy.Account, "work-codex"; got != want {
+		t.Fatalf("account: got %q, want %q", got, want)
+	}
+	if rep.Proxy.Binary != "proxenos" || rep.Proxy.Error != "" {
+		t.Fatalf("proxy report: %+v", rep.Proxy)
+	}
+}
+
+// A proxy that is down is reported in its own words. Swallowing them would
+// leave the operator with the one fact they already had.
+func TestDoctorReportsADownProxyInItsOwnWords(t *testing.T) {
+	stateDir(t)
+	d, f := newDaemon(t)
+	f.Bin(t, "proxenos", `echo "Error: the daemon is not answering. Start it with 'proxenos run'." >&2; exit 1`)
+
+	rep := doctorOf(t, d)
+	if rep.Proxy.Reachable {
+		t.Fatal("doctor called a proxy that refused reachable")
+	}
+	if !rep.Proxy.Installed {
+		t.Fatal("a proxy that answered at all is installed")
+	}
+	if !strings.Contains(rep.Proxy.Error, "proxenos run") {
+		t.Fatalf("the proxy's own words are gone: %q", rep.Proxy.Error)
+	}
+}
+
+// A proxy nobody installed is not a failure: no configured profile launches
+// through it here, and doctor says both facts rather than one that reads as
+// an outage.
+func TestDoctorSaysWhenNoProxyIsInstalledAndNoneIsNeeded(t *testing.T) {
+	stateDir(t)
+	d, _ := newDaemon(t)
+
+	rep := doctorOf(t, d)
+	if rep.Proxy.Installed || rep.Proxy.Reachable {
+		t.Fatalf("proxy report: %+v", rep.Proxy)
+	}
+	if len(rep.Proxy.Profiles) != 0 {
+		t.Fatalf("the claude profile path never touches the proxy: %+v", rep.Proxy.Profiles)
+	}
+	if rep.Proxy.Error == "" {
+		t.Fatal("doctor says why it got no answer")
+	}
+}
+
+// Which profiles launch through the proxy is what turns its state into a
+// consequence: the same down proxy is an outage for a codex profile and
+// nothing at all for a claude one.
+func TestDoctorNamesTheProfilesThatLaunchThroughTheProxy(t *testing.T) {
+	stateDir(t)
+	d, f := newDaemon(t)
+	f.Bin(t, "proxenos", `echo '{"auth":{"account":"work-codex"}}'`)
+	cfg, err := config.Parse([]byte(`default = "worker"
+[profiles.worker]
+provider = "claude"
+[profiles.cheap]
+provider = "codex"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Loop.Config = cfg
+
+	rep := doctorOf(t, d)
+	if got := rep.Proxy.Profiles; len(got) != 1 || got[0] != "cheap" {
+		t.Fatalf("profiles: got %+v", got)
+	}
+}

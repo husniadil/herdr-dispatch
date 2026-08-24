@@ -251,7 +251,9 @@ func TestDoctorSaysTheLaneIsASelfReviewShotInTheWorkersOwnPane(t *testing.T) {
 			t.Errorf("want %q in doctor prose %q", want, out.String())
 		}
 	}
-	if strings.Contains(out.String(), "profile") {
+	// The verify LINE, not the whole report: the proxy line names the
+	// profiles that launch through it, which is a different fact.
+	if strings.Contains(verifyLineOf(t, out.String()), "profile") {
 		t.Errorf("the lane still names a profile it no longer launches: %q", out.String())
 	}
 }
@@ -407,4 +409,63 @@ func TestAnEventRendersAsALineAndAsItsOwnDocument(t *testing.T) {
 	if strings.TrimSpace(out.String()) != string(raw) {
 		t.Fatalf("--json rewrote the daemon's document as %s", out.String())
 	}
+}
+
+// A down proxy is step zero of a codex spawn failing, and the operator reads
+// it here in the proxy's own words rather than off that failure.
+func TestDoctorSaysWhenTheProxyIsDownInItsOwnWords(t *testing.T) {
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","proxy":{"binary":"proxenos","profiles":["cheap"],"installed":true,"reachable":false,"error":"proxenos status: the daemon is not answering. Start it with 'proxenos run'."},"board":{"reachable":true}}`)
+	var out strings.Builder
+	if err := Write("doctor", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	for _, want := range []string{"proxy", "proxenos run", "cheap"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("want %q in doctor prose %q", want, out.String())
+		}
+	}
+}
+
+// A proxy that answers names the account it routes through: an operator
+// blaming a spawn on the wrong subscription reads it before they blame it.
+func TestDoctorNamesTheAccountTheProxyRoutesThrough(t *testing.T) {
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","proxy":{"binary":"proxenos","profiles":["cheap"],"installed":true,"reachable":true,"account":"work-codex"},"board":{"reachable":true}}`)
+	var out strings.Builder
+	if err := Write("doctor", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	for _, want := range []string{"reachable", "work-codex"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("want %q in doctor prose %q", want, out.String())
+		}
+	}
+}
+
+// No profile launches through the proxy, so a proxy that is not installed is
+// not an outage. The line says so rather than printing a failure the operator
+// would go looking for.
+func TestDoctorDoesNotReadAMissingProxyAsAFailureWhenNothingUsesIt(t *testing.T) {
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","proxy":{"binary":"proxenos","profiles":[],"installed":false,"reachable":false,"error":"proxenos: not installed"},"board":{"reachable":true}}`)
+	var out strings.Builder
+	if err := Write("doctor", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	for _, want := range []string{"not installed", "no configured profile launches through it"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("want %q in doctor prose %q", want, out.String())
+		}
+	}
+}
+
+// verifyLineOf returns the one line of a doctor report that reports the
+// verification lane.
+func verifyLineOf(t *testing.T, report string) string {
+	t.Helper()
+	for _, line := range strings.Split(report, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "verify") {
+			return line
+		}
+	}
+	t.Fatalf("doctor printed no verify line: %q", report)
+	return ""
 }

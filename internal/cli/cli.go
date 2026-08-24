@@ -123,6 +123,7 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 		fmt.Fprintf(out, "  verify      %s\n", verifyLane(rep.Verify))
 		fmt.Fprintf(out, "  gate        %s\n", gateLane(rep.Gate))
 		fmt.Fprintf(out, "  herdr api   %s\n", herdrLane(rep.Herdr))
+		fmt.Fprintf(out, "  proxy       %s\n", proxyLane(rep.Proxy))
 		fmt.Fprintf(out, "  layout      min_pane_columns %d, max_panes_per_tab %d per task\n",
 			rep.MinPaneColumns, rep.MaxPanesPerTab)
 		if rep.Board.Error != "" {
@@ -275,6 +276,27 @@ func herdrLane(h daemon.HerdrHealth) string {
 		return line + ", MISSING " + strings.Join(h.Missing, " ") + ": the verbs that need one refuse UNSUPPORTED"
 	}
 	return line + ", every capability this binary needs"
+}
+
+// proxyLane is the codex provider's launcher in one line. Its state alone is
+// not the answer an operator needs: the same down proxy is step zero of a
+// codex spawn failing and nothing at all where every profile is a claude one,
+// so the line says which of the two this dispatcher is in.
+func proxyLane(p daemon.ProxyHealth) string {
+	bin := or(p.Binary, "proxenos")
+	var line string
+	switch {
+	case p.Reachable:
+		line = bin + " reachable, active account " + or(p.Account, "none selected")
+	case p.Installed:
+		line = bin + " is down: " + or(p.Error, "it gave no answer and no reason")
+	default:
+		line = bin + " is not installed: " + or(p.Error, "it could not be resolved on PATH")
+	}
+	if len(p.Profiles) == 0 {
+		return line + ", and no configured profile launches through it: the claude path never touches it"
+	}
+	return line + ", launching " + strings.Join(p.Profiles, " ")
 }
 
 func or(s, fallback string) string {

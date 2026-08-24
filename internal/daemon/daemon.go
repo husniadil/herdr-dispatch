@@ -16,6 +16,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -29,6 +30,7 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/htask"
 	"github.com/husniadil/herdr-dispatch/internal/loop"
 	"github.com/husniadil/herdr-dispatch/internal/protocol"
+	"github.com/husniadil/herdr-dispatch/internal/proxy"
 	"github.com/husniadil/herdr-dispatch/internal/store"
 	"github.com/husniadil/herdr-dispatch/internal/verbs"
 	"github.com/husniadil/herdr-dispatch/internal/version"
@@ -415,6 +417,11 @@ type DoctorReport struct {
 	// schema it saw, and it is the one place an operator can tell "this
 	// Herdr cannot do it" from "this plugin did not ask".
 	Herdr HerdrHealth `json:"herdr"`
+	// Proxy is the codex provider's launcher: whether it is installed, up,
+	// and which account it routes through. A down proxy is step zero of a
+	// codex spawn failing, and without this line the first an operator
+	// hears of it is that failure.
+	Proxy ProxyHealth `json:"proxy"`
 	// MinPaneColumns is the width a worker's pane must be readable at, and
 	// the reason every worker gets a tab of its own. Herdr reports no column
 	// count for a pane, so this is the one place an operator can see the
@@ -481,6 +488,26 @@ type HerdrHealth struct {
 // reports missing is exactly what a verb refuses with UNSUPPORTED.
 var needs = herdrclient.Needs
 
+// ProxyHealth is the codex provider's launcher as doctor reports it. Not
+// installed and down are kept apart: the first affects nothing until a codex
+// profile is launched, the second breaks one that is — which is what Profiles
+// says, so the claude path is never reported as an outage it is not in.
+type ProxyHealth struct {
+	// Binary is what would be run, as the config names it.
+	Binary string `json:"binary"`
+	// Profiles is every configured profile that launches through it, sorted.
+	// Empty means no worker this dispatcher launches touches the proxy.
+	Profiles []string `json:"profiles"`
+	// Installed says the binary resolved at all; Reachable says its daemon
+	// answered.
+	Installed bool `json:"installed"`
+	Reachable bool `json:"reachable"`
+	// Account is the stored account it routes through, when it answered.
+	Account string `json:"account,omitempty"`
+	// Error is the proxy's own words for why it gave no answer.
+	Error string `json:"error,omitempty"`
+}
+
 // BoardHealth is the board's own report of itself, or why it gave none.
 type BoardHealth struct {
 	Reachable      bool   `json:"reachable"`
@@ -521,6 +548,7 @@ func (d *Daemon) doctor(ctx context.Context) (DoctorReport, error) {
 	}
 	rep.Events = d.eventsHealth()
 	rep.Herdr = d.herdrHealth(ctx)
+	rep.Proxy = d.proxyHealth(ctx)
 	board, err := d.Board.Doctor(ctx)
 	if err != nil {
 		rep.Board.Error = err.Error()
@@ -578,6 +606,36 @@ func (d *Daemon) herdrHealth(ctx context.Context) HerdrHealth {
 			out.Missing = append(out.Missing, want)
 		}
 	}
+	return out
+}
+
+// proxyHealth asks the proxy whether it is up. doctor never fails, so a proxy
+// that is down or absent is the answer here rather than an error: it is
+// exactly the state an operator ran doctor to learn.
+func (d *Daemon) proxyHealth(ctx context.Context) ProxyHealth {
+	out := ProxyHealth{Binary: config.DefaultProxy, Profiles: []string{}}
+	if d.Loop == nil {
+		return out
+	}
+	if d.Loop.Config.Proxy != "" {
+		out.Binary = d.Loop.Config.Proxy
+	}
+	for name, p := range d.Loop.Config.Profiles {
+		if p.Provider == config.ProviderCodex {
+			out.Profiles = append(out.Profiles, name)
+		}
+	}
+	sort.Strings(out.Profiles)
+	if d.Loop.Spawn == nil || d.Loop.Spawn.Proxy == nil {
+		return out
+	}
+	st, err := d.Loop.Spawn.Proxy.Status(ctx)
+	if err != nil {
+		out.Installed = !errors.Is(err, proxy.ErrNotInstalled)
+		out.Error = err.Error()
+		return out
+	}
+	out.Installed, out.Reachable, out.Account = true, true, st.Account
 	return out
 }
 

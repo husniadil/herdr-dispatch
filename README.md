@@ -510,6 +510,23 @@ the next rename should be one line of config:
 proxy = "/opt/homebrew/bin/proxenos"
 ```
 
+`hdis doctor` asks it whether it is up, so a down proxy is read before a
+codex spawn fails on it rather than out of that failure. The line carries the
+proxy's own words and the account it routes through, and it names the
+profiles that launch through it, because the same proxy state means different
+things to different configs:
+
+```
+  proxy       proxenos reachable, active account work-codex, launching routed
+  proxy       proxenos is down: proxenos status: the daemon is not answering. Start it with 'proxenos run'., launching routed
+  proxy       proxenos is not installed: proxenos: not installed, and no configured profile launches through it: the claude path never touches it
+```
+
+A `claude` profile never touches the proxy, so where no profile is a `codex`
+one the line says so instead of reporting an outage there is none of. The
+JSON shape carries the same facts under `proxy`: `installed`, `reachable`,
+`account`, `profiles`, and the `error` in the proxy's own words.
+
 Which profile a project gets is decided here and nowhere else. The board
 carries no profile field, deliberately: which agent kind and model a worker
 runs as is execution policy, and execution policy does not belong in the

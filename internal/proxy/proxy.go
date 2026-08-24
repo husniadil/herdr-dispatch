@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -56,4 +57,48 @@ func (c *Client) Settings(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("%s settings: unreadable json: %w", c.bin(), err)
 	}
 	return compact.String(), nil
+}
+
+// ErrNotInstalled is what Status gives when the launcher binary cannot be
+// resolved at all. A proxy nobody installed is a different fact from one that
+// is down, and doctor reports them differently: the first affects nothing
+// until a codex profile is launched, the second breaks one that is.
+var ErrNotInstalled = errors.New("not installed")
+
+// Status is the proxy's own report of itself, narrowed to what doctor asks
+// for. The daemon prints more; nothing here decides on the rest.
+type Status struct {
+	// Account is the stored account the proxy is currently routing through.
+	Account string
+}
+
+// statusPayload is the shape `status --json` answers with, read for the one
+// field doctor names.
+type statusPayload struct {
+	Auth struct {
+		Account string `json:"account"`
+	} `json:"auth"`
+}
+
+// Status reports whether the proxy is up, and through which account. A daemon
+// that is down answers in its own words — they name the socket and say how to
+// start it — and those words are what the caller gets, unswallowed.
+func (c *Client) Status(ctx context.Context) (Status, error) {
+	cmd := exec.CommandContext(ctx, c.bin(), "status", "--json")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return Status{}, fmt.Errorf("%s: %w", c.bin(), ErrNotInstalled)
+		}
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return Status{}, fmt.Errorf("%s status: %s", c.bin(), msg)
+		}
+		return Status{}, fmt.Errorf("%s status: %w", c.bin(), err)
+	}
+	var payload statusPayload
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &payload); err != nil {
+		return Status{}, fmt.Errorf("%s status: unreadable json: %w", c.bin(), err)
+	}
+	return Status{Account: payload.Auth.Account}, nil
 }
