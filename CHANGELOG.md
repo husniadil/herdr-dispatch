@@ -7,6 +7,19 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+**Changed: a worker is told which checkout is its own, and a second one is
+refused after an escape.** The spawn condition now says that the working
+directory is the only writable checkout, that everything else including a
+sibling repository is read-only, and that a task needing a sibling changed is
+filed on that sibling's board. It grew by 127 characters, so
+`spawn.TypedLineBudget` moved from 512 to 640, still under half the ~1.4k
+line that broke on a live shell. Separately, `spawn()` now refuses a task
+whose branch was already handed to a worker and never moved while the
+project's HEAD moved past it: that pair is the signature of work that landed
+outside its own checkout, and it is logged and left on the board rather than
+given a second pane. Nothing in the CLI, the MCP tool list, the JSON shapes
+or the error codes changed.
+
 **Added: a task's priority routes it to a profile.** Named `[[route]]` blocks
 in `dispatch.toml` pair a minimum priority with a profile name; the highest
 matching minimum wins, and a task below every minimum launches with the

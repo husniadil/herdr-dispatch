@@ -133,10 +133,24 @@ const SettingsFileMode = 0o600
 // criteria stay on the board, where `htask get` reads them whole and no
 // shell ever types them, and the end state is named so /goal can still judge
 // the transcript and finish.
+//
+// One rule rides along that is NOT on the board and cannot be: which checkout
+// is the worker's own. hdis makes a worktree per task and opens the pane in
+// it, so the pane's working directory already IS the answer — but three
+// workers on 2026-08-24/25 committed past it anyway, twice onto the shared
+// checkout's main and once into a SIBLING repository's checkout, and all
+// three bypassed the review gate the branch exists to reach. Nothing on the
+// board would have said otherwise: a task's criteria are about the work and
+// never about where it is done. So the condition says it — the working
+// directory is the only writable checkout, everything else is read-only, and
+// a task that needs a sibling changed is filed on that sibling's board rather
+// than edited in place.
 func PointerGoal(seq int) string {
 	return fmt.Sprintf("task %d is submitted for review: claim it with htask claim %d, "+
 		"read its full criteria with htask get %d, do the work, then run "+
 		"htask submit %d with a report and evidence. "+
+		"Your working directory is the only writable checkout: never edit or commit "+
+		"outside it. A sibling repo is read-only; file a task on its board. "+
 		"Reach the dispatcher at $"+DispatcherPaneVar+".", seq, seq, seq, seq)
 }
 
@@ -288,10 +302,17 @@ const PromptedGoalBudget = 1023
 //	written to a file under this machine's TMPDIR (a 48-character
 //	directory), render a whole line of 377 characters.
 //
-// The budget sits at 512: room for a longer temp path, another profile flag
-// and a five-digit task number, and still less than a quarter of the ~1.4k
-// line that came out broken on the live shell.
-const TypedLineBudget = 512
+// The budget sat at 512 until the condition took on the isolation rule, which
+// added 127 characters and left a five-digit task number no room. Re-measured
+// on 2026-08-25 with the same profile, the whole line is 505 characters for a
+// two-digit task.
+//
+// It sits at 640 now: the same headroom the 512 was chosen for — a longer temp
+// path, another profile flag and a five-digit task number — and still under
+// half of the ~1.4k line that came out broken on the live shell. What bounds
+// this is the measured break, never the budget's own roundness, and the test
+// that types the corrupted shape still refuses it at this ceiling.
+const TypedLineBudget = 640
 
 // TypedLine reconstructs the command line herdr types into a worker's pane
 // for an agent argv: the client's own name, then every argument, quoted the

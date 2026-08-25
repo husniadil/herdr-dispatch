@@ -1,7 +1,9 @@
 package loop
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log"
 	"os"
@@ -826,4 +828,66 @@ func TestTheSpawnRequestNamesTheTasksProjectSoTheDeskIsFound(t *testing.T) {
 	if !strings.Contains(argv, spawn.DispatcherPaneVar+"=w15:p1") {
 		t.Fatalf("the worker was not addressed at the session working /src/p: %s", argv)
 	}
+}
+
+// A branch that was already handed to a worker and never moved, while the
+// project's HEAD moved past it, says the last worker on this task committed
+// somewhere other than the checkout it was given. Three occurrences on
+// 2026-08-24/25 had that shape, each landing on the shared checkout's main
+// and each bypassing the review gate.
+//
+// A second worker on the same task is refused rather than sent after the
+// first one's escape: the operator has a stray commit to reconcile, and a new
+// pane would compound it. The task stays on the board.
+func TestASecondWorkerIsRefusedWhenTheTasksBranchWasHandedOverAndNeverMoved(t *testing.T) {
+	l, f := newLoop(t)
+	var said bytes.Buffer
+	l.Log = log.New(&said, "", 0)
+	l.Worktrees = escapedTrees{Trees: l.Worktrees}
+
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if got := calls(t, f, "tab create"); len(got) != 0 {
+		t.Fatalf("a worker came up on a task whose branch the last one escaped: %v", got)
+	}
+	if len(l.bindings) != 0 {
+		t.Fatalf("a binding was written for a worker that never came up: %+v", l.bindings)
+	}
+	if !strings.Contains(said.String(), worktree.Branch(7)) {
+		t.Fatalf("the refusal does not name the branch the operator has to reconcile: %s", said.String())
+	}
+}
+
+// And the refusal is evidence-driven: a git that cannot answer the question
+// refuses the spawn loudly rather than being read as either answer.
+func TestASpawnIsRefusedWhenTheBranchQuestionCannotBeAnswered(t *testing.T) {
+	l, f := newLoop(t)
+	var said bytes.Buffer
+	l.Log = log.New(&said, "", 0)
+	l.Worktrees = escapedTrees{Trees: l.Worktrees, err: errors.New("git said nothing")}
+
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if got := calls(t, f, "tab create"); len(got) != 0 {
+		t.Fatalf("a worker came up while the branch question was unanswered: %v", got)
+	}
+	if len(l.bindings) != 0 {
+		t.Fatalf("a binding was written for a worker that never came up: %+v", l.bindings)
+	}
+}
+
+// escapedTrees answers the branch question the way a repository does after an
+// isolation escape, or refuses to answer it at all.
+type escapedTrees struct {
+	Trees
+	err error
+}
+
+func (e escapedTrees) Unmoved(ctx context.Context, project, branch string) (bool, error) {
+	if e.err != nil {
+		return false, e.err
+	}
+	return true, nil
 }

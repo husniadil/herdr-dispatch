@@ -710,6 +710,11 @@ whole of it.
    composes — claim the task with `htask claim <n>`, read its full
    criteria with `htask get <n>`, and finish by submitting it for review
    with a report and evidence — and never the board's rendered goal document.
+   It carries one rule beyond the pointer, because no board row states it and
+   none could: the working directory is the only writable checkout, everything
+   else including a sibling repository is read-only, and a task that needs a
+   sibling changed is filed on that sibling's board. See
+   [A checkout is only isolation if the worker uses it](#a-checkout-is-only-isolation-if-the-worker-uses-it).
    The line is
    TYPED into the pane, character by character, and a long one intermittently
    arrives broken: two live runs came out with the condition cut mid-word and
@@ -1347,6 +1352,43 @@ working. `TestTheWorkerIsGivenAWorktreeOfItsOwnOnItsOwnBranch`,
 `TestAWorkerIsSpawnedInItsOwnWorktreeNeverTheProjectDirectory`,
 `TestWithoutAWorktreeNothingIsSpawned` and `TestARunLeavesNoWorktreeBehind`
 pin each half.
+
+### A checkout is only isolation if the worker uses it
+
+Three workers on 2026-08-24/25 were given a checkout and committed past it.
+Twice the commit went onto the shared checkout's main with the task's own
+branch left untouched; once the worker reached into a SIBLING repository's
+shared checkout and committed there, unprompted by any goal. All three
+bypassed the review gate the branch exists to reach, and all three were
+caught the same cheap way: the reviewer diffs main against the branch head
+before every merge.
+
+Two things answer it, and neither pretends to be a wall.
+
+- **The condition says which checkout is the worker's own.** The pane's
+  working directory already IS the worktree, and that was never stated. Now
+  it is: the working directory is the only writable checkout, everything else
+  is read-only, and a sibling that needs changing gets a task on its own
+  board. `TestTheSpawnConditionNamesTheWorkingDirectoryAsTheOnlyWritableCheckout`
+  pins the wording; the typed-line budget above bounds what it may cost.
+- **A second spawn refuses a branch that was handed over and never moved.**
+  A task's branch that carries nothing the project does not already have,
+  while the project's HEAD has moved past the point it was cut from, is the
+  escape's own signature: a checkout was made for this task and the work
+  landed somewhere else. `worktree.Manager.Unmoved` reads exactly that pair,
+  and `spawn()` refuses on it — the operator has a stray commit to reconcile
+  and a second pane would compound it. Neither half means it alone: a branch
+  carrying nothing while the project stands still is every first spawn, and a
+  project that moved past a branch carrying its own commits is an ordinary
+  rework. A branch no spawn has made yet is not an escape, and a git that
+  cannot answer refuses the spawn rather than being read either way.
+  `TestUnmovedIsTrueOnlyForABranchThatCarriesNothingWhileTheProjectMovedPast`
+  and `TestASecondWorkerIsRefusedWhenTheTasksBranchWasHandedOverAndNeverMoved`
+  pin the two sides.
+
+Detection stays the operator's, because both of these are policy a worker can
+still walk past: the diff of main against the branch head before a merge is
+what actually caught all three.
 
 **What the operator now does by hand.** A worker's commits land on
 `hdis/task-<seq>` and nowhere else, so approving a task no longer leaves the

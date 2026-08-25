@@ -585,7 +585,12 @@ func TestTheSpawnConditionIsAShortPointerToTheBoard(t *testing.T) {
 	if strings.ContainsAny(got, "\n\r") {
 		t.Fatalf("the condition carries a line break, which herdr refuses outright: %q", got)
 	}
-	if len(got) > 256 {
+	// The cap is what keeps this a pointer rather than the row's own text,
+	// which runs past a thousand characters. It was 256 while the condition
+	// was only a pointer; it is 384 now that the condition also carries the
+	// isolation rule, which no board row states and none could. Still a
+	// third of the shortest document this replaced.
+	if len(got) > 384 {
 		t.Fatalf("the condition is %d characters, which is no longer a pointer: %s", len(got), got)
 	}
 	t.Logf("pointer condition: %d characters, %q", len(got), got)
@@ -1836,5 +1841,27 @@ func TestACanceledSpawnStillRetiresThePaneItBroughtUp(t *testing.T) {
 	verbs := h.verbs(t)
 	if count(verbs, "pane close")+count(verbs, "tab close") == 0 {
 		t.Fatalf("the pane the spawn brought up was never retired: %v (err: %v)", verbs, err)
+	}
+}
+
+// The condition names the one thing a worker cannot read off the board: which
+// checkout is its own. Three isolation escapes on 2026-08-24/25 each put a
+// commit on a shared checkout's main instead of the task's branch, and one of
+// them reached into a SIBLING repository's checkout to do it. The pane's
+// working directory is already the worktree; what was missing is the sentence
+// that says so, and that everything else is read-only.
+func TestTheSpawnConditionNamesTheWorkingDirectoryAsTheOnlyWritableCheckout(t *testing.T) {
+	got := PointerGoal(14)
+	for _, want := range []string{
+		"working directory",
+		"only writable checkout",
+		"never edit or commit outside it",
+		"sibling repo",
+		"read-only",
+		"file a task on its board",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("the condition does not say %q: %s", want, got)
+		}
 	}
 }

@@ -360,3 +360,90 @@ func gitFailingAt(t *testing.T, verb string) string {
 	}
 	return path
 }
+
+// A branch that was handed to a worker and never moved, while the project's
+// own HEAD moved past it, is the signature of an isolation escape: the
+// worker had a checkout of its own and committed somewhere else. It is the
+// one shape a second spawn must refuse, so all four corners are pinned here
+// against the same repository.
+func TestUnmovedIsTrueOnlyForABranchThatCarriesNothingWhileTheProjectMovedPast(t *testing.T) {
+	src := repo(t)
+	m := &Manager{Root: t.TempDir()}
+	ctx := context.Background()
+	tree, branch, err := m.Worker(ctx, src, 7)
+	if err != nil {
+		t.Fatalf("worker: %v", err)
+	}
+
+	// Cut from the project's own HEAD and nothing has happened yet: this is
+	// every first spawn, and refusing it would refuse the whole lane.
+	unmoved, err := m.Unmoved(ctx, src, branch)
+	if err != nil {
+		t.Fatalf("unmoved: %v", err)
+	}
+	if unmoved {
+		t.Fatalf("a branch cut from the project's own HEAD reads as unmoved")
+	}
+
+	// The project moved and the branch did not. Nothing this task was given
+	// a checkout for is on the branch it was given.
+	commit(t, src, "two")
+	unmoved, err = m.Unmoved(ctx, src, branch)
+	if err != nil {
+		t.Fatalf("unmoved after the project moved: %v", err)
+	}
+	if !unmoved {
+		t.Fatalf("the project moved past a branch carrying nothing and nothing said so")
+	}
+
+	// The worker used its checkout after all. The branch carries a commit
+	// the project does not have, so there is nothing to refuse — this is a
+	// rejected task coming back for rework, which is the normal second spawn.
+	commit(t, tree, "work")
+	unmoved, err = m.Unmoved(ctx, src, branch)
+	if err != nil {
+		t.Fatalf("unmoved after the branch moved: %v", err)
+	}
+	if unmoved {
+		t.Fatalf("a branch carrying its own commit reads as unmoved")
+	}
+}
+
+// A branch the repository does not have is a FIRST spawn, whose branch this
+// package is about to create. There is nothing to judge yet, and answering
+// with an error here would refuse every task the dispatcher ever picks up.
+func TestUnmovedAnswersFalseForABranchThatDoesNotExistYet(t *testing.T) {
+	src := repo(t)
+	m := &Manager{Root: t.TempDir()}
+	unmoved, err := m.Unmoved(context.Background(), src, "hdis/task-999")
+	if err != nil {
+		t.Fatalf("a branch no spawn has made yet was refused: %v", err)
+	}
+	if unmoved {
+		t.Fatalf("a branch that does not exist reads as unmoved")
+	}
+}
+
+// A git that cannot answer is not the answer "unmoved". Reading a refusal as
+// unmoved would refuse every spawn at once, which is a stopped dispatcher
+// rather than a safe one.
+func TestUnmovedFailsRatherThanAnsweringWhenGitCannotTellUs(t *testing.T) {
+	src := repo(t)
+	m := &Manager{Root: t.TempDir()}
+	ctx := context.Background()
+	if _, _, err := m.Worker(ctx, src, 7); err != nil {
+		t.Fatalf("worker: %v", err)
+	}
+	m.Git = gitFailingAt(t, "rev-list")
+
+	unmoved, err := m.Unmoved(ctx, src, Branch(7))
+	if err == nil {
+		t.Fatalf("a git that could not answer was read as an answer: unmoved=%t", unmoved)
+	}
+	if unmoved {
+		t.Fatalf("a failure was reported as unmoved, which refuses a spawn on no evidence")
+	}
+	if !strings.Contains(err.Error(), Branch(7)) {
+		t.Fatalf("the failure does not name the branch it is about: %v", err)
+	}
+}

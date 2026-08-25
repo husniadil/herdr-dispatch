@@ -115,6 +115,46 @@ func (m *Manager) Behind(ctx context.Context, project, branch string) (bool, err
 	return false, nil
 }
 
+// Unmoved reports the signature of an isolation escape: a branch that was
+// already handed to a worker, carries nothing the project does not already
+// have, while the project's HEAD has moved past the point it was cut from.
+//
+// Read together those two facts say one thing. A checkout was made for this
+// task and the work that followed did not land on its branch, while
+// SOMETHING landed on the project's own. Three occurrences on 2026-08-24/25
+// had exactly that shape, each with the commit on the shared checkout's main
+// and the task's branch untouched.
+//
+// Neither half means it alone. A branch carrying nothing while the project
+// stands still is every first spawn. A project that moved past a branch
+// carrying its own commits is an ordinary rework, which Behind already
+// reports for the merge.
+//
+// A branch the repository does not have is a first spawn whose branch does
+// not exist yet, and it answers false rather than failing: there is nothing
+// to judge before the checkout is made. A git that cannot answer is an
+// error, never a quiet true, because a true here refuses a spawn.
+func (m *Manager) Unmoved(ctx context.Context, project, branch string) (bool, error) {
+	if branch == "" {
+		return false, nil
+	}
+	root, err := m.run(ctx, project, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return false, fmt.Errorf("no base for %s: %w", branch, err)
+	}
+	if _, err := m.run(ctx, root, "rev-parse", "--verify", "--quiet", branch+"^{commit}"); err != nil {
+		return false, nil
+	}
+	carried, err := m.run(ctx, root, "rev-list", "--count", branch, "^HEAD")
+	if err != nil {
+		return false, fmt.Errorf("no base for %s: %w", branch, err)
+	}
+	if carried != "0" {
+		return false, nil
+	}
+	return m.Behind(ctx, root, branch)
+}
+
 // prepare finds the project's repository root and makes the empty directory
 // its checkout goes in.
 func (m *Manager) prepare(ctx context.Context, project, prefix string, seq int) (string, string, error) {

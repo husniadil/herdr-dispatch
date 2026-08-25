@@ -39,6 +39,10 @@ type Trees interface {
 	// Behind reports whether the project's HEAD has moved past the branch,
 	// which is the state that refuses a fast-forward merge.
 	Behind(ctx context.Context, project, branch string) (bool, error)
+	// Unmoved reports the signature of an isolation escape: a branch this
+	// task already has that carries nothing while the project's HEAD moved
+	// past it. A branch no spawn has made yet is false, never an error.
+	Unmoved(ctx context.Context, project, branch string) (bool, error)
 	// Remove takes a checkout and git's record of it.
 	Remove(ctx context.Context, dir string) error
 	// Project is the repository a directory belongs to, with a worktree
@@ -1136,6 +1140,22 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 	// dispatching is the better failure, and the next tick may try again.
 	if l.Worktrees == nil {
 		return fmt.Errorf("no worktree manager, so nothing works on task %s in a tree of its own", row.Project)
+	}
+	// A branch this task already has, carrying nothing while the project's
+	// own HEAD moved past it, says the last worker on this task committed
+	// outside the checkout it was given. Three occurrences on 2026-08-24/25
+	// had that shape, each landing on the shared checkout's main and each
+	// bypassing the review gate. A second pane is refused rather than sent
+	// after the first one's stray commit: the operator has a reconcile to do
+	// and another worker would compound it. A question git cannot answer is
+	// refused the same way, because dispatching on no evidence is what put
+	// the commits on main in the first place.
+	if unmoved, err := l.Worktrees.Unmoved(ctx, row.Project, worktree.Branch(row.Seq)); err != nil {
+		return fmt.Errorf("branch %s: %w", worktree.Branch(row.Seq), err)
+	} else if unmoved {
+		return fmt.Errorf("branch %s was handed to a worker and never moved while the project moved past it: "+
+			"the work went somewhere other than its own checkout, and no second worker goes out until that is reconciled",
+			worktree.Branch(row.Seq))
 	}
 	tree, branch, err := l.Worktrees.Worker(ctx, row.Project, row.Seq)
 	if err != nil {
