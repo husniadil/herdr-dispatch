@@ -7,6 +7,8 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+## 0.3.0 — 2026-08-25
+
 **Changed: a worker is told which checkout is its own, and a second one is
 refused after an escape.** The spawn condition now says that the working
 directory is the only writable checkout, that everything else including a
