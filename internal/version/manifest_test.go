@@ -113,3 +113,23 @@ func TestVersionPrintsTheContractBesideTheVersion(t *testing.T) {
 		}
 	}
 }
+
+// An absence is not a decision until it is written down, and a comment nothing
+// reads is exactly what a later edit drops without noticing. The manifest
+// declares no [[panes]] on purpose: the questions a pane would answer are
+// already answered by Herdr's sidebar, the board, and `hdis status`. Pin both
+// halves, because a bare "No [[panes]]." with the reason gone is the drift.
+func TestTheManifestWritesDownWhyThereIsNoPane(t *testing.T) {
+	m := manifest(t)
+	if regexp.MustCompile(`(?m)^\[\[panes\]\]$`).MatchString(m) {
+		t.Fatal("the manifest declares a [[panes]] section, so the comment saying there is none is now a lie")
+	}
+	if !strings.Contains(m, "# No [[panes]].") {
+		t.Fatal("the manifest omits [[panes]] and says nothing about why")
+	}
+	for _, reason := range []string{"hdis status", "base_pane", "max_workers", "pending", "workers"} {
+		if !strings.Contains(m, reason) {
+			t.Errorf("the [[panes]] absence does not name %q as what answers instead", reason)
+		}
+	}
+}
