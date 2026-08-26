@@ -254,6 +254,11 @@ func Decide(s Snapshot, p Policy) []Action {
 			continue
 		}
 		if known && t.Status == "doing" && status == "idle" {
+			// One nudge per timeout, as for an unclaimed goal: a pane that
+			// stays idle would otherwise be told to carry on every tick.
+			if s.Now.Sub(b.PromptedAt) < p.ClaimTimeout {
+				continue
+			}
 			reason := ReasonStalled
 			if t.Feedback != "" {
 				reason = ReasonRejected

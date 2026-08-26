@@ -32,6 +32,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/husniadil/herdr-dispatch/internal/config"
 	"github.com/husniadil/herdr-dispatch/internal/herdrclient"
@@ -910,6 +911,15 @@ func (p *Pipeline) build(ctx context.Context, req Request, pane, settingsDoc str
 		}
 	}
 
+	// The budget is measured here, on the line as typed, and not only in
+	// the test that fixed it: a long profile or temp path past it would
+	// otherwise reach the shell as the corrupted line the budget exists to
+	// refuse.
+	if line := TypedLine(agentArgs); len(line) > TypedLineBudget {
+		return fmt.Errorf("spawn %s: the typed line is %d characters, over the %d the shell is known to take whole",
+			req.Name, len(line), TypedLineBudget)
+	}
+
 	err := p.startWhenShellIsFree(ctx, herdrclient.StartRequest{
 		Name:      req.Name,
 		Kind:      Kind,
@@ -1095,7 +1105,13 @@ func tail(text string) string {
 	}
 	const max = 400
 	if len(text) > max {
-		text = "…" + text[len(text)-max:]
+		cut := len(text) - max
+		// Back up to a rune boundary: a box-drawing glyph split down the
+		// middle would put invalid UTF-8 into the error this feeds.
+		for cut < len(text) && !utf8.RuneStart(text[cut]) {
+			cut++
+		}
+		text = "…" + text[cut:]
 	}
 	return strings.Join(strings.Fields(text), " ")
 }

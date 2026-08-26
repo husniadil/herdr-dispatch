@@ -166,12 +166,24 @@ func TestAnIdleWorkerOnADoingTaskIsReprompted(t *testing.T) {
 		Tasks:    map[string]Task{"9": {ID: "9", Status: "doing", ClaimedBy: "wA:p7"}},
 		Agents:   map[string]string{"wA:p7": "idle"},
 		Bindings: []Binding{{TaskID: "9", Pane: "wA:p7", PromptedAt: t0, Prompts: 1}},
-		Now:      t0.Add(time.Minute),
+		Now:      t0.Add(pol().ClaimTimeout),
 	}
 	a := one(t, Decide(s, pol()), Prompt)
 	if a.TaskID != "9" || a.Pane != "wA:p7" || a.Reason != ReasonStalled {
 		t.Fatalf("got %+v", a)
 	}
+}
+
+// The nudge is one per timeout. A pane that stays idle is not told to carry
+// on again on the very next tick.
+func TestAnIdleWorkerJustPromptedIsNotPromptedAgain(t *testing.T) {
+	s := Snapshot{
+		Tasks:    map[string]Task{"9": {ID: "9", Status: "doing", ClaimedBy: "wA:p7"}},
+		Agents:   map[string]string{"wA:p7": "idle"},
+		Bindings: []Binding{{TaskID: "9", Pane: "wA:p7", PromptedAt: t0, Prompts: 1}},
+		Now:      t0.Add(pol().ClaimTimeout - time.Second),
+	}
+	none(t, Decide(s, pol()), Prompt)
 }
 
 // A working worker on a claimed task needs nothing.
@@ -231,7 +243,7 @@ func TestARejectedWorkerIsPromptedWithARejectionReasonOfItsOwn(t *testing.T) {
 		Tasks:    map[string]Task{"9": {ID: "9", Status: "doing", ClaimedBy: "wA:p7", Feedback: "criterion 1 cites no test"}},
 		Agents:   map[string]string{"wA:p7": "idle"},
 		Bindings: []Binding{{TaskID: "9", Pane: "wA:p7", PromptedAt: t0, Prompts: 1}},
-		Now:      t0.Add(time.Minute),
+		Now:      t0.Add(pol().ClaimTimeout),
 	}
 	a := one(t, Decide(s, pol()), Prompt)
 	if a.TaskID != "9" || a.Pane != "wA:p7" || a.Reason != ReasonRejected {
@@ -249,7 +261,7 @@ func TestAnIdleWorkerOnADoingTaskWithNoFeedbackKeepsTheStalledReason(t *testing.
 		Tasks:    map[string]Task{"9": {ID: "9", Status: "doing", ClaimedBy: "wA:p7"}},
 		Agents:   map[string]string{"wA:p7": "idle"},
 		Bindings: []Binding{{TaskID: "9", Pane: "wA:p7", PromptedAt: t0, Prompts: 1}},
-		Now:      t0.Add(time.Minute),
+		Now:      t0.Add(pol().ClaimTimeout),
 	}
 	a := one(t, Decide(s, pol()), Prompt)
 	if a.Reason != ReasonStalled {
