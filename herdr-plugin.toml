@@ -34,3 +34,10 @@ id = "restart"
 title = "Restart the dispatcher"
 contexts = ["workspace"]
 command = ["./scripts/restart.sh"]
+
+# No [[panes]]. §2.1 as amended owes a plugin pane only where the plugin's
+# concern includes an operator-facing view; the questions an operator has here,
+# which workers are up, on which tasks, how many slots are free, are already
+# answered by Herdr's own pane sidebar and by the herdr-tasks board, and
+# `hdis status` carries the same four facts (base_pane, max_workers, pending,
+# workers) for anything scripted. A pane of its own would restate them.
