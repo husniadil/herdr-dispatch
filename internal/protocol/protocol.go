@@ -42,6 +42,13 @@ type Request struct {
 	// DERIVED, and a call that could declare one would be declaring the
 	// fact the rule exists to keep underived.
 	As string `json:"as,omitempty"`
+	// Operator is the door saying that the PROCESS it runs in was started
+	// by a deliberate human act: `hdis mcp --operator` (§7.5). It is read
+	// once from the door's own startup and never from a call, which is what
+	// keeps it from being `--as human` with a different spelling — the one
+	// principal §3.2 will not let a call declare. The pane is resolved
+	// first, so a declared door inside a pane is still that pane's agent.
+	Operator bool `json:"operator,omitempty"`
 }
 
 // Response is the one answer. Exactly one of Result and Error is set.
@@ -63,8 +70,15 @@ type Failure struct {
 	ParkedID string `json:"parked_id,omitempty"`
 }
 
-// Caller names who asked, for the daemon's log. It is a record, never a
-// permission.
+// Caller names who asked: the §9 gate's subject and the resolver a parked row
+// records. It is a record, never a permission.
+//
+// The order is §3.2's, with §7.5's declaration last of the three: what the
+// call declared with --as, else the pane it runs in, else the operator when
+// the DOOR was started with `hdis mcp --operator`, else nobody in particular.
+// The pane is read before the declaration on purpose (§7.5): a door started
+// inside a pane is that pane's agent whatever it was declared, so declaring
+// one gains an agent nothing.
 func (r Request) Caller() string {
 	// §3.2: the declared principal is the one exception to derivation, and
 	// it wins over the pane, because a cron job firing from inside a pane is
@@ -72,8 +86,11 @@ func (r Request) Caller() string {
 	if r.As != "" {
 		return r.As
 	}
-	if r.Pane == "" {
-		return "unknown"
+	if r.Pane != "" {
+		return "agent:" + r.Pane
 	}
-	return "agent:" + r.Pane
+	if r.Operator {
+		return "human"
+	}
+	return "unknown"
 }

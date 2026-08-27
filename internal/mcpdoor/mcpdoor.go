@@ -49,8 +49,19 @@ const Instructions = "herdr-dispatch drives the htask board's ready work: it bri
 // that answers in process.
 type Caller func(protocol.Request) (json.RawMessage, error)
 
+// Options is what the door was STARTED with, which under the process-bound
+// identity rule (§3.2) is the only place a door's identity may come from. It
+// is not a general-purpose bag: everything else a door needs, it derives per
+// call.
+type Options struct {
+	// Operator is §7.5's declaration: this door speaks for the operator.
+	// Read once from `hdis mcp --operator` and never from a tool call,
+	// which is what keeps it from being --as with a different spelling.
+	Operator bool
+}
+
 // New builds the MCP server with one tool per verb.
-func New(version string, call Caller) *mcp.Server {
+func New(version string, call Caller, opt Options) *mcp.Server {
 	if call == nil {
 		call = (&client.Client{}).Call
 	}
@@ -61,14 +72,27 @@ func New(version string, call Caller) *mcp.Server {
 		Description: "Dispatch ready tasks from the htask board to worker agents in Herdr panes",
 	}, &mcp.ServerOptions{Instructions: Instructions})
 	for _, v := range verbs.All {
-		s.AddTool(tool(v), handlerFor(v, call))
+		s.AddTool(tool(v), handlerFor(v, call, opt))
 	}
 	return s
 }
 
 // Serve runs the door on stdio until the client disconnects.
-func Serve(ctx context.Context, version string, call Caller) error {
-	return New(version, call).Run(ctx, &mcp.StdioTransport{})
+//
+// The refusal below is §7.5's second half, and it is defence in depth rather
+// than the guarantee: protocol.Request.Caller resolves the pane BEFORE it
+// reads the declaration, so a declared door inside a pane is that pane's
+// agent on every call whether this returns or not. What this buys is failing
+// loudly once, instead of running a door whose two answers about who it is
+// disagree for as long as it is up.
+func Serve(ctx context.Context, version string, call Caller, opt Options) error {
+	if pane := os.Getenv("HERDR_PANE_ID"); opt.Operator && pane != "" {
+		return codes.Errorf(codes.Forbidden,
+			"--operator declares this door speaks for the operator, but it is starting inside "+
+				"Herdr pane %s, which makes it that pane's agent (§3.2); the declaration is for "+
+				"a door in no pane (§7.5)", pane)
+	}
+	return New(version, call, opt).Run(ctx, &mcp.StdioTransport{})
 }
 
 // tool renders one verb as an MCP tool. The schema is built from the same
@@ -94,7 +118,9 @@ func tool(v verbs.Verb) *mcp.Tool {
 	// about the whole surface and not only the per-verb half (§4.2). --json
 	// and --as are deliberately absent: a tool call already answers with a
 	// structured document, and §3.2 derives a principal from the calling
-	// process rather than reading one off a call.
+	// process rather than reading one off a call. §7.5's --operator is that
+	// exclusion's counterpart rather than a second spelling of it: it is
+	// read from `hdis mcp --operator` and so is absent here too.
 	props[argProject] = map[string]any{"type": "string",
 		"description": "The board to act on; defaults to every board (§4.2)"}
 	props[argAllProjects] = map[string]any{"type": "boolean",
@@ -108,7 +134,7 @@ func tool(v verbs.Verb) *mcp.Tool {
 }
 
 // handlerFor turns a tool call into the same daemon call the CLI makes.
-func handlerFor(v verbs.Verb, call Caller) mcp.ToolHandler {
+func handlerFor(v verbs.Verb, call Caller, opt Options) mcp.ToolHandler {
 	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := map[string]any{}
 		if len(req.Params.Arguments) > 0 {
@@ -142,7 +168,11 @@ func handlerFor(v verbs.Verb, call Caller) mcp.ToolHandler {
 			// caller on another harness has none; the daemon records what it
 			// is given and grants nothing for it.
 			Pane: os.Getenv("HERDR_PANE_ID"),
-			Door: Door,
+			// From the door's own startup, never from args: §7.5 says the
+			// declaration may not arrive per call, and this is the line
+			// that makes that true rather than intended.
+			Operator: opt.Operator,
+			Door:     Door,
 		})
 		if err != nil {
 			return failure(err), nil
@@ -182,6 +212,17 @@ func check(v verbs.Verb, args map[string]any) error {
 		if _, ok := declared[name]; !ok {
 			if name == argProject || name == argAllProjects {
 				continue
+			}
+			// §7.5: the declaration is read from how the door was STARTED,
+			// so a call carrying it is refused BY name rather than falling
+			// through to "takes no argument named" — a caller that wrote it
+			// meant something this door will never do, and should be told
+			// what to do instead.
+			if name == argOperator {
+				return codes.Refusef(codes.Invalid,
+					"%q is not an argument: a door speaks for the operator because of how it was "+
+						"started, never because a call says so (§7.5). Start the server with "+
+						"`hdis mcp --operator` instead", argOperator)
 			}
 			return codes.Refusef(codes.Invalid, "%s takes no argument named %q", v.Name, name)
 		}
@@ -230,3 +271,8 @@ const (
 	argProject     = "project"
 	argAllProjects = "all_projects"
 )
+
+// argOperator is not an argument, and never becomes one (§7.5). It is named
+// here so that check can refuse it BY name, because a reserved word nothing
+// spells out is one a later edit spells differently.
+const argOperator = "operator"

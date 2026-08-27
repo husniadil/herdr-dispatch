@@ -54,8 +54,7 @@ is written down.
 
 | Section | Why it does not reach this plugin |
 |---|---|
-| §3.4, §3.7 | This plugin attributes nothing. It holds no ledger, records no actor, and has no verb whose authority is anyone's in particular. See the README section on where the contract is written for a plugin this one is not. |
-| §7.5 | Same reason, and the contract has a gap here rather than this plugin: §7.5 rests its declaration on "`<name> doctor` (§10.3) already prints the calling principal", which §10.3 does not require and this door has no principal to print. |
+| §3.4, §3.7 | This plugin attributes nothing on the board. It holds no ledger and has no verb whose authority is anyone's in particular. See the README section on where the contract is written for a plugin this one is not. §7.5 was recorded here for the same reason until 2026-08-27, when it turned out to reach this plugin after all; the entry below says how. |
 | §5.2 | No SQLite store, so no schema and no migrations. §5.1's store choice is a recorded divergence in the README. §5.5's sibling events TABLE is the same divergence: the trail is a bounded list in the one JSON document, written whole with what it is a trail of, which is what §5.5's "same transaction" buys. |
 | §6.6 | No review semantics. The board's review gate is htask's, and this binary stops at review. |
 | §11.5 | Lease liveness and the sweep are htask's; a second writer racing them is the bug. |
@@ -116,6 +115,44 @@ reason it stands.
 | §12.2 | A test cites the section it enforces | `TestEveryTestThisDocumentNamesExists`, `TestContractCitationsResolve` |
 | §13.4 | The declared revision is the vendored one, and the README states it | `TestTheDeclaredRevisionIsTheVendoredOne`, `TestTheChangelogHasALineForTheDeclaredContractRevision` |
 | §13.2 | The short name is `dispatch` | `TestTheManifestNamesThisPluginAtThisVersion` |
+| §7.5 | `hdis mcp` accepts `--operator` and the declaration arrives by no other route: read once at start, refused as a tool argument, the pane resolved before it, and a declared door inside a pane refusing to start | `TestTheOperatorDeclarationIsAFlagOnTheMCPCommandAndNowhereElse`, `TestTheOperatorDeclarationNeverArrivesPerCall`, `TestServeRefusesADeclaredDoorInsideAPane`, `TestAnInPaneDeclaredDoorIsStillThePanesAgent`, `TestTheDeclaredDoorIsTheOperatorAndTheUndeclaredOneIsNot`, `TestTheCallerIsDerivedAndNeverMoreThanTheDaemonKnows`, `TestADeclaredPanelessDoorIsTheOperatorAtTheGateAndOnTheParkedRow`, `TestAnUndeclaredPanelessDoorIsNobodyAtTheGateAndOnTheParkedRow` |
+
+## §7.5 — the operator declaration, and what "records no actor" was hiding
+
+§7.5 is implemented as of 2026-08-27. It was recorded under "what does not
+apply" until then, on the ground that this plugin "records no actor". That
+sentence was true of one thing and read as if it were true of everything.
+
+It is true of the trail. `loop.principal()` is the board principal this daemon
+writes with, `plugin:hdis@<its own pane>`, and it is fixed for the process on
+purpose — a principal that changed mid-run would leave rows written under one
+name and released under another. No caller's identity reaches it, and that is
+a design decision this entry does not touch.
+
+It was never true of the §9 gate. `Request.Caller()` is the subject the policy
+gate is asked about, the subject a deferred call is parked under, and the
+resolver `ClaimParked` records. A door registered in a desktop MCP client
+carries no `HERDR_PANE_ID`, so before this change every gate decision and every
+`parked resolve` an operator made through such a door was filed under
+`unknown` — the paneless case §7.5 exists to answer, reached through this
+plugin's own gate rather than through a ledger it does not keep.
+
+So `hdis mcp --operator` is the one route and there is no other: the flag is on
+the `mcp` command alone, read once at start into `mcpdoor.Options`, sent on
+every request as `Operator`, and `operator` is refused BY name as a tool
+argument with `USAGE`. `Caller()` reads `--as`, then the pane, then the
+declaration, so an agent that starts a declared door gains nothing by it, and
+`Serve` refuses to start a declared door carrying `HERDR_PANE_ID` with
+`FORBIDDEN`. Both halves of §7.5's fourth property are pinned, the ordering and
+the startup refusal, because the half that exists to reassure a reader is the
+half a reader stops checking.
+
+What is still a gap in the contract rather than here is the visibility §7.5
+leans on: it says "`<name> doctor` (§10.3) already prints the calling
+principal", and §10.3 requires no such thing. `hdis doctor` does not print one
+today. The declaration is checkable at the two places it actually decides
+something — the gate's subject and the parked row — and that is where the
+tests above look.
 
 ## What the §8 sweep added
 

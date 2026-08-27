@@ -431,3 +431,82 @@ func TestDumpPrintsTheWholeStore(t *testing.T) {
 		t.Errorf("dump does not carry an empty bindings list: %s", raw)
 	}
 }
+
+// §7.5 where it actually reaches this plugin: the declaration is not the
+// trail actor — the board principal this daemon writes with is fixed for the
+// process (loop.principal) and never a caller's — but it IS the §9 gate's
+// subject and the resolver a parked row records. A door registered in a
+// desktop MCP client stands in no pane, so without the declaration both of
+// those read `unknown`; with it they read the operator who wrote it.
+func TestADeclaredPanelessDoorIsTheOperatorAtTheGateAndOnTheParkedRow(t *testing.T) {
+	stateDir(t)
+	d, _ := newDaemon(t)
+	seen := gateScript(t, d, `echo '{"decision":"defer","reason":"ask the operator"}'`)
+
+	// No pane, Door "mcp", Operator true: the request the declared door
+	// builds, exactly as internal/mcpdoor assembles it.
+	_, err := call(t, d, protocol.Request{
+		Verb: "dispatch", Args: map[string]any{"task": "7"},
+		Door: "mcp", Operator: true})
+	id := codes.ParkedOf(err)
+	if id == "" {
+		t.Fatalf("no parked row: %v", err)
+	}
+	body, rerr := os.ReadFile(seen)
+	if rerr != nil {
+		t.Fatalf("the gate was never run: %v", rerr)
+	}
+	if !strings.Contains(string(body), `"subject":"human"`) {
+		t.Errorf("the gate saw %s, and a declared paneless door is the operator (§7.5)", body)
+	}
+	held := d.Loop.Parked()
+	if len(held) != 1 || held[0].Subject != "human" {
+		t.Fatalf("the parked row does not name the operator as the subject: %+v", held)
+	}
+
+	// And the resolver, which is the other place Request.Caller is read:
+	// ClaimParked records WHO decided, and the operator resolving through
+	// their own declared door is not `unknown`.
+	if _, err := call(t, d, protocol.Request{
+		Verb: "parked.resolve", Args: map[string]any{"id": id, "reject": true},
+		Door: "mcp", Operator: true}); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	state, _ := d.Loop.Store.Load()
+	if len(state.Parked) != 1 || state.Parked[0].ResolvedBy != "human" {
+		t.Fatalf("the row does not name the operator as who resolved it: %+v", state.Parked)
+	}
+}
+
+// The half that says the declaration is what changed the answer: the same
+// paneless call with no declaration is nobody in particular, at both places.
+func TestAnUndeclaredPanelessDoorIsNobodyAtTheGateAndOnTheParkedRow(t *testing.T) {
+	stateDir(t)
+	d, _ := newDaemon(t)
+	seen := gateScript(t, d, `echo '{"decision":"defer","reason":"ask the operator"}'`)
+
+	_, err := call(t, d, protocol.Request{
+		Verb: "dispatch", Args: map[string]any{"task": "7"}, Door: "mcp"})
+	id := codes.ParkedOf(err)
+	if id == "" {
+		t.Fatalf("no parked row: %v", err)
+	}
+	body, rerr := os.ReadFile(seen)
+	if rerr != nil {
+		t.Fatalf("the gate was never run: %v", rerr)
+	}
+	if !strings.Contains(string(body), `"subject":"unknown"`) {
+		t.Errorf("the gate saw %s, and a door nobody declared is nobody (§3.7)", body)
+	}
+	if held := d.Loop.Parked(); len(held) != 1 || held[0].Subject != "unknown" {
+		t.Fatalf("the parked row = %+v", held)
+	}
+	if _, err := call(t, d, protocol.Request{
+		Verb: "parked.resolve", Args: map[string]any{"id": id, "reject": true}, Door: "mcp"}); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	state, _ := d.Loop.Store.Load()
+	if len(state.Parked) != 1 || state.Parked[0].ResolvedBy != "unknown" {
+		t.Fatalf("the row = %+v", state.Parked)
+	}
+}

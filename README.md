@@ -59,20 +59,18 @@ field, distinct from the `board.contract` it relays from `htask`.
 
 ### Where the contract is written for a plugin this one is not
 
-§3.4, §3.7 and §7.5 are one rule seen three times: who a call is attributed
-to, and how the trail says so. **This plugin attributes nothing.** It holds no
-ledger, records no actor, and has no verb whose authority is anyone's in
-particular — the daemon's own README says it above: the caller's identity buys
-nothing, because every caller here is the operator's own tooling reaching a
-socket only the operator can open.
+§3.4 and §3.7 are one rule seen twice: who a call is attributed to, and how
+the trail says so. **This plugin attributes nothing on the board.** It holds
+no ledger and has no verb whose authority is anyone's in particular — the
+daemon's own README says it above: the caller's identity buys nothing, because
+every caller here is the operator's own tooling reaching a socket only the
+operator can open.
 
-So §7.5's `--operator` is not implemented, and that is a gap in the contract
-rather than one here. The flag exists so a door's principal is settled before
-a call arrives, and §7.5 names what makes that visible: "`<name> doctor`
-(§10.3) already prints the calling principal". §10.3 requires no such thing,
-and this door has no principal for it to print. A flag read by nothing and
-recorded nowhere would be conformance theatre — it would change no
-attribution, because there is none to change.
+§7.5 was recorded here too, and that was wrong: the declaration is implemented,
+and [the operator declaration](#the-operator-declaration) below says what it
+changes. The short of it is that the caller IS recorded in one place — the
+policy gate's subject and the parked row it defers to the operator — even
+though the board principal never moves.
 
 The line to watch is the one place identity DOES matter: the board principal
 this daemon writes with, `plugin:hdis@<its own pane>`, which is declared to
@@ -184,6 +182,39 @@ hdis dispatch 7
 hdis status --json
 ```
 
+### The operator declaration
+
+A door registered in a desktop MCP client stands in no Herdr pane, so it has no
+pane to derive a principal from, and `human` is not what a plugin falls back to
+when it knows nothing (§3.7). Declare the door instead, once, where the
+operator writes the server configuration:
+
+```json
+{ "command": "hdis", "args": ["mcp", "--operator"] }
+```
+
+Every call that door makes is then the operator's where this daemon records a
+caller at all: the §9 gate's subject, the subject a deferred call is parked
+under, and who resolved it. Without it a paneless door's calls are attributed
+to nobody in particular, which is what a door nobody declared has earned. What
+it does not change is the board principal — `plugin:hdis@<pane>` is fixed for
+the process and carries no caller, which is a separate decision recorded in
+[`docs/contract-notes.md`](docs/contract-notes.md).
+
+Four things hold, and each is pinned by a test (§7.5):
+
+- It is read once, from the server command. Passing `operator` in a tool call
+  is refused with `USAGE`, because a door that could be TOLD at call time that
+  it speaks for the operator is a door with no identity at all (§3.2).
+- It is on `hdis mcp` and nowhere else. It is not a persistent flag, there is
+  no environment variable and no `--as human`. `hdis daemon --pane` is a
+  different thing: it names the pane workers are split off, not who is calling.
+- **The pane wins.** A door started inside a pane is that pane's agent whatever
+  it was declared, so an agent gains nothing by declaring one.
+- **An ambiguous door does not start.** `hdis mcp --operator` inside a Herdr
+  pane refuses with `FORBIDDEN` rather than running with two answers about who
+  it is.
+
 ### The four globals
 
 The CLI is cobra, as `htask` and `hmail` are, so the three binaries present
@@ -250,10 +281,11 @@ decided by the config and nowhere else, for the same reason the board carries
 no profile field: execution policy is this binary's business.
 
 **The caller's identity buys nothing.** The daemon records the pane a caller
-ran in, or `unknown` for a caller on another harness, and grants nothing for
-it. Every caller here is the operator's own tooling reaching a socket only
-the operator can open, and the board only ever hears from this binary as
-`plugin:hdis` whoever asked.
+ran in, `human` for a door started with the §7.5 declaration above, and
+`unknown` for a caller with neither, and grants nothing for any of them. Every
+caller here is the operator's own tooling reaching a socket only the operator
+can open, and the board only ever hears from this binary as `plugin:hdis`
+whoever asked.
 
 ## What this Herdr can do
 
