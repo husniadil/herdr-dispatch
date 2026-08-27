@@ -44,6 +44,13 @@ defaults to. A call that passes its own `project` is still answered on that
 one, and `all_projects` still gets every board — the explicit argument wins.
 A door started without the flag defaults to every board exactly as before.
 
+**Fixed: an idle worker on a doing row is nudged once per timeout, not every
+tick.** An idle worker holding a claimed task was re-prompted on every tick
+with no cooldown, unlike an unclaimed one; both now wait out the claim
+timeout between nudges. The typed-line budget is also checked before a line
+is typed into a pane, so a long profile or temp path is refused instead of
+reaching the shell as the corrupted line the budget exists to prevent.
+
 **Added: `hdis mcp --operator` declares the door speaks for the operator.**
 §7.5's declaration is read once from how the server was started, so a door in
 no pane — a desktop harness resolving a parked row — is the operator to the
