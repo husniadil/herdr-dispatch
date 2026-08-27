@@ -7,6 +7,10 @@ shape. This document writes that shape down so a new verb, a new file, or a
 fourth plugin has a template instead of a guess, and so a divergence is
 recognisable as a divergence rather than mistaken for local taste.
 
+A fourth plugin, **herdr-sched** (`hsched`), has since joined the set; it
+follows this standard and files its deltas in its own `docs/contract-notes.md`,
+and the tables below have not been widened to a fourth column.
+
 Audited on 2026-08-24 across all three checkouts. Where the three disagree,
 the rule below is what two of them already do, and the third carries a delta
 filed on its own board.
