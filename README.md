@@ -1575,8 +1575,8 @@ The standard library, and two things that earned their way in:
   callers the door exists for. It is pinned to the version the board plugin
   already runs, so one machine holds one copy.
 
-- **`github.com/spf13/cobra`** — §6 and §7 expect the three sibling binaries
-  to present the same flag shape, and both siblings already are cobra. The
+- **`github.com/spf13/cobra`** — §6 and §7 expect the sibling binaries
+  to present the same flag shape, and the siblings already are cobra. The
   hand-written `flag` CLI could not give it: `flag.Parse` stops at the first
   positional, so `--json` had to be scraped out of argv before anything parsed
   it; there was one usage block for the whole binary rather than help per
