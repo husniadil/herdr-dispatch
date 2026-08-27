@@ -7,6 +7,8 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+## 0.5.0 — 2026-08-27
+
 **Added: `dispatch.parked.failed`, filed under the resolver (§3.7).** A parked
 action the operator let through whose verb then errored now writes its own
 event, and it is the other outcome of the same decision: the actor is the
