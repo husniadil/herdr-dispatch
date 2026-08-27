@@ -565,15 +565,64 @@ func TestTheScopeArgumentsAreHeldToTheirTypes(t *testing.T) {
 	}
 }
 
+// §4.2: the board `hdis mcp --project <path>` named is the DEFAULT scope of
+// every tool call that names none. An explicit `project` or `all_projects`
+// wins, because the caller is the one who knows which board it means.
+func TestTheDoorsProjectIsTheDefaultScopeOfEveryCall(t *testing.T) {
+	here, err := (&worktree.Manager{}).Project(context.Background(), ".")
+	if err != nil {
+		t.Skipf("no git project here: %v", err)
+	}
+	door := Options{Project: "."}
+
+	// A call that names nothing is answered on the board the door was
+	// started on, resolved to §4.1's canonical path like any other.
+	req := scopedCallWith(t, door, map[string]any{})
+	if req.Project != here || req.AllProjects {
+		t.Errorf("a call naming no board came through as %q / all=%t, want the door's %q",
+			req.Project, req.AllProjects, here)
+	}
+
+	// An explicit board wins over the door's.
+	req = scopedCallWith(t, Options{Project: "/nowhere/at/all"}, map[string]any{argProject: "."})
+	if req.Project != here || req.AllProjects {
+		t.Errorf("an explicit project came through as %q / all=%t, want %q",
+			req.Project, req.AllProjects, here)
+	}
+
+	// And so does an explicit all_projects, which is unchanged by the
+	// default: a caller that asked for every board gets every board.
+	req = scopedCallWith(t, door, map[string]any{argAllProjects: true})
+	if req.Project != "" || !req.AllProjects {
+		t.Errorf("all_projects came through as %q / all=%t, want every board",
+			req.Project, req.AllProjects)
+	}
+}
+
+// A door started on no board is unchanged: every call defaults to every
+// board, exactly as it did before the flag was read.
+func TestADoorStartedOnNoBoardStillDefaultsToEveryBoard(t *testing.T) {
+	req := scopedCallWith(t, Options{}, map[string]any{})
+	if req.Project != "" || !req.AllProjects {
+		t.Fatalf("default scope = %q / all=%t, want every board", req.Project, req.AllProjects)
+	}
+}
+
 // scopedCall makes one call through the door and hands back the request it
 // built, so a test can read what the scope resolved to.
 func scopedCall(t *testing.T, args map[string]any) protocol.Request {
 	t.Helper()
+	return scopedCallWith(t, Options{}, args)
+}
+
+// scopedCallWith is the same, for a door STARTED with a scope of its own.
+func scopedCallWith(t *testing.T, opt Options, args map[string]any) protocol.Request {
+	t.Helper()
 	var got protocol.Request
-	sess := session(t, func(req protocol.Request) (json.RawMessage, error) {
+	sess := sessionWith(t, func(req protocol.Request) (json.RawMessage, error) {
 		got = req
 		return json.RawMessage(`{}`), nil
-	})
+	}, opt)
 	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{Name: "status", Arguments: args})
 	if err != nil {
 		t.Fatalf("CallTool %v: %v", args, err)

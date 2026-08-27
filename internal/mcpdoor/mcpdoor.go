@@ -58,6 +58,16 @@ type Options struct {
 	// Read once from `hdis mcp --operator` and never from a tool call,
 	// which is what keeps it from being --as with a different spelling.
 	Operator bool
+	// Project is the board `hdis mcp --project <path>` named, and it is the
+	// DEFAULT scope of every tool call that names none itself. Without it
+	// the flag parsed on the door's own command line took effect nowhere,
+	// which is the one way a scope flag can fail: silently. A call that
+	// names its own `project` or asks for `all_projects` is unchanged — the
+	// explicit argument wins, because the caller is the one who knows which
+	// board it means. It is the door's raw string rather than a resolved
+	// project: what it is relative to is this process's own working
+	// directory, and Scope resolves it there like any other (§4.1, §4.2).
+	Project string
 }
 
 // New builds the MCP server with one tool per verb.
@@ -152,6 +162,13 @@ func handlerFor(v verbs.Verb, call Caller, opt Options) mcp.ToolHandler {
 		everyBoard, _ := args[argAllProjects].(bool)
 		delete(args, argProject)
 		delete(args, argAllProjects)
+		// The board the door was STARTED on stands in for the call that
+		// named none. An explicit `project` or `all_projects` wins: the
+		// default is what the operator wired into the server configuration,
+		// and the argument is what this caller knows about this call.
+		if named == "" && !everyBoard {
+			named = opt.Project
+		}
 		project, allProjects, err := cli.Scope(named, everyBoard)
 		if err != nil {
 			return failure(err), nil

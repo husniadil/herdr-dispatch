@@ -196,8 +196,21 @@ operator writes the server configuration:
 Every call that door makes is then the operator's where this daemon records a
 caller at all: the §9 gate's subject, the subject a deferred call is parked
 under, and who resolved it. Without it a paneless door's calls are attributed
-to nobody in particular, which is what a door nobody declared has earned. What
-it does not change is the board principal — `plugin:hdis@<pane>` is fixed for
+to nobody in particular, which is what a door nobody declared has earned. Read
+which is which with `hdis doctor`, whose `principal` line and JSON field are
+the calling principal itself, so a declared door answers `human` where an
+undeclared one does not:
+
+```
+$ hdis doctor
+  principal   human
+```
+
+A paneless CLI call answers `human` too, and for a different reason: the argv
+that ran is the deliberate human act §3.7 asks a paneless operator to point at
+(§3.6). A call from inside a Herdr pane answers `agent:<pane>` on either door,
+and `--as` answers what it declared. What the declaration does not change is
+the board principal — `plugin:hdis@<pane>` is fixed for
 the process and carries no caller, which is a separate decision recorded in
 [`docs/contract-notes.md`](docs/contract-notes.md).
 
@@ -238,6 +251,9 @@ one daemon runs per user and drives the whole fleet, and scoping `status` to
 whichever directory the operator happens to be standing in would hide most of
 what it is driving.
 
+On `hdis mcp` the same flag names the board every tool call through that door
+defaults to, which is spelled out with the door's wiring below.
+
 Shell completion comes with cobra:
 
 ```sh
@@ -253,6 +269,22 @@ Wire the MCP door into any client that speaks stdio MCP:
 ```json
 { "command": "hdis", "args": ["mcp"] }
 ```
+
+`--project` works on the door as it works on any other command, and names the
+board every tool call defaults to:
+
+```json
+{ "command": "hdis", "args": ["mcp", "--project", "/src/p"] }
+```
+
+A door started that way answers a call that names no scope on `/src/p` rather
+than on every board, which is what a client wired to one repository wants. A
+call that passes its own `project` is answered on that one, and a call that
+passes `all_projects` gets every board: the explicit argument wins, because
+the caller is the one who knows which board it means. A door started without
+the flag defaults to every board exactly as before. Unlike `--operator`, this
+is scope rather than identity, so there is no reason to keep it off a call —
+it is a default, not a declaration.
 
 **`dispatch` does not wait for a worker.** Bringing one up runs past three
 minutes in the worst case — the pane's shell, the agent's startup, a trust

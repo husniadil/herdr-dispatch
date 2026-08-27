@@ -7,6 +7,31 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+**Added: `hdis doctor` prints the calling principal.** `principal` is a new
+top-level field on the doctor report and a new line in its text output,
+carrying the principal this daemon recorded for that very call — the same
+answer the §9 gate is asked about and a parked row is filed under, so the
+three cannot disagree. It is what §7.5 leans on: a doctor call through a door
+started with `--operator` answers `human` and one through an undeclared door
+does not, which is how an operator checks which of their registrations speak
+for them. A caller reading the report by field name is unaffected; one
+matching the text output line by line gains a line after `contract`.
+
+**Changed: a paneless CLI call is the operator (§3.6).** The CLI door now
+sends the human act its own argv is, so `hdis doctor` outside a Herdr pane
+answers `human` where it answered `unknown`, and the §9 gate is asked about
+`human` rather than `unknown` for the same call. A gate script matching the
+subject `unknown` for CLI calls has to match `human` instead. A call from
+inside a pane and a call with `--as` are unchanged: the pane still wins, and
+so does the declaration.
+
+**Added: `hdis mcp --project <path>` sets the door's default board.** The
+root's persistent `--project` parsed on the door's own command line took
+effect nowhere; it now names the board every tool call through that door
+defaults to. A call that passes its own `project` is still answered on that
+one, and `all_projects` still gets every board — the explicit argument wins.
+A door started without the flag defaults to every board exactly as before.
+
 **Added: `hdis mcp --operator` declares the door speaks for the operator.**
 §7.5's declaration is read once from how the server was started, so a door in
 no pane — a desktop harness resolving a parked row — is the operator to the

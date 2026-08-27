@@ -66,6 +66,11 @@ func newDaemonCmd() *cobra.Command {
 	return cmd
 }
 
+// serveMCP is the door, behind a name a test can stand in for. What a test
+// needs to read is which Options the command built from its flags, and the
+// real one blocks on stdio until the client goes away.
+var serveMCP = mcpdoor.Serve
+
 func newMCPCmd() *cobra.Command {
 	var opt mcpdoor.Options
 	cmd := &cobra.Command{
@@ -80,7 +85,12 @@ func newMCPCmd() *cobra.Command {
 		// effect.
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return mcpdoor.Serve(context.Background(), version.Version, nil, opt)
+			// The root's own persistent --project (§4.2). It is parsed on
+			// this command line whether or not anything reads it, so a door
+			// started with it either defaults every call to that board or
+			// drops the flag on the floor; this is which of the two.
+			opt.Project, _ = cmd.Flags().GetString("project")
+			return serveMCP(context.Background(), version.Version, nil, opt)
 		},
 	}
 	// §7.5: read once, from the server command. It is deliberately NOT a
