@@ -56,6 +56,23 @@ type Profile struct {
 	// Anthropic account must name a real Anthropic model rather than
 	// `opus`, `sonnet` or `haiku`.
 	Account string `json:"account"`
+	// MCPConfig is the MCP document THIS profile's workers are launched
+	// against, overriding the top-level Worker.MCPConfig. Empty takes that
+	// one, and an empty one takes the default file.
+	MCPConfig string `json:"mcp_config"`
+}
+
+// Worker is what every worker gets, whichever profile it launched from.
+type Worker struct {
+	// MCPConfig is the MCP document a worker discovers its doors through.
+	// Empty means the default file this dispatcher writes once at
+	// config.WorkerMCPConfigPath().
+	//
+	// Without it a worker reads `~/.mcp.json`, which is the OPERATOR's file
+	// and theirs to keep as they like — a fleet whose operator holds only
+	// the hub connector there would hand every worker a pane with no local
+	// doors at all.
+	MCPConfig string `json:"mcp_config"`
 }
 
 // AccountNameOK reports whether an account name may be exported bare onto a
@@ -518,6 +535,8 @@ type Config struct {
 	Proxy Proxy `json:"proxy"`
 	// Verify is the verification lane: off unless the document turns it on.
 	Verify Verify `json:"verify"`
+	// Worker is what a worker gets whichever profile it launched from.
+	Worker Worker `json:"worker"`
 	// Layout is where a worker is placed and the width it must be readable
 	// at.
 	Layout Layout `json:"layout"`
@@ -574,6 +593,28 @@ func Parse(b []byte) (Config, error) {
 	if verify, ok := doc["verify"].(map[string]any); ok {
 		if _, named := verify["profile"]; named {
 			return Config{}, fmt.Errorf("hdis config: verify.profile names a verifier pane that no longer launches; the verification lane is a self-review shot in the worker's own pane, so remove the field")
+		}
+	}
+	// An mcp_config written as the empty string is not an unconfigured one:
+	// it is a document nobody can read, and a worker launched against it
+	// under --strict-mcp-config has no doors at all. An operator who meant
+	// the default file deletes the key. The check is on the DOCUMENT rather
+	// than on the decoded struct, because an empty string and an absent key
+	// decode to the same field.
+	if worker, ok := doc["worker"].(map[string]any); ok {
+		if err := checkMCPConfig(worker, "worker"); err != nil {
+			return Config{}, err
+		}
+	}
+	if profiles, ok := doc["profiles"].(map[string]any); ok {
+		for name, raw := range profiles {
+			p, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			if err := checkMCPConfig(p, "profile "+name); err != nil {
+				return Config{}, err
+			}
 		}
 	}
 	// The launcher used to be a bare top-level string and is now a table,
@@ -710,6 +751,29 @@ func Parse(b []byte) (Config, error) {
 		}
 	}
 	return c, nil
+}
+
+// checkMCPConfig refuses an mcp_config key written with nothing usable in it,
+// naming where it was written.
+func checkMCPConfig(table map[string]any, where string) error {
+	v, named := table["mcp_config"]
+	if !named {
+		return nil
+	}
+	if s, ok := v.(string); !ok || strings.TrimSpace(s) == "" {
+		return fmt.Errorf("hdis config: %s names an empty mcp_config, which is a document no worker can read; remove the key to take the default doors this dispatcher writes at %s", where, WorkerMCPFile)
+	}
+	return nil
+}
+
+// MCPConfigFor is the MCP document a profile's workers are launched against:
+// the profile's own if it names one, the fleet's otherwise. Empty is nothing
+// configured, which is the default file.
+func (c Config) MCPConfigFor(p Profile) string {
+	if p.MCPConfig != "" {
+		return p.MCPConfig
+	}
+	return c.Worker.MCPConfig
 }
 
 // Load reads a config document from disk.

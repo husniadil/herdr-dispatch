@@ -576,3 +576,38 @@ func TestStatusNamesTheProfileEachWorkerRuns(t *testing.T) {
 		t.Fatalf("status does not name the profile: %q", out.String())
 	}
 }
+
+// A worker's doors are the whole of what it can reach, so doctor says which
+// document they come from and whether it is there.
+func TestDoctorNamesTheWorkerMCPConfigAndWhetherItIsThere(t *testing.T) {
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","base_pane":"wM:p1","max_workers":2,"interval":"15s",` +
+		`"worker":{"mcp_config":"/s/state/worker.mcp.json","mcp_config_configured":false,"mcp_config_exists":true},` +
+		`"board":{"reachable":true}}`)
+	var out strings.Builder
+	if err := Write("doctor", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	for _, want := range []string{"worker", "mcp_config", "/s/state/worker.mcp.json", "present"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("want %q in doctor prose %q", want, out.String())
+		}
+	}
+}
+
+// A configured document nobody wrote is the finding: every spawn against it
+// is refused, and the line says so rather than printing a path and leaving it.
+func TestDoctorCallsAConfiguredWorkerMCPConfigThatIsNotThereAFinding(t *testing.T) {
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","base_pane":"wM:p1","max_workers":2,"interval":"15s",` +
+		`"worker":{"mcp_config":"/etc/hdis/worker.mcp.json","mcp_config_configured":true,"mcp_config_exists":false,` +
+		`"profile_mcp_configs":[{"profile":"routed","mcp_config":"/etc/hdis/routed.mcp.json","mcp_config_exists":false}]},` +
+		`"board":{"reachable":true}}`)
+	var out strings.Builder
+	if err := Write("doctor", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	for _, want := range []string{"/etc/hdis/worker.mcp.json", "MISSING", "refused", "profile routed", "/etc/hdis/routed.mcp.json"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("want %q in doctor prose %q", want, out.String())
+		}
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -72,6 +73,7 @@ provider = "claude"
 			Spawn: &spawn.Pipeline{
 				Herdr: &herdrclient.Client{}, Proxy: &proxy.Client{},
 				StartTimeout: time.Second, Poll: time.Second, Sleep: func(time.Duration) {},
+				WorkerMCPPath: filepath.Join(t.TempDir(), config.WorkerMCPFile),
 			},
 			BasePane: "wM:p1",
 			Log:      log.New(io.Discard, "", 0),

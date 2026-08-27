@@ -105,6 +105,10 @@ func newDaemon(t *testing.T) (*Daemon, *testenv.Fake) {
 				Herdr: &herdrclient.Client{}, Proxy: &proxy.Client{},
 				StartTimeout: time.Second, DialogCeiling: time.Second, ConfirmCeiling: 2 * time.Second,
 				Poll: time.Second, Sleep: func(time.Duration) {},
+				// The default doors land in the test's own directory: a
+				// spawn writes this file, and the operator's real state
+				// dir is not a test's to write in.
+				WorkerMCPPath: filepath.Join(t.TempDir(), config.WorkerMCPFile),
 			},
 			Store:     &store.Bindings{Path: filepath.Join(t.TempDir(), "dispatch-bindings.json")},
 			Worktrees: &worktree.Manager{Root: t.TempDir(), Git: filepath.Join(f.Dir, "git")},
@@ -827,6 +831,69 @@ max_panes_per_tab = 2
 	d.Loop.Config = cfg
 	if rep := doctorOf(t, d); rep.MaxPanesPerTab != 2 {
 		t.Fatalf("doctor reports max_panes_per_tab %d, want 2", rep.MaxPanesPerTab)
+	}
+}
+
+// A worker is launched with --strict-mcp-config, so the document doctor names
+// is the whole of the doors it has. An unconfigured fleet reads the default
+// file in the state dir, and doctor says whether it has been written yet.
+func TestDoctorNamesTheDefaultWorkerMCPConfig(t *testing.T) {
+	dir := stateDir(t)
+	d, _ := newDaemon(t)
+	rep := doctorOf(t, d)
+	if got, want := rep.Worker.MCPConfig, filepath.Join(dir, config.WorkerMCPFile); got != want {
+		t.Fatalf("doctor reports %q, want the default %q", got, want)
+	}
+	if rep.Worker.MCPConfigured {
+		t.Error("a document nobody configured must not be reported as configured")
+	}
+	if rep.Worker.MCPExists {
+		t.Error("a file nothing has written must not be reported as there")
+	}
+	if err := config.EnsureWorkerMCPConfig(rep.Worker.MCPConfig); err != nil {
+		t.Fatalf("write the default: %v", err)
+	}
+	if rep := doctorOf(t, d); !rep.Worker.MCPExists {
+		t.Error("a file that is there must be reported as there")
+	}
+}
+
+// A configured document that nobody wrote is the finding a spawn would refuse
+// on, and a profile that names one of its own is reported beside it.
+func TestDoctorReportsAConfiguredWorkerMCPConfigAndWhetherItIsThere(t *testing.T) {
+	d, _ := newDaemon(t)
+	fleet := filepath.Join(t.TempDir(), "fleet.mcp.json")
+	if err := os.WriteFile(fleet, []byte(`{"mcpServers":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(t.TempDir(), "routed.mcp.json")
+	cfg, err := config.Parse([]byte(`default = "w"
+[worker]
+mcp_config = "` + fleet + `"
+[profiles.w]
+provider = "claude"
+[profiles.routed]
+provider = "claude"
+mcp_config = "` + missing + `"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Loop.Config = cfg
+
+	rep := doctorOf(t, d)
+	if got := rep.Worker.MCPConfig; got != fleet {
+		t.Fatalf("doctor reports %q, want the configured %q", got, fleet)
+	}
+	if !rep.Worker.MCPConfigured || !rep.Worker.MCPExists {
+		t.Fatalf("a configured document that is there: %+v", rep.Worker)
+	}
+	if len(rep.Worker.Profiles) != 1 {
+		t.Fatalf("doctor reports %d overriding profiles, want 1: %+v", len(rep.Worker.Profiles), rep.Worker.Profiles)
+	}
+	got := rep.Worker.Profiles[0]
+	if got.Profile != "routed" || got.MCPConfig != missing || got.Exists {
+		t.Fatalf("the overriding profile is reported as %+v", got)
 	}
 }
 

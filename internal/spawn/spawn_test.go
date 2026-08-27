@@ -117,6 +117,7 @@ func newHarness(t *testing.T, reads []string, start string) *harness {
 		Herdr:          &herdrclient.Client{},
 		Proxy:          &proxy.Client{},
 		SettingsDir:    t.TempDir(),
+		WorkerMCPPath:  filepath.Join(t.TempDir(), config.WorkerMCPFile),
 		StartTimeout:   45 * time.Second,
 		DialogCeiling:  4 * time.Second,
 		ConfirmCeiling: 4 * time.Second,
@@ -181,7 +182,11 @@ func TestTheGoalTravelsInTheInitialArgvAsASlashCommand(t *testing.T) {
 		t.Fatalf("the goal is not the last argument: %q", last)
 	}
 	joined := strings.Join(start, " ")
-	for _, want := range []string{"--kind claude", "--pane wM:p9", "-- --agent claude --effort low"} {
+	// The agent argv leads with the worker's own doors and the profile
+	// follows: `-- --agent claude` was the pin until --mcp-config and
+	// --strict-mcp-config took the front of the argv, and the pin moved
+	// with them on purpose.
+	for _, want := range []string{"--kind claude", "--pane wM:p9", "--strict-mcp-config --agent claude --effort low"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("want %q in %q", want, joined)
 		}
@@ -607,6 +612,14 @@ func TestTheTypedSpawnLineStaysUnderItsBudgetWithACodexProfile(t *testing.T) {
 	// measure something no spawn ever types.
 	h.pipe.SettingsDir = ""
 	t.Cleanup(func() { h.pipe.Discard("wM:p9") })
+	// The same reason, one path over: the doors travel as a path on that
+	// line too. The real default is <state_dir>/worker.mcp.json, 50
+	// characters on the machine this was measured on; the shared temp
+	// directory stands in for it here at a comparable length, and a
+	// t.TempDir() path — which carries the test's own name — would measure
+	// something no spawn ever types.
+	h.pipe.WorkerMCPPath = filepath.Join(os.TempDir(), config.WorkerMCPFile)
+	t.Cleanup(func() { os.Remove(h.pipe.WorkerMCPPath) })
 	h.Bin(t, "proxenos", `cat "$HDIS_FAKE_DIR/settings.json"`)
 	h.Write(t, "settings.json", realProxySettings)
 
@@ -643,6 +656,13 @@ func TestThePipelineDeliversTheConditionItWasGivenUnchanged(t *testing.T) {
 	h := newHarness(t, []string{goalActive}, startRegistered)
 	h.Bin(t, "proxenos", `cat "$HDIS_FAKE_DIR/settings.json"`)
 	h.Write(t, "settings.json", realProxySettings)
+	// The real condition on a t.TempDir() settings path and a t.TempDir()
+	// doors path is a line no spawn ever types and one the budget rightly
+	// refuses, so both paths stand at the lengths a real spawn has.
+	h.pipe.SettingsDir = ""
+	t.Cleanup(func() { h.pipe.Discard("wM:p9") })
+	h.pipe.WorkerMCPPath = filepath.Join(os.TempDir(), config.WorkerMCPFile)
+	t.Cleanup(func() { os.Remove(h.pipe.WorkerMCPPath) })
 
 	r := req(codexProfile())
 	r.Goal = PointerGoal(14)
@@ -1888,5 +1908,124 @@ func TestACodexProfileWithAnAccountExportsItAfterTheEval(t *testing.T) {
 	want := `eval "$(proxenos env)"; export ANTHROPIC_AUTH_TOKEN=proxenos-account:work-codex`
 	if run == nil || run[3] != want {
 		t.Fatalf("environment half: got %v, want %q", run, want)
+	}
+}
+
+// A worker's doors are handed to it in its argv, and nothing else is allowed
+// to answer: without --mcp-config the client reads the OPERATOR's ~/.mcp.json,
+// which is theirs to keep as they like.
+func TestTheWorkerIsLaunchedAgainstItsOwnMCPConfig(t *testing.T) {
+	h := newHarness(t, []string{goalActive}, startRegistered)
+
+	if _, err := h.pipe.Run(context.Background(), req(claudeProfile())); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	args := agentArgsOf(t, h)
+	if len(args) < 3 || args[0] != "--mcp-config" || args[2] != "--strict-mcp-config" {
+		t.Fatalf("the doors must lead the agent argv: %v", args)
+	}
+	if args[1] != h.pipe.WorkerMCPPath {
+		t.Fatalf("the document is %q, want the default file %q", args[1], h.pipe.WorkerMCPPath)
+	}
+	// The flag is variadic — `--mcp-config <configs...>` — so it may never
+	// sit last: the goal is positional and would be swallowed as a second
+	// document.
+	if got, want := args[len(args)-1], GoalPrefix+req(claudeProfile()).Goal; got != want {
+		t.Fatalf("the goal must stay the last argument: got %q, want %q", got, want)
+	}
+}
+
+// The default file is written where nothing configured one, and it holds the
+// four plugin doors of this fleet.
+func TestTheDefaultMCPConfigIsWrittenAtSpawnTime(t *testing.T) {
+	h := newHarness(t, []string{goalActive}, startRegistered)
+	if _, err := os.Stat(h.pipe.WorkerMCPPath); err == nil {
+		t.Fatal("the default file must not exist before a spawn")
+	}
+
+	if _, err := h.pipe.Run(context.Background(), req(claudeProfile())); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	body, err := os.ReadFile(h.pipe.WorkerMCPPath)
+	if err != nil {
+		t.Fatalf("the default document: %v", err)
+	}
+	for _, door := range config.WorkerMCPDoors {
+		if !strings.Contains(string(body), `"`+door.Server+`"`) {
+			t.Fatalf("door %q is missing: %s", door.Server, body)
+		}
+	}
+}
+
+// A document the operator named and never wrote is a worker with no doors,
+// and it is refused before a pane is opened, naming the path.
+func TestAConfiguredMCPConfigThatIsNotThereRefusesTheSpawn(t *testing.T) {
+	h := newHarness(t, []string{goalActive}, startRegistered)
+	missing := filepath.Join(t.TempDir(), "nowhere.mcp.json")
+
+	r := req(claudeProfile())
+	r.MCPConfig = missing
+	pane, err := h.pipe.Run(context.Background(), r)
+	if err == nil {
+		t.Fatal("a configured document that is not there must refuse the spawn")
+	}
+	if !strings.Contains(err.Error(), missing) {
+		t.Fatalf("the refusal does not name the path: %v", err)
+	}
+	if pane != "" {
+		t.Fatalf("a refused spawn must open no pane, got %q", pane)
+	}
+	if n := count(h.verbs(t), "pane split") + count(h.verbs(t), "tab create"); n != 0 {
+		t.Fatalf("a refused spawn opened %d panes", n)
+	}
+}
+
+// A document the operator named and did write is what the worker is launched
+// against, verbatim, and the default file is never written beside it.
+func TestAConfiguredMCPConfigIsUsedAsWritten(t *testing.T) {
+	h := newHarness(t, []string{goalActive}, startRegistered)
+	own := filepath.Join(t.TempDir(), "own.mcp.json")
+	if err := os.WriteFile(own, []byte(`{"mcpServers":{}}`), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	r := req(claudeProfile())
+	r.MCPConfig = own
+	if _, err := h.pipe.Run(context.Background(), r); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	args := agentArgsOf(t, h)
+	if args[1] != own {
+		t.Fatalf("the document is %q, want %q", args[1], own)
+	}
+	if _, err := os.Stat(h.pipe.WorkerMCPPath); err == nil {
+		t.Fatal("a configured document must not make the default file be written")
+	}
+}
+
+// The codex provider's --settings still leads the argv: the launcher's
+// settings half is spliced in front of everything, and the doors sit behind
+// it, both after the program name and both forwarded untouched.
+func TestTheCodexArgvKeepsSettingsAheadOfTheDoors(t *testing.T) {
+	h := newHarness(t, []string{goalActive}, startRegistered)
+	h.Bin(t, "proxenos", `cat "$HDIS_FAKE_DIR/settings.json"`)
+	h.Write(t, "settings.json", realProxySettings)
+
+	if _, err := h.pipe.Run(context.Background(), req(codexProfile())); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	args := agentArgsOf(t, h)
+	if len(args) < 5 || args[0] != "--settings" || args[2] != "--mcp-config" || args[4] != "--strict-mcp-config" {
+		t.Fatalf("the codex argv must be --settings, then the doors: %v", args)
+	}
+	if args[3] != h.pipe.WorkerMCPPath {
+		t.Fatalf("the document is %q, want %q", args[3], h.pipe.WorkerMCPPath)
+	}
+	if got, want := args[5], "--agent"; got != want {
+		t.Fatalf("the profile's own argv must follow the doors: got %q, want %q", got, want)
 	}
 }

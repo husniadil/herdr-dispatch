@@ -184,6 +184,7 @@ enabled = true
 			Herdr: &herdrclient.Client{}, Proxy: &proxy.Client{},
 			StartTimeout: time.Second, DialogCeiling: time.Second, ConfirmCeiling: 5 * time.Second,
 			Poll: time.Second, Sleep: func(time.Duration) {},
+			WorkerMCPPath: filepath.Join(t.TempDir(), config.WorkerMCPFile),
 		},
 		Worktrees: &worktree.Manager{Root: realPath(t, t.TempDir())},
 		Store:     &store.Bindings{Path: filepath.Join(t.TempDir(), "dispatch-bindings.json")},

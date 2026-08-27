@@ -1193,6 +1193,7 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 		Project:    row.Project,
 		Cwd:        tree,
 		Profile:    profile,
+		MCPConfig:  l.Config.MCPConfigFor(profile),
 		Goal:       spawn.PointerGoal(row.Seq),
 	})
 	if pane == "" {

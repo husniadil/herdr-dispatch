@@ -561,6 +561,7 @@ exists to prevent.
 | `effort`   | Defaults to `low`.                                                                                                           |
 | `args`     | Extra argv passed through to the worker.                                                                                     |
 | `account`  | A stored account of the proxy launcher this profile's workers run as. `codex` only; naming one on a `claude` profile is refused when the document is read. Optional; without it the launcher's own standing selection serves. |
+| `mcp_config` | The MCP document this profile's workers read their doors from, overriding `[worker] mcp_config` below. Optional. |
 
 Naming an `account` exports the launcher's own per-session tag —
 `ANTHROPIC_AUTH_TOKEN=proxenos-account:<name>` — into the worker's pane, after
@@ -579,6 +580,57 @@ are set up by `proxenos env` from the DAEMON's own `[tiers]` config, which in a
 fleet routing to OpenAI points them at gpt models. Pinning a profile to an
 Anthropic account does not repoint them, so such a profile must name a real
 Anthropic model in `model` rather than a tier alias.
+
+### The doors a worker gets
+
+A worker is launched with `--mcp-config <path> --strict-mcp-config`, so that
+one document is every MCP door it has and nothing else is consulted:
+
+```toml
+[worker]
+mcp_config = "/Users/me/.config/herdr/worker.mcp.json"
+```
+
+Without the flags a Claude Code worker discovers its doors through `~/.mcp.json`
+in HOME, which is the OPERATOR's file. That file is theirs — an operator whose
+own session reaches the fleet through a single hub connector wants only the hub
+connector in it — and a worker that inherited it would come up with the hub's
+doors and none of its own. The four local doors are what give a worker a
+principal derived from its pane (contract §3.1); a hub connector cannot, because
+it speaks for whoever registered it.
+
+`[worker] mcp_config` is the fleet-wide answer and a profile's own `mcp_config`
+overrides it. **A configured path that does not exist is refused**: the spawn
+fails naming the path, before a pane or a checkout is made, and `hdis doctor`
+says so before a task is ever reserved against it.
+
+When neither names one, `hdis` writes `<state_dir>/worker.mcp.json` ONCE — at
+the first spawn that needs it — and launches every worker against that. It holds
+exactly the four plugin doors of this fleet:
+
+```json
+{
+  "mcpServers": {
+    "herdr-dispatch": { "type": "stdio", "command": "hdis", "args": ["mcp"] },
+    "herdr-mail": { "type": "stdio", "command": "hmail", "args": ["mcp"] },
+    "herdr-sched": { "type": "stdio", "command": "hsched", "args": ["mcp"] },
+    "herdr-tasks": { "type": "stdio", "command": "htask", "args": ["mcp"] }
+  }
+}
+```
+
+Each command is written as the absolute path PATH resolved at spawn time, and
+as the bare name when PATH resolved nothing: a worker's pane is opened in a
+worktree under the state directory, where a plugin binary kept in a project's
+own `bin/` is not on PATH. The file is written once and never rewritten, so
+editing it is how the doors are changed; deleting it is how the default is
+asked for again.
+
+`hdis doctor` prints the document and whether it is there:
+
+```text
+  worker      mcp_config /Users/me/.local/state/dispatch/worker.mcp.json, present
+```
 
 ### Routing a task to a profile by its priority
 

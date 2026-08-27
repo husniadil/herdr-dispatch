@@ -171,6 +171,7 @@ provider = "claude"
 			Herdr: &herdrclient.Client{}, Proxy: &proxy.Client{},
 			StartTimeout: time.Second, DialogCeiling: time.Second, ConfirmCeiling: 5 * time.Second,
 			Poll: time.Second, Sleep: func(time.Duration) {},
+			WorkerMCPPath: filepath.Join(t.TempDir(), config.WorkerMCPFile),
 		},
 		Store:     &store.Bindings{Path: filepath.Join(t.TempDir(), "dispatch-bindings.json")},
 		Worktrees: &worktree.Manager{Root: t.TempDir(), Git: fakeGit(t, f)},
@@ -557,6 +558,17 @@ provider = "codex"
 	l.Config = cfg
 	dir := t.TempDir()
 	l.Spawn.SettingsDir = dir
+	// A codex worker's typed line carries BOTH paths, and it is measured
+	// against spawn.TypedLineBudget on the way out. A t.TempDir() path
+	// carries the test's own name and is far longer than anything a real
+	// spawn types, so the doors take a short directory of their own rather
+	// than pushing a line no spawn would render over the budget.
+	short, err := os.MkdirTemp("/tmp", "hdis-")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(short) })
+	l.Spawn.WorkerMCPPath = filepath.Join(short, config.WorkerMCPFile)
 	f.Bin(t, "proxenos", `echo '{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8787"}}'`)
 	return l, f, dir
 }
@@ -890,4 +902,40 @@ func (e escapedTrees) Unmoved(ctx context.Context, project, branch string) (bool
 		return false, e.err
 	}
 	return true, nil
+}
+
+// The document a worker's doors come from is config, and the tick is what
+// carries it from the profile the task routed to into the worker's argv.
+func TestATickCarriesTheConfiguredMCPConfigIntoTheWorkersArgv(t *testing.T) {
+	l, f := newLoop(t)
+	own := filepath.Join(t.TempDir(), "fleet.mcp.json")
+	if err := os.WriteFile(own, []byte(`{"mcpServers":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Parse([]byte(`default = "worker"
+[worker]
+mcp_config = "` + own + `"
+[profiles.worker]
+provider = "claude"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.Config = cfg
+
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	start := calls(t, f, "agent start")
+	if len(start) != 1 {
+		t.Fatalf("agent start ran %d times", len(start))
+	}
+	if !strings.Contains(start[0], "--mcp-config "+own+" --strict-mcp-config") {
+		t.Fatalf("the configured document did not reach the worker: %q", start[0])
+	}
+	// And the default file is not written beside it: an operator who named
+	// a document is not also given one they did not ask for.
+	if _, err := os.Stat(l.Spawn.WorkerMCPPath); err == nil {
+		t.Fatal("the default document was written for a fleet that configured its own")
+	}
 }

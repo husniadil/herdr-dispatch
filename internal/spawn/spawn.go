@@ -308,6 +308,14 @@ const PromptedGoalBudget = 1023
 // on 2026-08-25 with the same profile, the whole line is 505 characters for a
 // two-digit task.
 //
+// The worker's own doors then joined the line: `--mcp-config <path>
+// --strict-mcp-config` is a fixed 33 characters plus the path. Measured on
+// 2026-08-27 with the same profile and the default document at
+// <state_dir>/worker.mcp.json (50 characters here), the whole line is 590
+// characters for a two-digit task and 602 for a five-digit one — 84 more than
+// the 506 the same shape rendered without them, and still inside this budget,
+// so it did not move.
+//
 // It sits at 640 now: the same headroom the 512 was chosen for — a longer temp
 // path, another profile flag and a five-digit task number — and still under
 // half of the ~1.4k line that came out broken on the live shell. What bounds
@@ -415,6 +423,10 @@ type Pipeline struct {
 	// SettingsDir is where a codex spawn writes its settings file; empty
 	// means the system temp directory.
 	SettingsDir string
+	// WorkerMCPPath is where the default MCP document is written for a
+	// worker no profile configured one for; empty means
+	// config.WorkerMCPConfigPath().
+	WorkerMCPPath string
 	// StartTimeout is how long herdr waits for interactive readiness. It is
 	// spent in full on every registering goal, which is the normal case.
 	StartTimeout time.Duration
@@ -478,6 +490,11 @@ type Request struct {
 	// address the report is owed at. It is empty for a task nothing with a
 	// pane filed, and then the desk is looked for in the pane list.
 	OriginPane string
+	// MCPConfig is the MCP document this worker's doors are read from, as
+	// the config resolved it: the profile's own, else the fleet's. Empty is
+	// nothing configured, and then the default file this pipeline writes
+	// once is used instead.
+	MCPConfig string
 	// Project is the task's project directory, as the board records it. It
 	// is what a live pane's cwd is measured against to find the desk that
 	// owns the work; empty means no desk can be found that way. It is NOT
@@ -579,6 +596,16 @@ func (p *Pipeline) Run(ctx context.Context, req Request) (string, error) {
 		}
 		settingsDoc = doc
 	}
+
+	// The doors, before a pane is opened: a document the operator named and
+	// never wrote is a worker with no doors at all under
+	// --strict-mcp-config, and refusing here costs nothing while refusing
+	// after the split costs a pane and a checkout.
+	mcpConfig, err := p.workerMCPConfig(req.MCPConfig)
+	if err != nil {
+		return "", fmt.Errorf("spawn %s: %w", req.Name, err)
+	}
+	agentArgs = append([]string{"--mcp-config", mcpConfig, "--strict-mcp-config"}, agentArgs...)
 
 	// Claude Code takes its initial prompt positionally, and the goal is the
 	// whole of it. It stays here whole: it has to reach the slash-command
@@ -857,6 +884,34 @@ func (p *Pipeline) Discard(pane string) {
 	if path != "" {
 		os.Remove(path)
 	}
+}
+
+// workerMCPConfig is the MCP document a worker is launched against, and it is
+// the whole of the doors it gets: `--strict-mcp-config` makes the client read
+// this file and nothing else, so the operator's own `~/.mcp.json` — which may
+// hold only the hub connector, or anything else they like — never reaches a
+// worker.
+//
+// A configured path is checked and never created. An operator who named a
+// document is owed a refusal naming it rather than a default one written over
+// their intent. Nothing configured takes the default file, written once at
+// spawn time so the commands in it are resolved against a PATH the daemon
+// still has.
+func (p *Pipeline) workerMCPConfig(configured string) (string, error) {
+	if configured != "" {
+		if _, err := os.Stat(configured); err != nil {
+			return "", fmt.Errorf("the configured mcp config %s cannot be read: %w", configured, err)
+		}
+		return configured, nil
+	}
+	path := p.WorkerMCPPath
+	if path == "" {
+		path = config.WorkerMCPConfigPath()
+	}
+	if err := config.EnsureWorkerMCPConfig(path); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // writeSettings puts the proxy's document where the worker can read it and

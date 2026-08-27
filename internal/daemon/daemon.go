@@ -439,6 +439,38 @@ type DoctorReport struct {
 	// rather than keeping two tasks apart. The operator sets it in the
 	// config, and this is where they read it back off the running daemon.
 	MaxPanesPerTab int `json:"max_panes_per_tab"`
+	// Worker is what every worker is launched with whichever profile it
+	// came from: the MCP document that is the whole of its doors.
+	Worker WorkerHealth `json:"worker"`
+}
+
+// WorkerHealth is the worker-side launch policy as doctor reports it: which
+// MCP document a worker's doors are read from, and whether it is there.
+//
+// A worker is launched with `--strict-mcp-config`, so this file is every door
+// it has. A path an operator configured and never wrote is a spawn refusal,
+// and this is where they read it before a task is reserved against it.
+type WorkerHealth struct {
+	// MCPConfig is the fleet-wide document: what `[worker] mcp_config`
+	// names, else the default file this dispatcher writes once.
+	MCPConfig string `json:"mcp_config"`
+	// MCPConfigured says the path came from the document rather than from
+	// the default. The default is written at the first spawn that needs it,
+	// so an unconfigured path that is not there yet is ordinary; a
+	// configured one that is not there is a refusal waiting to happen.
+	MCPConfigured bool `json:"mcp_config_configured"`
+	MCPExists     bool `json:"mcp_config_exists"`
+	// Profiles are the profiles that name a document of their own, in name
+	// order. A profile is listed whether or not its path is there, because
+	// which profile a worker launched from decides which doors it got.
+	Profiles []ProfileMCPConfig `json:"profile_mcp_configs"`
+}
+
+// ProfileMCPConfig is one profile's own MCP document, as doctor reports it.
+type ProfileMCPConfig struct {
+	Profile   string `json:"profile"`
+	MCPConfig string `json:"mcp_config"`
+	Exists    bool   `json:"mcp_config_exists"`
 }
 
 // VerifyHealth is the verification lane as doctor reports it. There is
@@ -598,6 +630,7 @@ func (d *Daemon) doctor(ctx context.Context, req protocol.Request) (DoctorReport
 		MinPaneColumns: d.Loop.Config.Layout.MinPaneColumns,
 		MaxPanesPerTab: d.Loop.Config.Layout.MaxPanesPerTab,
 	}
+	rep.Worker = d.workerHealth()
 	rep.Events = d.eventsHealth()
 	rep.Herdr = d.herdrHealth(ctx)
 	rep.Proxy = d.proxyHealth(ctx)
@@ -616,6 +649,39 @@ func (d *Daemon) doctor(ctx context.Context, req protocol.Request) (DoctorReport
 		rep.Board.Error = "the board's daemon is not answering on " + board.Binary
 	}
 	return rep, nil
+}
+
+// workerHealth is the worker's doors as doctor reports it. Existence is asked
+// of the filesystem here rather than remembered from a spawn: the operator
+// runs doctor to learn whether the next one would refuse.
+func (d *Daemon) workerHealth() WorkerHealth {
+	out := WorkerHealth{MCPConfig: config.WorkerMCPConfigPath(), Profiles: []ProfileMCPConfig{}}
+	if d.Loop == nil {
+		return out
+	}
+	if path := d.Loop.Config.Worker.MCPConfig; path != "" {
+		out.MCPConfig, out.MCPConfigured = path, true
+	}
+	out.MCPExists = exists(out.MCPConfig)
+	for name, p := range d.Loop.Config.Profiles {
+		if p.MCPConfig == "" {
+			continue
+		}
+		out.Profiles = append(out.Profiles, ProfileMCPConfig{
+			Profile:   name,
+			MCPConfig: p.MCPConfig,
+			Exists:    exists(p.MCPConfig),
+		})
+	}
+	sort.Slice(out.Profiles, func(i, j int) bool { return out.Profiles[i].Profile < out.Profiles[j].Profile })
+	return out
+}
+
+// exists is the one question doctor asks of a configured path: a spawn reads
+// the document, and this only says whether there is one to read.
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // eventsHealth is the §8 trail as doctor reports it. A trail that cannot be

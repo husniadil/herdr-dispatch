@@ -141,6 +141,11 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 		}
 		fmt.Fprintf(out, "  layout      min_pane_columns %d, max_panes_per_tab %d per task\n",
 			rep.MinPaneColumns, rep.MaxPanesPerTab)
+		// Every worker is launched with --strict-mcp-config against this
+		// document, so it is the whole of the doors it has. A configured
+		// path that is not there refuses the spawn, which is what makes it
+		// a doctor line rather than a config echo.
+		fmt.Fprintf(out, "  worker      %s\n", workerLane(rep.Worker))
 		if rep.Board.Error != "" {
 			fmt.Fprintf(out, "  board       unreachable: %s\n", rep.Board.Error)
 			return nil
@@ -262,6 +267,34 @@ func verifyLane(v daemon.VerifyHealth) string {
 		return "off: a submission earns no self-review shot"
 	}
 	return "on: a submission earns one self-review shot in the worker's own pane"
+}
+
+// workerLane is the worker's doors in one line: which MCP document a worker
+// is launched against, whether it is there, and any profile that names one of
+// its own.
+//
+// A path that is not there says what it costs. Configured and missing is a
+// spawn refused; unconfigured and missing is the ordinary state of a
+// dispatcher that has not spawned yet, because the default file is written at
+// the first spawn that needs it.
+func workerLane(w daemon.WorkerHealth) string {
+	line := "mcp_config " + w.MCPConfig
+	switch {
+	case w.MCPExists:
+		line += ", present"
+	case w.MCPConfigured:
+		line += ", MISSING: a spawn against it is refused until it is written"
+	default:
+		line += ", not written yet: the default doors are written at the first spawn"
+	}
+	for _, p := range w.Profiles {
+		state := "present"
+		if !p.Exists {
+			state = "MISSING"
+		}
+		line += fmt.Sprintf("; profile %s reads %s, %s", p.Profile, p.MCPConfig, state)
+	}
+	return line
 }
 
 // gateLane is the §9 policy gate in one line: whether one is configured, and

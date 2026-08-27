@@ -5,6 +5,30 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
+## Unreleased
+
+**Added: `[worker] mcp_config`, and the doors a worker is launched with.** A
+worker's argv now carries `--mcp-config <path> --strict-mcp-config`, so one
+document is every MCP door it has. Until now a worker discovered its doors
+through `~/.mcp.json` in HOME, which is the OPERATOR's file: an operator who
+keeps only the Agamemnon hub connector in it handed every worker a pane with
+the hub's doors and none of the local ones, and the local doors are what derive
+a worker's principal from its pane (contract §3.1). `[worker] mcp_config` names
+the document fleet-wide, `mcp_config` on a profile overrides it for that
+profile's workers, and a path that is configured and not there is refused when
+the spawn is assembled — naming the path, before a pane or a checkout is made —
+as well as reported by `hdis doctor`. When neither names one, `hdis` writes
+`<state_dir>/worker.mcp.json` once, at the first spawn that needs it, holding
+exactly the four plugin doors (`htask mcp`, `hmail mcp`, `hdis mcp`,
+`hsched mcp`) with each command resolved to the absolute path PATH gave at that
+moment, and the bare name where PATH gave nothing; it is never rewritten, so an
+edited file stays edited and a deleted one comes back as the default.
+`hdis doctor` grows a `worker` object — `mcp_config`, `mcp_config_configured`,
+`mcp_config_exists` and `profile_mcp_configs` — and a `worker` line in the
+plain-text report. A consumer pinning the worker's argv sees two new flags at
+the front of it, ahead of the profile's own arguments and, on a `codex`
+profile, behind the `--settings` the launcher's half still leads with.
+
 ## 0.6.0 — 2026-08-27
 
 **Added: `account` on a worker profile, and a `doctor` finding for one the
