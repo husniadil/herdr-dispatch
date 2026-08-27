@@ -536,6 +536,7 @@ provider = "codex"
 agent = "claude"
 model = "sonnet"
 effort = "medium"
+account = "work-codex"
 args = ["--add-dir", "/srv/shared"]
 
 [projects]
@@ -559,6 +560,25 @@ exists to prevent.
 | `model`    | A tier alias. Empty means the client's own default.                                                                          |
 | `effort`   | Defaults to `low`.                                                                                                           |
 | `args`     | Extra argv passed through to the worker.                                                                                     |
+| `account`  | A stored account of the proxy launcher this profile's workers run as. `codex` only; naming one on a `claude` profile is refused when the document is read. Optional; without it the launcher's own standing selection serves. |
+
+Naming an `account` exports the launcher's own per-session tag —
+`ANTHROPIC_AUTH_TOKEN=proxenos-account:<name>` — into the worker's pane, after
+the `eval "$(proxenos env)"` that supplies the routing, because that eval sets
+a token of its own and the last export is the one the worker carries. The
+launcher reads the tag per turn and refuses a name its store does not hold
+twice, at launch and again at the turn, so `hdis doctor` checks every
+configured account against `proxenos accounts list` and names the profile and
+the account when one is missing. It is a finding rather than an outage: every
+other profile launches exactly as it did. The name is written bare onto that
+shell line, so it may hold only letters, digits, `.`, `_` and `-`; anything
+else is refused when the document is read rather than mangled by the shell.
+
+**The tier aliases do not follow the account.** `opus`, `sonnet` and `haiku`
+are set up by `proxenos env` from the DAEMON's own `[tiers]` config, which in a
+fleet routing to OpenAI points them at gpt models. Pinning a profile to an
+Anthropic account does not repoint them, so such a profile must name a real
+Anthropic model in `model` rather than a tier alias.
 
 ### Routing a task to a profile by its priority
 

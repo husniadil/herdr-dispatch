@@ -698,3 +698,79 @@ func TestAProfileIsLookedUpByTheNameTheDecisionChose(t *testing.T) {
 		t.Fatalf("default name: %q", name)
 	}
 }
+
+// The account tag is the proxy launcher's own per-session selection, so a
+// profile that never launches through the launcher has nothing to select
+// with. Accepting the key there would leave an operator believing a worker
+// runs as an account nothing ever exports.
+func TestAnAccountOnlyBelongsToACodexProfile(t *testing.T) {
+	_, err := Parse([]byte(`default = "worker"
+
+[profiles.worker]
+provider = "claude"
+account = "work-codex"
+`))
+	if err == nil {
+		t.Fatal("an account on a claude profile was accepted")
+	}
+	for _, want := range []string{"worker", "work-codex", "codex"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("want %q in the error, got %v", want, err)
+		}
+	}
+}
+
+// The name is exported bare onto a shell line, so anything that would need
+// quoting is refused where the document is read rather than where the shell
+// mangles it.
+func TestAnAccountNameIsRefusedWhenItCouldNotSitBareOnAShellLine(t *testing.T) {
+	for _, name := range []string{"work codex", "work;rm -rf /", "$(id)", "work'codex", `work"codex`, "work/codex"} {
+		_, err := Parse([]byte(`default = "worker"
+
+[profiles.worker]
+provider = "codex"
+account = "` + name + `"
+`))
+		if err == nil {
+			t.Fatalf("account %q was accepted", name)
+		}
+	}
+}
+
+// The conservative charset is letters, digits, '.', '_' and '-', and a codex
+// profile keeps what it named.
+func TestACodexProfileCarriesItsAccount(t *testing.T) {
+	c, err := Parse([]byte(`default = "worker"
+
+[profiles.worker]
+provider = "codex"
+account = "work-codex.2_A9"
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	p, err := c.ProfileNamed("worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := p.Account, "work-codex.2_A9"; got != want {
+		t.Fatalf("account: got %q, want %q", got, want)
+	}
+}
+
+// A codex profile that names no account is every document written before the
+// key existed, and it stays exactly as valid as it was.
+func TestACodexProfileNeedsNoAccount(t *testing.T) {
+	c, err := Parse([]byte(`default = "worker"
+
+[profiles.worker]
+provider = "codex"
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	p, _ := c.ProfileNamed("worker")
+	if p.Account != "" {
+		t.Fatalf("account: got %q, want empty", p.Account)
+	}
+}

@@ -7,6 +7,25 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+**Added: `account` on a worker profile, and a `doctor` finding for one the
+proxy does not hold.** A `provider = "codex"` profile may now name a stored
+account of the proxy launcher, and its workers run as that account: `hdis`
+exports the launcher's own per-session tag,
+`ANTHROPIC_AUTH_TOKEN=proxenos-account:<name>`, into the worker's pane after
+the `eval "$(proxenos env)"` that supplies the routing. The key is optional
+and a document without it is unchanged in every byte, down to the shell line
+the pane is given. `account` on a profile of any other provider is refused
+when the document is read, naming the profile, and so is a name outside
+letters, digits, `.`, `_` and `-`, because the name is written bare onto that
+shell line. `hdis doctor` checks every configured account against
+`proxenos accounts list --json`: `proxy.missing_accounts` is a list of
+`{profile, account}` and `proxy.accounts_error` says why the store could not
+be read at all, with the plain-text report carrying an `accounts` line when
+either has something to say. A missing name is a finding and not a failure of
+`doctor`. Caveat: the tier aliases `proxenos env` sets up (`opus`, `sonnet`,
+`haiku`) follow the launcher daemon's own tier config rather than the account,
+so a profile pinned to an Anthropic account must name a real Anthropic model.
+
 ## 0.5.0 — 2026-08-27
 
 **Added: `dispatch.parked.failed`, filed under the resolver (§3.7).** A parked

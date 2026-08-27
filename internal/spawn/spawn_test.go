@@ -1865,3 +1865,28 @@ func TestTheSpawnConditionNamesTheWorkingDirectoryAsTheOnlyWritableCheckout(t *t
 		}
 	}
 }
+
+// A profile that names an account carries it into the pane's shell, after the
+// eval the launcher documents. The eval sets a token of its own, so the tag
+// only selects the account when it comes second.
+func TestACodexProfileWithAnAccountExportsItAfterTheEval(t *testing.T) {
+	h := newHarness(t, []string{goalActive}, startRegistered)
+	h.Bin(t, "proxenos", "printf '{\\n  \"env\": {}\\n}\\n'")
+
+	p := codexProfile()
+	p.Account = "work-codex"
+	if _, err := h.pipe.Run(context.Background(), req(p)); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	var run []string
+	for _, argv := range h.Argv(t) {
+		if len(argv) >= 2 && argv[0] == "pane" && argv[1] == "run" {
+			run = argv
+		}
+	}
+	want := `eval "$(proxenos env)"; export ANTHROPIC_AUTH_TOKEN=proxenos-account:work-codex`
+	if run == nil || run[3] != want {
+		t.Fatalf("environment half: got %v, want %q", run, want)
+	}
+}

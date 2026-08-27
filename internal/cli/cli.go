@@ -133,6 +133,12 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 		if len(rep.Proxy.Profiles) > 0 {
 			fmt.Fprintf(out, "  quota       %s\n", quotaLane(rep.Proxy.Quota))
 		}
+		// Only where there is something to say: a fleet whose profiles
+		// name no account, or one whose names the store all holds, has
+		// no finding and gets no line.
+		if line := accountsLane(rep.Proxy); line != "" {
+			fmt.Fprintf(out, "  accounts    %s\n", line)
+		}
 		fmt.Fprintf(out, "  layout      min_pane_columns %d, max_panes_per_tab %d per task\n",
 			rep.MinPaneColumns, rep.MaxPanesPerTab)
 		if rep.Board.Error != "" {
@@ -306,6 +312,28 @@ func proxyLane(p daemon.ProxyHealth) string {
 		return line + ", and no configured profile launches through it: the claude path never touches it"
 	}
 	return line + ", launching " + strings.Join(p.Profiles, " ")
+}
+
+// accountsLane is the per-profile account check as one line: the profiles
+// whose configured account the launcher does not hold, or why nothing could
+// be checked. Empty means there is nothing to report, and the line is left
+// out rather than printed blank.
+//
+// It is a finding and not an outage: the fleet is running, and every profile
+// naming an account the store does hold launches exactly as it did.
+func accountsLane(p daemon.ProxyHealth) string {
+	if p.AccountsError != "" {
+		return "not checked: " + p.AccountsError
+	}
+	if len(p.MissingAccounts) == 0 {
+		return ""
+	}
+	named := make([]string, 0, len(p.MissingAccounts))
+	for _, f := range p.MissingAccounts {
+		named = append(named, fmt.Sprintf("%s wants %q", f.Profile, f.Account))
+	}
+	return strings.Join(named, ", ") +
+		", which " + or(p.Binary, "proxenos") + " does not hold: its worker is refused at launch and again at the turn"
 }
 
 // quotaLane is the proxy's quota as one line: what the account has spent

@@ -517,6 +517,23 @@ type ProxyHealth struct {
 	// and quota are different questions with the same answer for an
 	// operator whose fleet has stopped, so doctor answers both here.
 	Quota QuotaHealth `json:"quota"`
+	// MissingAccounts is every profile whose configured account the
+	// launcher's store does not hold. The launcher refuses such a name at
+	// launch and again at the turn, so this is the finding that gets in
+	// front of an operator before a worker dies in its pane. Empty is
+	// nothing to report, and it is a list either way.
+	MissingAccounts []AccountFinding `json:"missing_accounts"`
+	// AccountsError is why the store could not be read at all. A store
+	// nobody could open is not a name that is missing, so the two are
+	// reported apart and MissingAccounts stays empty here.
+	AccountsError string `json:"accounts_error,omitempty"`
+}
+
+// AccountFinding is one configured account the launcher's store does not
+// hold, named with the profile that would launch as it.
+type AccountFinding struct {
+	Profile string `json:"profile"`
+	Account string `json:"account"`
 }
 
 // QuotaHealth is the proxy's quota as doctor reports it, plus the refusal a
@@ -648,7 +665,7 @@ func (d *Daemon) herdrHealth(ctx context.Context) HerdrHealth {
 // that is down or absent is the answer here rather than an error: it is
 // exactly the state an operator ran doctor to learn.
 func (d *Daemon) proxyHealth(ctx context.Context) ProxyHealth {
-	out := ProxyHealth{Binary: config.DefaultProxy, Profiles: []string{}}
+	out := ProxyHealth{Binary: config.DefaultProxy, Profiles: []string{}, MissingAccounts: []AccountFinding{}}
 	if d.Loop == nil {
 		return out
 	}
@@ -671,6 +688,7 @@ func (d *Daemon) proxyHealth(ctx context.Context) ProxyHealth {
 		return out
 	}
 	out.Installed, out.Reachable, out.Account = true, true, st.Account
+	d.checkProfileAccounts(ctx, &out)
 	// Asked only where a profile launches through it: a claude-only fleet
 	// spends no account here, and there is nothing to report.
 	if len(out.Profiles) > 0 {
@@ -686,6 +704,42 @@ func (d *Daemon) proxyHealth(ctx context.Context) ProxyHealth {
 		}
 	}
 	return out
+}
+
+// checkProfileAccounts names every profile whose configured account the
+// launcher's store does not hold. It is a FINDING and never a failure of
+// doctor: the store is asked once, and a store that could not be read leaves
+// nothing claimed, because "the name is not there" and "nothing could be
+// read" would send an operator after two different things.
+func (d *Daemon) checkProfileAccounts(ctx context.Context, out *ProxyHealth) {
+	wanted := make(map[string]string, len(d.Loop.Config.Profiles))
+	for name, p := range d.Loop.Config.Profiles {
+		if p.Account != "" {
+			wanted[name] = p.Account
+		}
+	}
+	if len(wanted) == 0 {
+		return
+	}
+	held, err := d.Loop.Spawn.Proxy.Accounts(ctx)
+	if err != nil {
+		out.AccountsError = err.Error()
+		return
+	}
+	have := make(map[string]bool, len(held))
+	for _, name := range held {
+		have[name] = true
+	}
+	names := make([]string, 0, len(wanted))
+	for name := range wanted {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, profile := range names {
+		if !have[wanted[profile]] {
+			out.MissingAccounts = append(out.MissingAccounts, AccountFinding{Profile: profile, Account: wanted[profile]})
+		}
+	}
 }
 
 // check refuses a request the verb table does not describe: a required

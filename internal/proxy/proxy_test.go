@@ -76,11 +76,74 @@ func TestUnreadableSettingsAreRefusedHere(t *testing.T) {
 // The environment half is delivered by the shell, exactly as the proxy's own
 // README spells it, and it names the configured binary.
 func TestEnvCommandIsTheEvalTheProxyDocuments(t *testing.T) {
-	if got, want := (&Client{}).EnvCommand(), `eval "$(proxenos env)"`; got != want {
+	if got, want := (&Client{}).EnvCommand(""), `eval "$(proxenos env)"`; got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
-	if got, want := (&Client{Bin: "/opt/ccp"}).EnvCommand(), `eval "$(/opt/ccp env)"`; got != want {
+	if got, want := (&Client{Bin: "/opt/ccp"}).EnvCommand(""), `eval "$(/opt/ccp env)"`; got != want {
 		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+// A profile that names an account exports the proxy's own per-session tag
+// AFTER the eval, because the eval sets a token of its own and the last
+// export is the one the child carries.
+func TestEnvCommandExportsTheProfileAccountAfterTheEval(t *testing.T) {
+	got := (&Client{}).EnvCommand("work-codex")
+	want := `eval "$(proxenos env)"; export ANTHROPIC_AUTH_TOKEN=proxenos-account:work-codex`
+	if got != want {
+		t.Fatalf("got  %s\nwant %s", got, want)
+	}
+	if strings.Index(got, "ANTHROPIC_AUTH_TOKEN") < strings.Index(got, "proxenos env") {
+		t.Fatal("the account tag was exported before the eval that overwrites it")
+	}
+	if got, want := (&Client{Bin: "/opt/ccp"}).EnvCommand("acct"),
+		`eval "$(/opt/ccp env)"; export ANTHROPIC_AUTH_TOKEN=proxenos-account:acct`; got != want {
+		t.Fatalf("got  %s\nwant %s", got, want)
+	}
+}
+
+// doctor checks a configured account name against the store before a spawn
+// fails in a pane, so the client reads the names `accounts list --json`
+// holds.
+func TestAccountsNamesWhatTheStoreHolds(t *testing.T) {
+	f := testenv.New(t)
+	f.Bin(t, "proxenos", `cat <<'EOF'
+{"accounts":[
+  {"name":"claude","provider":"anthropic","kind":"grant","selected":false},
+  {"name":"work-codex","provider":"codex","kind":"grant","selected":true},
+  {"name":"openai-api","provider":"codex","kind":"key","selected":false}
+],"selected":"work-codex"}
+EOF`)
+
+	got, err := (&Client{}).Accounts(context.Background())
+	if err != nil {
+		t.Fatalf("accounts: %v", err)
+	}
+	want := []string{"claude", "work-codex", "openai-api"}
+	if len(got) != len(want) {
+		t.Fatalf("accounts: got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("accounts: got %v, want %v", got, want)
+		}
+	}
+	if c := f.Calls(t)[0]; c != "accounts list --json" {
+		t.Fatalf("argv: got %q", c)
+	}
+}
+
+// A store that cannot be read is not a name that is missing. doctor has to be
+// able to tell the two apart, so the error travels rather than reading as an
+// empty store.
+func TestAccountsOfADownDaemonCarriesItsOwnMessage(t *testing.T) {
+	f := testenv.New(t)
+	f.Bin(t, "proxenos", `echo "Error: the daemon is not answering. Start it with 'proxenos run'." >&2; exit 1`)
+
+	if _, err := (&Client{}).Accounts(context.Background()); err == nil {
+		t.Fatal("want an error")
+	} else if !strings.Contains(err.Error(), "proxenos run") {
+		t.Fatalf("want the daemon's own words, got %v", err)
 	}
 }
 

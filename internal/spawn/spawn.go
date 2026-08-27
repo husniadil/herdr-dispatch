@@ -906,7 +906,7 @@ func (p *Pipeline) build(ctx context.Context, req Request, pane, settingsDoc str
 
 		// The environment half belongs to the pane's shell, which the agent
 		// then inherits as a direct child.
-		if err := p.Herdr.PaneRun(ctx, pane, p.Proxy.EnvCommand()); err != nil {
+		if err := p.Herdr.PaneRun(ctx, pane, p.Proxy.EnvCommand(req.Profile.Account)); err != nil {
 			return fmt.Errorf("spawn %s: %w", req.Name, err)
 		}
 	}

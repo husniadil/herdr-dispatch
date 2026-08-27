@@ -1163,3 +1163,101 @@ provider = "codex"
 		t.Fatalf("profiles: got %+v", got)
 	}
 }
+
+// An account name the proxy's store does not hold is refused twice by the
+// proxy — at launch and again at the turn — so the first thing an operator
+// would otherwise learn about a typo is a worker dying in its pane. doctor
+// names the profile and the account instead, and stays an answer rather than
+// becoming a failure of its own.
+func TestDoctorNamesAProfileWhoseAccountTheProxyDoesNotHold(t *testing.T) {
+	stateDir(t)
+	d, f := newDaemon(t)
+	f.Bin(t, "proxenos", `case "$1 $2" in
+"accounts list") echo '{"accounts":[{"name":"work-codex"}],"selected":"work-codex"}' ;;
+*) echo '{"auth":{"account":"work-codex"}}' ;;
+esac`)
+	cfg, err := config.Parse([]byte(`default = "worker"
+[profiles.worker]
+provider = "claude"
+[profiles.cheap]
+provider = "codex"
+account = "personal-codex"
+[profiles.held]
+provider = "codex"
+account = "work-codex"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Loop.Config = cfg
+
+	rep := doctorOf(t, d)
+	if len(rep.Proxy.MissingAccounts) != 1 {
+		t.Fatalf("findings: %+v", rep.Proxy.MissingAccounts)
+	}
+	got := rep.Proxy.MissingAccounts[0]
+	if got.Profile != "cheap" || got.Account != "personal-codex" {
+		t.Fatalf("finding: %+v", got)
+	}
+	if rep.Proxy.Error != "" {
+		t.Fatalf("a missing name is a finding, not a failure of doctor: %q", rep.Proxy.Error)
+	}
+	if !rep.Proxy.Reachable {
+		t.Fatal("the proxy answered; doctor called it unreachable")
+	}
+}
+
+// Every configured account the store holds leaves nothing to report. The
+// finding list is empty rather than absent, so a consumer reads a list either
+// way.
+func TestDoctorReportsNoFindingWhenTheProxyHoldsEveryConfiguredAccount(t *testing.T) {
+	stateDir(t)
+	d, f := newDaemon(t)
+	f.Bin(t, "proxenos", `case "$1 $2" in
+"accounts list") echo '{"accounts":[{"name":"work-codex"}],"selected":"work-codex"}' ;;
+*) echo '{"auth":{"account":"work-codex"}}' ;;
+esac`)
+	cfg, err := config.Parse([]byte(`default = "cheap"
+[profiles.cheap]
+provider = "codex"
+account = "work-codex"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Loop.Config = cfg
+
+	rep := doctorOf(t, d)
+	if rep.Proxy.MissingAccounts == nil || len(rep.Proxy.MissingAccounts) != 0 {
+		t.Fatalf("findings: %+v", rep.Proxy.MissingAccounts)
+	}
+}
+
+// A store that could not be read is not a name that is missing. Reporting the
+// configured names as absent there would send an operator after a typo that
+// is not there, so nothing is claimed at all.
+func TestDoctorClaimsNoMissingAccountWhenTheStoreCannotBeRead(t *testing.T) {
+	stateDir(t)
+	d, f := newDaemon(t)
+	f.Bin(t, "proxenos", `case "$1 $2" in
+"accounts list") echo "Error: the account store could not be opened" >&2; exit 1 ;;
+*) echo '{"auth":{"account":"work-codex"}}' ;;
+esac`)
+	cfg, err := config.Parse([]byte(`default = "cheap"
+[profiles.cheap]
+provider = "codex"
+account = "personal-codex"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Loop.Config = cfg
+
+	rep := doctorOf(t, d)
+	if len(rep.Proxy.MissingAccounts) != 0 {
+		t.Fatalf("findings: %+v", rep.Proxy.MissingAccounts)
+	}
+	if !strings.Contains(rep.Proxy.AccountsError, "could not be opened") {
+		t.Fatalf("doctor says why it could not check: %q", rep.Proxy.AccountsError)
+	}
+}

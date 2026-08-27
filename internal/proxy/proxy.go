@@ -32,8 +32,73 @@ func (c *Client) bin() string {
 
 // EnvCommand is the shell line that exports the routing environment into a
 // worker pane before its agent starts.
-func (c *Client) EnvCommand() string {
-	return fmt.Sprintf(`eval "$(%s env)"`, c.bin())
+//
+// A non-empty account appends the launcher's own per-session selection, and
+// it comes AFTER the eval on purpose: the eval sets ANTHROPIC_AUTH_TOKEN
+// itself, so an export placed before it is the one that gets overwritten.
+// The daemon reads the tag per turn, and refuses a name its store does not
+// hold both at launch and at the turn. An empty account gives back exactly
+// the line this returned before the field existed.
+//
+// The name is not quoted, and nothing here makes it safe: config.AccountNameOK
+// is what keeps it to characters that need no quoting, and a document is
+// refused at load rather than mangled here.
+func (c *Client) EnvCommand(account string) string {
+	line := fmt.Sprintf(`eval "$(%s env)"`, c.bin())
+	if account == "" {
+		return line
+	}
+	return line + "; export " + AccountEnvVar + "=" + AccountTagPrefix + account
+}
+
+// AccountEnvVar and AccountTagPrefix are how the launcher spells a
+// per-session account selection. The variable's VALUE is ignored by the
+// launcher by design except as this tag, which is why a name rather than a
+// secret travels here.
+const (
+	AccountEnvVar    = "ANTHROPIC_AUTH_TOKEN"
+	AccountTagPrefix = "proxenos-account:"
+)
+
+// accountsPayload is the shape `accounts list --json` answers with, read for
+// the one field doctor names.
+type accountsPayload struct {
+	Accounts []struct {
+		Name string `json:"name"`
+	} `json:"accounts"`
+}
+
+// Accounts is every account name the launcher's store holds, in the order it
+// lists them. doctor checks a configured profile account against it, because
+// a name the store does not hold is refused at launch and again at the turn —
+// and a spawn dying in its pane is a worse place to learn about a typo than
+// `hdis doctor`.
+//
+// An unreadable store is an error rather than an empty list: "nothing could
+// be read" and "the name is not there" are different facts, and doctor
+// reports them differently.
+func (c *Client) Accounts(ctx context.Context) ([]string, error) {
+	cmd := exec.CommandContext(ctx, c.bin(), "accounts", "list", "--json")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return nil, fmt.Errorf("%s: %w", c.bin(), ErrNotInstalled)
+		}
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return nil, fmt.Errorf("%s accounts list: %s", c.bin(), msg)
+		}
+		return nil, fmt.Errorf("%s accounts list: %w", c.bin(), err)
+	}
+	var payload accountsPayload
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &payload); err != nil {
+		return nil, fmt.Errorf("%s accounts list: unreadable json: %w", c.bin(), err)
+	}
+	names := make([]string, 0, len(payload.Accounts))
+	for _, a := range payload.Accounts {
+		names = append(names, a.Name)
+	}
+	return names, nil
 }
 
 // Settings returns the client-policy half of the launch, compacted to a

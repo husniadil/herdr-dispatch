@@ -43,6 +43,42 @@ type Profile struct {
 	Model    string   `json:"model"`
 	Effort   string   `json:"effort"`
 	Args     []string `json:"args"`
+	// Account is the proxy launcher's stored account this profile's workers
+	// run as, exported into the pane as the launcher's own per-session tag.
+	// It is meaningful for ProviderCodex alone, because that tag is read by
+	// the launcher and nothing else reads it.
+	//
+	// Empty is the launcher's own standing selection, which is what every
+	// document written before this key had.
+	//
+	// The tier aliases `proxenos env` sets up map to the DAEMON's tier
+	// config rather than to this account, so a profile pinned to an
+	// Anthropic account must name a real Anthropic model rather than
+	// `opus`, `sonnet` or `haiku`.
+	Account string `json:"account"`
+}
+
+// AccountNameOK reports whether an account name may be exported bare onto a
+// shell line: letters, digits, '.', '_' and '-', and nothing else.
+//
+// It is deliberately narrower than what the launcher's own store accepts.
+// The name travels as `ANTHROPIC_AUTH_TOKEN=proxenos-account:<name>` on a
+// line typed into a pane's shell, so a character that needs quoting is a
+// worker launched as something nobody wrote — and quoting it instead would
+// put the decision in the shell's hands rather than in this document's.
+func AccountNameOK(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '.', r == '_', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // Verify is the verification lane's own policy: whether a task that reaches
@@ -590,6 +626,22 @@ func Parse(b []byte) (Config, error) {
 		}
 		if p.Effort == "" {
 			p.Effort = DefaultEffort
+		}
+		if p.Account != "" {
+			// The account tag is the codex launcher's own per-session
+			// selection and nothing else reads it, so a profile on
+			// another provider names an account no worker of it will
+			// ever run as. Accepted silently, it would leave an
+			// operator believing a subscription is being spent that
+			// is not.
+			if p.Provider != ProviderCodex {
+				return Config{}, fmt.Errorf("hdis config: profile %q names account %q but its provider is %q; the account is the %q launcher's own per-session selection, so only a %q profile can carry one",
+					name, p.Account, p.Provider, ProviderCodex, ProviderCodex)
+			}
+			if !AccountNameOK(p.Account) {
+				return Config{}, fmt.Errorf("hdis config: profile %q names account %q, and an account name may hold only letters, digits, '.', '_' and '-'; it is exported bare onto the shell line that starts the worker, so anything needing quotes is refused here rather than mangled there",
+					name, p.Account)
+			}
 		}
 		c.Profiles[name] = p
 	}
