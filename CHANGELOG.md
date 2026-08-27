@@ -7,6 +7,8 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+## 0.4.1 — 2026-08-27
+
 **Changed: `parked list` refuses `--all-projects` (§4.4).** The flag selected
 nothing there — a parked row here belongs to no board — and was accepted and
 ignored; `hdis parked list --all-projects`, and `parked_list` with
