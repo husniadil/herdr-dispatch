@@ -546,6 +546,34 @@ func TestNamingOneBoardAndEveryBoardIsRefusedOnTheMCPDoor(t *testing.T) {
 	}
 }
 
+// §4.4 on this door: the scope pair is injected into every tool, and
+// `parked_list` refuses all_projects for the same reason the CLI refuses
+// --all-projects — it selects nothing, because a parked row belongs to no
+// board.
+func TestParkedListRefusesEveryBoardOnTheMCPDoor(t *testing.T) {
+	_, call := inProcessDaemon(t)
+	sess := session(t, call)
+	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "parked_list", Arguments: map[string]any{argAllProjects: true}})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError || !strings.Contains(text(res), string(codes.Usage)) {
+		t.Fatalf("parked_list with all_projects: %s", text(res))
+	}
+	// A call that names no scope still answers, which is what a refusal read
+	// off the resolved request could not leave standing: this daemon's default
+	// IS every board, so the two would be the same call.
+	res, err = sess.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "parked_list", Arguments: map[string]any{}})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("parked_list naming no scope was refused: %s", text(res))
+	}
+}
+
 // The injected arguments are held to the types the schema publishes, the same
 // way the declared ones are.
 func TestTheScopeArgumentsAreHeldToTheirTypes(t *testing.T) {

@@ -170,7 +170,10 @@ var All = []Verb{
 			"where those rows are read: who asked, which gated verb, what " +
 			"target, the reason the gate gave, and whether the action is still " +
 			"waiting or was resolved and then failed. A failed row is not " +
-			"finished business — the operator decided and the verb did not run.",
+			"finished business — the operator decided and the verb did not run. " +
+			"This is the one list verb that takes no all_projects (§4.4), and it " +
+			"refuses one that is named: every row is listed, because a parked " +
+			"row here belongs to no board and there is no narrower answer.",
 	},
 	{
 		Name: "parked.resolve", MCP: "parked_resolve", CLI: []string{"parked", "resolve"},

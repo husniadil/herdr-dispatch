@@ -245,7 +245,7 @@ arguments.
 | --- | --- |
 | `--json` | One JSON document on stdout (§6.2), wherever in the line it is written. |
 | `--project <path>` | Act on one board. Resolved here, in the door, to the §4.1 canonical project, because a relative path is relative to the caller's working directory and the daemon's is somewhere else. |
-| `--all-projects` | Act across every board, which is this daemon's default. Naming it together with `--project` is refused rather than ranked. |
+| `--all-projects` | Act across every board, which is this daemon's default. Naming it together with `--project` is refused rather than ranked. `parked list` is the one verb that takes no `--all-projects` (§4.4) and refuses it: a parked row belongs to no board, so the flag selects nothing. |
 | `--as <principal>` | Act as a `cron:`, `trigger:` or `plugin:` principal (§3.2). `agent` and `human` are derived from the calling process and cannot be declared. |
 
 `--project` is what makes a bare number dispatchable. A number is unique only
@@ -286,7 +286,8 @@ A door started that way answers a call that names no scope on `/src/p` rather
 than on every board, which is what a client wired to one repository wants. A
 call that passes its own `project` is answered on that one, and a call that
 passes `all_projects` gets every board: the explicit argument wins, because
-the caller is the one who knows which board it means. A door started without
+the caller is the one who knows which board it means. `parked_list` is the
+exception either way — it takes no `all_projects` (§4.4) and refuses it. A door started without
 the flag defaults to every board exactly as before. Unlike `--operator`, this
 is scope rather than identity, so there is no reason to keep it off a call —
 it is a default, not a declaration.

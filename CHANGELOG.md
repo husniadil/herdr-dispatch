@@ -7,6 +7,12 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+**Changed: `parked list` refuses `--all-projects` (§4.4).** The flag selected
+nothing there — a parked row here belongs to no board — and was accepted and
+ignored; `hdis parked list --all-projects`, and `parked_list` with
+`all_projects`, now answer `USAGE`. Drop the flag: the list is unchanged
+without it, and every other verb still takes it.
+
 **Changed: `dispatch.parked.resolved` names the caller, not this daemon
 (§3.7).** Resolving a deferral is the operator's authority, so the event
 for it is now filed under the principal that decided it — `agent:wM:p1`,

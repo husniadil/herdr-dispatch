@@ -214,7 +214,7 @@ func buildVerb(v verbs.Verb, g *globals, run Runner) *cobra.Command {
 // request fills in everything the door derives rather than the caller
 // declaring it: the scope (§4.2) and the principal (§3.2).
 func (g *globals) request(v verbs.Verb, args map[string]any) (protocol.Request, error) {
-	scope, all, err := g.scope()
+	scope, all, err := g.scope(v)
 	if err != nil {
 		return protocol.Request{}, err
 	}
@@ -250,8 +250,30 @@ func (g *globals) request(v verbs.Verb, args map[string]any) (protocol.Request, 
 // every board a worker could be wanted on, so defaulting to the directory the
 // operator happens to be standing in would hide most of the fleet from
 // `status` and refuse most of the ready list to `dispatch`.
-func (g *globals) scope() (string, bool, error) {
-	return Scope(g.project, g.allProjects)
+func (g *globals) scope(v verbs.Verb) (string, bool, error) {
+	return ScopeFor(v, g.project, g.allProjects)
+}
+
+// ScopeFor is Scope for one verb, and it is where a verb that has no scope of
+// its own refuses one the caller named. §4.4 gives `parked.list` no
+// `--all-projects`, and this plugin has nothing to answer it with either: the
+// store is bindings keyed by task id and a parked row belongs to no board, so
+// there is neither a narrower list nor a wider one to hand back. A flag that
+// selects nothing is refused rather than accepted and ignored, which is what
+// both siblings do with the same verb.
+//
+// The admission is here, in the door, because only a door can still tell the
+// flag from the default: every board is what this daemon does when no scope is
+// named (§4.2), so Scope resolves both spellings to the same pair and by the
+// time a request exists the two are indistinguishable.
+func ScopeFor(v verbs.Verb, project string, allProjects bool) (string, bool, error) {
+	if allProjects && v.Name == "parked.list" {
+		// Both spellings, for the same reason Scope names both below.
+		return "", false, codes.Refusef(codes.Invalid,
+			"parked.list takes no all_projects (§4.4); drop it "+
+				"(--all-projects on the CLI)")
+	}
+	return Scope(project, allProjects)
 }
 
 // Scope turns a named project and an every-board switch into the pair the

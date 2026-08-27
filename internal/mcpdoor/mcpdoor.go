@@ -169,7 +169,7 @@ func handlerFor(v verbs.Verb, call Caller, opt Options) mcp.ToolHandler {
 		if named == "" && !everyBoard {
 			named = opt.Project
 		}
-		project, allProjects, err := cli.Scope(named, everyBoard)
+		project, allProjects, err := cli.ScopeFor(v, named, everyBoard)
 		if err != nil {
 			return failure(err), nil
 		}

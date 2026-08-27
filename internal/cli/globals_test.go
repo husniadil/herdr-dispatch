@@ -112,6 +112,28 @@ func TestTheDefaultScopeIsEveryBoard(t *testing.T) {
 	}
 }
 
+// §4.4 names `parked.list` the one list verb that takes no --all-projects,
+// and this plugin has no narrower list to answer it with either: a parked row
+// belongs to no board. A flag that selects nothing is refused where it is
+// still a flag, rather than accepted and quietly ignored.
+func TestParkedListRefusesEveryBoard(t *testing.T) {
+	_, _, err := Request(verb(t, "parked.list"), []string{"--all-projects"})
+	if got, want := codes.Of(err), codes.Usage; got != want {
+		t.Fatalf("hdis parked list --all-projects = %v (%s), want %s", err, got, want)
+	}
+	// And the default is untouched. Every board is what this daemon answers
+	// with when no scope is named, so a refusal read off the RESOLVED request
+	// would refuse `hdis parked list` itself: by then the flag and the default
+	// are the same request.
+	req, _, err := Request(verb(t, "parked.list"), nil)
+	if err != nil {
+		t.Fatalf("hdis parked list: %v", err)
+	}
+	if req.Project != "" {
+		t.Fatalf("parked list narrowed itself to %q", req.Project)
+	}
+}
+
 // §3.2: a principal is derived from the calling process, never declared, and
 // the ONE exception is a call that wants to act as cron, trigger or plugin.
 // So --as takes those three kinds and refuses the two that are derived: a

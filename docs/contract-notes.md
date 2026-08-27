@@ -59,7 +59,7 @@ is written down.
 | §6.6 | No review semantics. The board's review gate is htask's, and this binary stops at review. |
 | §11.5 | Lease liveness and the sweep are htask's; a second writer racing them is the bug. |
 | §11.6 | The manifest declares no `[[panes]]`. |
-| §4.4 | No table here holds user-visible entities. The store is bindings keyed by task id, and a task's project is the board's fact, read from the board. There is no column to add and no partition to default. 0.10.1's sentence that `parked.list` is project-scoped assumes that partition; here `parked list` answers every board's rows, and the root `--all-projects` flag is accepted and changes nothing for it, because there is no narrower answer to give. |
+| §4.4 | No table here holds user-visible entities. The store is bindings keyed by task id, and a task's project is the board's fact, read from the board. There is no column to add and no partition to default. 0.10.1's sentence that `parked.list` is project-scoped assumes that partition; here `parked list` answers every board's rows, because there is no narrower answer to give. What 0.10.1 does reach is the other half of that sentence: `parked.list` takes no `--all-projects`, and as of 2026-08-27 naming one is refused with `USAGE` rather than accepted and ignored, the way both siblings refuse it. The refusal is made in the DOOR, not the daemon: every board is what this daemon does when no scope is named, so `cli.Scope` resolves the flag and the default to the same request and only a door can still tell them apart. `TestParkedListRefusesEveryBoard` and `TestParkedListRefusesEveryBoardOnTheMCPDoor` pin one door each. |
 | §16.1 | Acceptance criteria are a board concept. |
 
 ## Where this plugin diverges, and why
