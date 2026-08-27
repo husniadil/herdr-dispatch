@@ -82,6 +82,21 @@ or effort than a routine one. **The mapping and its meaning live in
 `dispatch.toml`**, never on the board — the row says how urgent the work is,
 and this binary alone decides what that earns.
 
+A `codex` profile may name an `account`, and its workers run as that stored
+account of the proxy launcher. **The tier aliases do not follow it**: `opus`,
+`sonnet` and `haiku` are set up from the launcher daemon's own tier config, so
+a profile pinned to an Anthropic account must name a real Anthropic model
+rather than an alias.
+
+**A worker's doors are one file, and it is not the operator's.** Every worker
+is launched with `--mcp-config <path> --strict-mcp-config`, so that document is
+every MCP door it has and `~/.mcp.json` in HOME — which belongs to the operator
+— is never consulted. `[worker] mcp_config` names the document fleet-wide and
+`mcp_config` on a profile overrides it for that profile; with neither, `hdis`
+writes `<state_dir>/worker.mcp.json` at the first spawn that needs it, holding
+the four plugin doors of this fleet. A configured path that is not there
+refuses the spawn, naming it, before a pane or a checkout is made.
+
 ## HDIS_DISPATCHER_PANE, if you are the worker
 
 Every pane the dispatcher opens is launched with
@@ -118,6 +133,15 @@ proxy, what the serving account has spent, which carries the refusal a codex
 worker would meet right now in the words `dispatch` would use. Run it first:
 a refusal is usually one of those.
 
+Three of its lines answer questions a caller asks often. The `gate` line says
+what is waiting on the operator, and it counts twice: `parked` is the board the
+call named, `parked_everywhere` is the whole daemon, so a project with nothing
+parked still shows a decision waiting on another one. The `worker` line names
+the MCP document a worker is launched against and whether it is there — a
+configured path that is missing is a spawn already refused. An `accounts` line
+appears only when there is something to say: a profile whose account the proxy
+launcher does not hold, or a launcher store that could not be read at all.
+
 ## Through MCP instead of the CLI
 
 Every verb this binary has is one of the `herdr-dispatch` server's MCP tools,
@@ -148,6 +172,13 @@ waiting for the operator.
 hdis parked list                     hdis parked resolve <id>
 hdis parked list --json              hdis parked resolve --reject <id>
 ```
+
+`parked list` answers **the board it was called on**: `--project <path>`, and
+`parked_list` with `project`, list that board's rows and no others, while a row
+parked by a call that named no board is listed only by a call that names none
+either — which is the every-board default, so an unscoped list is unchanged.
+`all_projects` is refused here with `USAGE`; this is the one verb that takes no
+such flag.
 
 A parked call is **the operator's to decide**, not yours. Tell them the id and
 what you were trying to do; resolve one yourself only when they have said to.

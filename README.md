@@ -489,6 +489,23 @@ hdis parked resolve pk-…             # let it through
 hdis parked resolve --reject pk-…    # close it, the verb never runs
 ```
 
+`parked list` answers the board the call named (§4.4), and `hdis doctor`
+counts the same way, so the figure an operator reads cannot contradict the
+list beside it. `gate.parked` is the count for the board the call named — a
+row parked by a call that named no board belongs to no board and is counted
+under none, and a call that names no board is this daemon's every-board
+default and counts everything. `gate.parked_everywhere` is always present and
+always the whole daemon: one daemon serves every board, and an operator
+standing on one project still has to see that another has a decision waiting.
+The plain-text `gate` line prints both when they differ, and says so plainly
+when this board is clear and another is not:
+
+```
+  gate        /usr/local/bin/fleet-policy check, gating dispatch.dispatch dispatch.stop, 1 parked for you (hdis parked list), 2 across every board
+  gate        /usr/local/bin/fleet-policy check, gating dispatch.dispatch dispatch.stop, none parked on this board, 3 across every board
+  gate        not configured: every verb is allowed (§9.2), gating dispatch.dispatch dispatch.stop
+```
+
 Resolving **re-runs the verb under the subject the gate stopped**, never the
 resolver's, and does not consult the gate again — the resolution is the
 decision the gate deferred, and a second ask would park it forever. The row
@@ -630,7 +647,18 @@ asked for again.
 
 ```text
   worker      mcp_config /Users/me/.local/state/dispatch/worker.mcp.json, present
+  worker      mcp_config /Users/me/.local/state/dispatch/worker.mcp.json, not written yet: the default doors are written at the first spawn
+  worker      mcp_config /etc/hdis/worker.mcp.json, MISSING: a spawn against it is refused until it is written; profile routed reads /etc/hdis/routed.mcp.json, present
 ```
+
+A configured path that is not there is a spawn already refused; the default
+one that is not there yet is the ordinary state of a dispatcher that has not
+spawned, which is why the two read differently. Every profile naming a
+document of its own is listed after the fleet-wide one, whether or not its
+path is there, because which profile a worker launched from decides which
+doors it got. The JSON shape carries the same facts under `worker`:
+`mcp_config`, `mcp_config_configured`, `mcp_config_exists`, and
+`profile_mcp_configs`.
 
 ### Routing a task to a profile by its priority
 
@@ -732,6 +760,22 @@ A `claude` profile never touches the proxy, so where no profile is a `codex`
 one the line says so instead of reporting an outage there is none of. The
 JSON shape carries the same facts under `proxy`: `installed`, `reachable`,
 `account`, `profiles`, and the `error` in the proxy's own words.
+
+Every account a profile names is checked against the launcher's own store, and
+an `accounts` line is printed where there is something to say — a name the
+store does not hold, or a store that could not be read at all:
+
+```
+  accounts    routed wants "work-codex", which proxenos does not hold: its worker is refused at launch and again at the turn
+  accounts    not checked: proxenos accounts list: Error: the daemon is not answering. Start it with 'proxenos run'.
+```
+
+It is a finding rather than an outage: every other profile launches exactly as
+it did, and `doctor` itself does not fail on one. The JSON carries the two
+apart under `proxy`: `missing_accounts` is a list of `{profile, account}` and
+is a list whether or not it has anything in it, and `accounts_error` is why
+the store could not be read — a store nobody could open is not a name that is
+missing, so `missing_accounts` stays empty there.
 
 #### Spawning against a quota
 
