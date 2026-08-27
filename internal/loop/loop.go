@@ -915,13 +915,28 @@ func (l *Loop) ClaimParked(id, state, by string) (store.Parked, error) {
 // row stays decided rather than going back to waiting: an action that errored
 // is not proof it had no effect, and re-opening it reopens the window the
 // one-winner move exists to close.
-func (l *Loop) FailParked(id, message string) {
+//
+// `by` is the principal that resolved the row, which the caller carries down
+// from the resolution. §3.7: the failure of an operator verb is that verb's
+// own outcome, so it is filed under the principal that decided it and marked
+// the same way the resolution before it was — a trail that filed the two
+// halves of one decision under two different actors would name the wrong one
+// for the half that went wrong.
+func (l *Loop) FailParked(id, by, message string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for i := range l.parked {
 		if l.parked[i].ID == id {
 			l.parked[i].State, l.parked[i].Error = store.ParkedFailed, message
-			l.saveLocked()
+			resolvedBy := l.parked[i].ResolvedBy
+			if resolvedBy == "" {
+				resolvedBy = by
+			}
+			ev := l.emitLockedAs(by, store.EntityParked, KindFailed, id, "", operatorVerb(by, map[string]any{
+				"subject": l.parked[i].Subject, "verb": l.parked[i].Verb, "target": l.parked[i].Target,
+				"state": store.ParkedFailed, "resolved_by": resolvedBy, "error": message,
+			}))
+			defer l.fire(ev)
 			return
 		}
 	}

@@ -7,6 +7,17 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+**Added: `dispatch.parked.failed`, filed under the resolver (§3.7).** A parked
+action the operator let through whose verb then errored now writes its own
+event, and it is the other outcome of the same decision: the actor is the
+principal that resolved the row rather than this daemon, and when that
+principal is not `human` its `detail` carries `on_behalf_of_operator: true`,
+exactly as `dispatch.parked.resolved` does. `detail.resolved_by` is there too,
+beside `subject`, `verb`, `target`, `state` and the `error` the parked row
+already showed. Nothing else moved: the row is still marked `failed` and still
+stays in front of the operator. A consumer watching the trail for a decision
+that did not take effect no longer has to infer it from `parked list`.
+
 ## 0.4.1 — 2026-08-27
 
 **Changed: `parked list` refuses `--all-projects` (§4.4).** The flag selected

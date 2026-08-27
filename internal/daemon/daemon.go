@@ -919,7 +919,7 @@ func (d *Daemon) resolveParked(ctx context.Context, req protocol.Request) (Parke
 	if err != nil {
 		// The decision stands; the verb did not run. Say why, in the verb's
 		// own words, and leave the row saying so.
-		d.Loop.FailParked(id, message(err))
+		d.Loop.FailParked(id, req.Caller(), message(err))
 		return ParkedResolution{}, err
 	}
 	return ParkedResolution{ID: id, State: state, Result: out}, nil

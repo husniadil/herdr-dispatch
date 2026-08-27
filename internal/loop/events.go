@@ -38,6 +38,9 @@ const (
 	KindDeferred = "deferred"
 	// KindResolved is the operator deciding a parked call, either way.
 	KindResolved = "resolved"
+	// KindFailed is a parked call the operator let through whose verb then
+	// errored, which is the other outcome of the same decision.
+	KindFailed = "failed"
 )
 
 // EventName is the §8.1 name for one entity and kind.

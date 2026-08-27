@@ -61,12 +61,13 @@ field, distinct from the `board.contract` it relays from `htask`.
 
 §3.4 and §3.7 are one rule seen twice: who a call is attributed to, and how
 the trail says so. **This plugin attributes nothing on the board.** Every
-event on its own trail but one carries this daemon's principal rather than a
+event on its own trail but two carries this daemon's principal rather than a
 caller's — the daemon's own README says it above: the caller's identity buys
 nothing, because every caller here is the operator's own tooling reaching a
-socket only the operator can open. The one exception is §3.7's: resolving a
-parked action is the operator's authority, so `dispatch.parked.resolved` is
-filed under the principal that decided it, and says so when that principal was
+socket only the operator can open. The exceptions are §3.7's: resolving a
+parked action is the operator's authority, so `dispatch.parked.resolved` and
+the `dispatch.parked.failed` of a resolution whose verb then errored are both
+filed under the principal that decided it, and say so when that principal was
 not the operator.
 
 §7.5 was recorded here too, and that was wrong: the declaration is implemented,
@@ -390,6 +391,7 @@ The names are `dispatch.<entity>.<kind>`:
 | `dispatch.worker.gone`               | A worker's pane disappeared and its binding was dropped   |
 | `dispatch.parked.deferred`           | The policy gate parked a call (§9.3)                      |
 | `dispatch.parked.resolved`           | A parked call was decided, either way, by the actor named |
+| `dispatch.parked.failed`             | A resolved call's verb then errored, by the same actor    |
 
 What is NOT here is deliberate: a task claimed, submitted, approved or
 rejected is a BOARD state change, it lives on htask's own trail, and copying
@@ -492,9 +494,11 @@ resolver's, and does not consult the gate again — the resolution is the
 decision the gate deferred, and a second ask would park it forever. The row
 records who resolved it, because otherwise the only trail names the caller
 that was stopped and nobody who decided it could proceed. So does the event:
-`dispatch.parked.resolved` is the one event here filed under the CALLER rather
-than under this daemon, and when that caller is not the operator its `detail`
-carries `on_behalf_of_operator: true` (§3.7). Resolving is the operator's
+`dispatch.parked.resolved` is filed under the CALLER rather than under this
+daemon, and when that caller is not the operator its `detail` carries
+`on_behalf_of_operator: true` (§3.7). So is the `dispatch.parked.failed` of a
+resolution whose verb then errored: it is the same decision's other outcome,
+and it names the same actor and carries the same mark. Resolving is the operator's
 authority and this door does not refuse it to anyone — an agent confirms with
 the user first, and the trail is what carries that. Only one resolve
 wins; the second meets a row that has already been decided rather than a

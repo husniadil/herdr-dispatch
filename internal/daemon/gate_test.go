@@ -416,6 +416,88 @@ func TestTheOperatorResolvingCarriesNoMark(t *testing.T) {
 	}
 }
 
+// parkOneThatFails defers a dispatch of a task the board does not have, so the
+// re-run a resolution triggers fails on the board's own answer rather than on
+// anything the gate did. It hands back the parked row's id.
+func parkOneThatFails(t *testing.T, d *Daemon) string {
+	t.Helper()
+	gateScript(t, d, `echo '{"decision":"defer","reason":"ask the operator"}'`)
+	_, err := call(t, d, protocol.Request{Verb: "dispatch", Args: map[string]any{"task": "nosuch"}})
+	id := codes.ParkedOf(err)
+	if id == "" {
+		t.Fatalf("no parked row: %v", err)
+	}
+	return id
+}
+
+// failedEvent is the one `dispatch.parked.failed` on the trail.
+func failedEvent(t *testing.T, d *Daemon) store.Event {
+	t.Helper()
+	return parkedEvent(t, d, loop.KindFailed)
+}
+
+// §3.7: the failure of an operator verb is that verb's own outcome, so it is
+// filed under the principal that decided it, exactly as the resolution before
+// it is. A trail that filed the two halves of one decision under two different
+// actors would name this daemon for the half that went wrong.
+func TestTheFailedEventIsFiledUnderTheCallerAndNotTheDaemon(t *testing.T) {
+	stateDir(t)
+	d, _ := newDaemon(t)
+	id := parkOneThatFails(t, d)
+
+	if _, err := call(t, d, protocol.Request{
+		Verb: "parked.resolve", Args: map[string]any{"id": id}, Pane: "wM:p1"}); err == nil {
+		t.Fatal("a dispatch of a task the board does not have succeeded")
+	}
+	ev := failedEvent(t, d)
+	if ev.Actor != "agent:wM:p1" {
+		t.Fatalf("the failure is filed under %q, want the caller agent:wM:p1", ev.Actor)
+	}
+	if ev.Actor == deferredEvent(t, d).Actor {
+		t.Fatalf("the failure is filed under this daemon (%q)", ev.Actor)
+	}
+	if ev.Detail["resolved_by"] != "agent:wM:p1" {
+		t.Errorf("resolved_by moved: %+v", ev.Detail)
+	}
+}
+
+// §3.7's second half on the same event: an agent performing the operator's
+// verb labels itself whether the verb then ran or errored.
+func TestAnAgentResolvingForTheOperatorMarksTheFailedEvent(t *testing.T) {
+	stateDir(t)
+	d, _ := newDaemon(t)
+	id := parkOneThatFails(t, d)
+
+	if _, err := call(t, d, protocol.Request{
+		Verb: "parked.resolve", Args: map[string]any{"id": id}, Pane: "wM:p1"}); err == nil {
+		t.Fatal("a dispatch of a task the board does not have succeeded")
+	}
+	if ev := failedEvent(t, d); ev.Detail[loop.OnBehalfOfOperator] != true {
+		t.Fatalf("detail = %+v, want %s: an agent performing the operator's verb labels itself",
+			ev.Detail, loop.OnBehalfOfOperator)
+	}
+}
+
+// And the mark means the same thing here: the operator resolving in person
+// carries none, however the verb they let through turned out.
+func TestTheOperatorResolvingCarriesNoMarkOnTheFailedEvent(t *testing.T) {
+	stateDir(t)
+	d, _ := newDaemon(t)
+	id := parkOneThatFails(t, d)
+
+	if _, err := call(t, d, protocol.Request{
+		Verb: "parked.resolve", Args: map[string]any{"id": id}, Operator: true}); err == nil {
+		t.Fatal("a dispatch of a task the board does not have succeeded")
+	}
+	ev := failedEvent(t, d)
+	if ev.Actor != "human" {
+		t.Fatalf("the operator's own failure is filed under %q", ev.Actor)
+	}
+	if _, marked := ev.Detail[loop.OnBehalfOfOperator]; marked {
+		t.Fatalf("detail = %+v, want no %s on the operator's own call", ev.Detail, loop.OnBehalfOfOperator)
+	}
+}
+
 // §10.3 with §9.2: an unconfigured gate allows, which at the call site is
 // indistinguishable from a configured one that allows. doctor is the only
 // place an operator can tell them apart, so it says which.
