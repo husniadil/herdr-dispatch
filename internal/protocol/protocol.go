@@ -75,10 +75,11 @@ type Failure struct {
 //
 // The order is §3.2's, with §7.5's declaration last of the three: what the
 // call declared with --as, else the pane it runs in, else the operator when
-// the DOOR was started with `hdis mcp --operator`, else nobody in particular.
-// The pane is read before the declaration on purpose (§7.5): a door started
-// inside a pane is that pane's agent whatever it was declared, so declaring
-// one gains an agent nothing.
+// the DOOR was started with `hdis mcp --operator`, else the literal `none`
+// §3.7 spells for a caller with none of the three. The pane is read before
+// the declaration on purpose (§7.5): a door started inside a pane is that
+// pane's agent whatever it was declared, so declaring one gains an agent
+// nothing.
 func (r Request) Caller() string {
 	// §3.2: the declared principal is the one exception to derivation, and
 	// it wins over the pane, because a cron job firing from inside a pane is
@@ -92,5 +93,9 @@ func (r Request) Caller() string {
 	if r.Operator {
 		return "human"
 	}
-	return "unknown"
+	// §3.7: a door with neither a pane nor the declaration has NO principal,
+	// and the contract spells that `none` — one word the four plugins share,
+	// so an operator reading a gate script, a parked row or a doctor line at
+	// any of them reads the same one.
+	return "none"
 }

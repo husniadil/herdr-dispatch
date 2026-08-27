@@ -7,15 +7,15 @@ import (
 
 // §3.2 with §7.5: the principal is what the call declared with --as, else the
 // pane it runs in, else the operator when the DOOR was started with the §7.5
-// declaration, else nobody in particular. It is never more than the daemon
-// knows, and an undeclared caller outside a pane is `unknown` rather than
+// declaration, else the literal `none` of §3.7. It is never more than the
+// daemon knows, and an undeclared caller outside a pane is `none` rather than
 // anyone.
 func TestTheCallerIsDerivedAndNeverMoreThanTheDaemonKnows(t *testing.T) {
 	for _, tc := range []struct {
 		req  Request
 		want string
 	}{
-		{Request{}, "unknown"},
+		{Request{}, "none"},
 		{Request{Pane: "wM:p1"}, "agent:wM:p1"},
 		// A declared principal wins over the pane, which is what makes a
 		// plugin's own call name the plugin rather than the pane it fired

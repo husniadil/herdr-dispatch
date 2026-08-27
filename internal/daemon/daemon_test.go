@@ -767,7 +767,7 @@ func TestDoctorReportsTheCallingPrincipal(t *testing.T) {
 		"a CLI call inside a pane":     {protocol.Request{Verb: "doctor", Door: "cli", Operator: true, Pane: "wM:p7"}, "agent:wM:p7"},
 		"a CLI call with --as":         {protocol.Request{Verb: "doctor", Door: "cli", Operator: true, As: "cron:nightly"}, "cron:nightly"},
 		"the door declared --operator": {protocol.Request{Verb: "doctor", Door: "mcp", Operator: true}, "human"},
-		"a door nobody declared":       {protocol.Request{Verb: "doctor", Door: "mcp"}, "unknown"},
+		"a door nobody declared":       {protocol.Request{Verb: "doctor", Door: "mcp"}, "none"},
 	} {
 		raw, err := call(t, d, tc.req)
 		if err != nil {

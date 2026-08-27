@@ -36,7 +36,7 @@ func TestTheDeclaredDoorIsTheOperatorAndTheUndeclaredOneIsNot(t *testing.T) {
 		opt  Options
 		want string
 	}{
-		"a door nobody declared":          {Options{}, "unknown"},
+		"a door nobody declared":          {Options{}, "none"},
 		"a door declared with --operator": {Options{Operator: true}, "human"},
 	} {
 		// The door §7.5 answers for stands in no pane: it was registered in

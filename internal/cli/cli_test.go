@@ -184,7 +184,7 @@ func TestDoctorSaysWhyADispatchWouldRefuse(t *testing.T) {
 // contract, so an operator reading it in a terminal sees which principal that
 // registration speaks as without asking for JSON.
 func TestDoctorPrintsTheCallingPrincipal(t *testing.T) {
-	for _, principal := range []string{"human", "agent:wM:p3", "cron:nightly", "unknown"} {
+	for _, principal := range []string{"human", "agent:wM:p3", "cron:nightly", "none"} {
 		raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","principal":"` +
 			principal + `","board":{"reachable":true}}`)
 		var out strings.Builder

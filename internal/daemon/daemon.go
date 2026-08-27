@@ -806,7 +806,7 @@ func (d *Daemon) Policy() *gate.Gate {
 //
 // The subject is the caller as the daemon records it — the pane a door runs
 // in, `human` for a CLI invocation (§3.6) and for a door started with the
-// §7.5 declaration, and `unknown` for a caller with neither. This binary
+// §7.5 declaration, and the `none` of §3.7 for a caller with neither. This binary
 // derives no principal and grants nothing for a pane (§3.4), so what the gate
 // is told is what the daemon knows, and never more.
 func (d *Daemon) pass(v verbs.Verb, req protocol.Request) error {

@@ -17,6 +17,16 @@ does not, which is how an operator checks which of their registrations speak
 for them. A caller reading the report by field name is unaffected; one
 matching the text output line by line gains a line after `contract`.
 
+**Changed: a caller with no pane and no declaration is `none`, not
+`unknown` (§3.7).** The contract spells the no-principal case `none` and the
+sibling plugins say `none`, so a fleet-wide gate script matching one word had
+to match two. A gate script matching the subject `unknown` must match `none`
+instead. The same string is what `hdis doctor` prints as `principal` and what
+a parked row carries as its subject and resolver. Nothing migrates: the
+principal on a parked row is free-form and no code path compares it to a
+literal, so a row parked before this change still reads, lists and resolves
+under the `unknown` it was written with.
+
 **Changed: a paneless CLI call is the operator (§3.6).** The CLI door now
 sends the human act its own argv is, so `hdis doctor` outside a Herdr pane
 answers `human` where it answered `unknown`, and the §9 gate is asked about

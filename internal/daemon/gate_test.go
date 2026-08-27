@@ -466,7 +466,7 @@ func TestADeclaredPanelessDoorIsTheOperatorAtTheGateAndOnTheParkedRow(t *testing
 
 	// And the resolver, which is the other place Request.Caller is read:
 	// ClaimParked records WHO decided, and the operator resolving through
-	// their own declared door is not `unknown`.
+	// their own declared door is not `none`.
 	if _, err := call(t, d, protocol.Request{
 		Verb: "parked.resolve", Args: map[string]any{"id": id, "reject": true},
 		Door: "mcp", Operator: true}); err != nil {
@@ -495,10 +495,10 @@ func TestAnUndeclaredPanelessDoorIsNobodyAtTheGateAndOnTheParkedRow(t *testing.T
 	if rerr != nil {
 		t.Fatalf("the gate was never run: %v", rerr)
 	}
-	if !strings.Contains(string(body), `"subject":"unknown"`) {
+	if !strings.Contains(string(body), `"subject":"none"`) {
 		t.Errorf("the gate saw %s, and a door nobody declared is nobody (§3.7)", body)
 	}
-	if held := d.Loop.Parked(); len(held) != 1 || held[0].Subject != "unknown" {
+	if held := d.Loop.Parked(); len(held) != 1 || held[0].Subject != "none" {
 		t.Fatalf("the parked row = %+v", held)
 	}
 	if _, err := call(t, d, protocol.Request{
@@ -506,7 +506,7 @@ func TestAnUndeclaredPanelessDoorIsNobodyAtTheGateAndOnTheParkedRow(t *testing.T
 		t.Fatalf("resolve: %v", err)
 	}
 	state, _ := d.Loop.Store.Load()
-	if len(state.Parked) != 1 || state.Parked[0].ResolvedBy != "unknown" {
+	if len(state.Parked) != 1 || state.Parked[0].ResolvedBy != "none" {
 		t.Fatalf("the row = %+v", state.Parked)
 	}
 }

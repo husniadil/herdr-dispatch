@@ -195,8 +195,9 @@ operator writes the server configuration:
 
 Every call that door makes is then the operator's where this daemon records a
 caller at all: the §9 gate's subject, the subject a deferred call is parked
-under, and who resolved it. Without it a paneless door's calls are attributed
-to nobody in particular, which is what a door nobody declared has earned. Read
+under, and who resolved it. Without it a paneless door's calls are `none` —
+§3.7's literal, written onto the parked row verbatim, so a row a plugin could
+not attribute says so rather than being filed under the operator. Read
 which is which with `hdis doctor`, whose `principal` line and JSON field are
 the calling principal itself, so a declared door answers `human` where an
 undeclared one does not:
@@ -313,8 +314,9 @@ decided by the config and nowhere else, for the same reason the board carries
 no profile field: execution policy is this binary's business.
 
 **The caller's identity buys nothing.** The daemon records the pane a caller
-ran in, `human` for a door started with the §7.5 declaration above, and
-`unknown` for a caller with neither, and grants nothing for any of them. Every
+ran in, `human` for a CLI invocation and for a door started with the §7.5
+declaration above, and the `none` §3.7 spells for a caller with neither, and
+grants nothing for any of them. Every
 caller here is the operator's own tooling reaching a socket only the operator
 can open, and the board only ever hears from this binary as `plugin:hdis`
 whoever asked.
@@ -447,7 +449,8 @@ gate_command = ["/usr/local/bin/fleet-policy", "check"]
 ```
 
 The command reads one JSON document on stdin — `{"subject","verb","target"}`,
-where the subject is the pane the caller ran in (`agent:wM:p3`) or `unknown`,
+where the subject is the pane the caller ran in (`agent:wM:p3`), `human`, or
+the `none` of §3.7 for a door nobody declared,
 and the target is the task the call named — and prints one back:
 
 ```json

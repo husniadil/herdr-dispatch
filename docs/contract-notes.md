@@ -164,11 +164,20 @@ CLI invocation `human` — its argv IS the deliberate act §3.7 asks for. The CL
 door now says so on every request, exactly as `hsched` does. The pane still
 wins, and so does `--as`.
 
-One divergence is left and is deliberate: a caller with none of the three is
-`unknown` here where §3.7 spells it `none`. Nothing reads the string but a
-human, the gate and the parked rows already written carry `unknown`, and
-renaming it is a change to what a gate script matches on — so it is a separate
-decision rather than a rider on this one.
+The last divergence went with it, on the same day. A caller with none of the
+three was `unknown` here where §3.7 spells it the literal `none`, and it is
+`none` now — the four plugins have to agree on the word, because it is what an
+operator matches in a gate script, reads on a parked row and reads on the
+doctor line, at any of them. `herdr-sched` moved first; this is the same
+change.
+
+Nothing migrates. `Parked.Subject` and `Parked.ResolvedBy` are the only places
+a principal string is written to disk, and they are free-form: no production
+path compares either to a literal, `parked resolve` replays `was.Subject` back
+at the gate as-is, and `parked list` prints it. So a row parked before this
+change still reads, lists and resolves under the `unknown` it was written
+with; only new calls say `none`. What a gate script matching `unknown` has to
+change is its own line, and that is in the CHANGELOG rather than fixed here.
 
 ## What the §8 sweep added
 
