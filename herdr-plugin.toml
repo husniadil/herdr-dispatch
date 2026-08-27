@@ -1,6 +1,6 @@
 id = "herdr-dispatch"
 name = "Dispatch"
-version = "0.7.1"
+version = "0.7.2"
 min_herdr_version = "0.8.0"
 description = "Takes ready tasks off the htask board to review with no human in the middle: a worker pane per task, the goal delivered, the worker tracked, and a stop at review"
 platforms = ["macos", "linux"]

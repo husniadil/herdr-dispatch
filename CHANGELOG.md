@@ -5,7 +5,7 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
-## Unreleased
+## 0.7.2 — 2026-08-27
 
 **Changed: `doctor`'s `gate.parked` counts the board the call named, and
 `gate.parked_everywhere` counts the daemon (§10.3).** 0.7.1 narrowed
