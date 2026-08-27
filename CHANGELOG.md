@@ -7,6 +7,16 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+**Added: `hdis mcp --operator` declares the door speaks for the operator.**
+§7.5's declaration is read once from how the server was started, so a door in
+no pane — a desktop harness resolving a parked row — is the operator to the
+policy gate and to `parked resolve` rather than an unknown caller. A pane
+still wins, and a door started with the flag inside one refuses to come up at
+all with `FORBIDDEN` naming the pane, rather than running with two disagreeing
+answers about who it is. The declaration may not be carried per call: a tool
+call with an `operator` argument is refused `USAGE` naming `hdis mcp
+--operator` instead. A door started without the flag behaves exactly as it did.
+
 ## 0.3.0 — 2026-08-25
 
 **Changed: a worker is told which checkout is its own, and a second one is
