@@ -5,7 +5,7 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
-## Unreleased
+## 0.6.0 — 2026-08-27
 
 **Added: `account` on a worker profile, and a `doctor` finding for one the
 proxy does not hold.** A `provider = "codex"` profile may now name a stored
