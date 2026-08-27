@@ -113,9 +113,9 @@ func TestTheDefaultScopeIsEveryBoard(t *testing.T) {
 }
 
 // §4.4 names `parked.list` the one list verb that takes no --all-projects,
-// and this plugin has no narrower list to answer it with either: a parked row
-// belongs to no board. A flag that selects nothing is refused where it is
-// still a flag, rather than accepted and quietly ignored.
+// and here the flag selects no reading the verb does not already have: a call
+// that names no board reads every board. A flag that selects nothing is
+// refused where it is still a flag, rather than accepted and quietly ignored.
 func TestParkedListRefusesEveryBoard(t *testing.T) {
 	_, _, err := Request(verb(t, "parked.list"), []string{"--all-projects"})
 	if got, want := codes.Of(err), codes.Usage; got != want {

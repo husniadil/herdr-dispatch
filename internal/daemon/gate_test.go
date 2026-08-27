@@ -702,3 +702,78 @@ func TestAnUndeclaredPanelessDoorIsNobodyAtTheGateAndOnTheParkedRow(t *testing.T
 		t.Fatalf("the row = %+v", state.Parked)
 	}
 }
+
+// parkedList reads `parked.list` the way a door does, so a test asserts on
+// the answer the operator gets rather than on the loop's whole set.
+func parkedList(t *testing.T, d *Daemon, req protocol.Request) ParkedReport {
+	t.Helper()
+	req.Verb = "parked.list"
+	raw, err := call(t, d, req)
+	if err != nil {
+		t.Fatalf("parked list %s: %v", scope(req), err)
+	}
+	var rep ParkedReport
+	if err := json.Unmarshal(raw, &rep); err != nil {
+		t.Fatalf("parked list %s: %v", scope(req), err)
+	}
+	if rep.Count != len(rep.Parked) {
+		t.Errorf("parked list %s counted %d rows and listed %d", scope(req), rep.Count, len(rep.Parked))
+	}
+	return rep
+}
+
+// §4.4: `parked.list` is project-scoped. A parked action is resolved where it
+// was parked, so an operator asking on one board must be handed that board's
+// deferrals and no others — handing over every row would put another
+// project's decision in front of them.
+func TestParkedListAnswersOnlyTheBoardTheCallNamed(t *testing.T) {
+	stateDir(t)
+	d, _ := newDaemon(t)
+	gateScript(t, d, `echo '{"decision":"defer","reason":"ask the operator"}'`)
+
+	for _, project := range []string{"/src/a", "/src/b"} {
+		if _, err := call(t, d, protocol.Request{
+			Verb: "dispatch", Args: map[string]any{"task": "7"}, Project: project}); err == nil {
+			t.Fatalf("the dispatch on %s was not parked", project)
+		}
+	}
+
+	for _, project := range []string{"/src/a", "/src/b"} {
+		rep := parkedList(t, d, protocol.Request{Project: project})
+		if len(rep.Parked) != 1 || rep.Parked[0].Project != project {
+			t.Errorf("parked list on %s = %+v, want that board's one row", project, rep.Parked)
+		}
+	}
+
+	// The call that names no board is this daemon's every-board default
+	// (§4.2 note in docs/contract-notes.md), and it is the only reading
+	// under which both rows are one answer.
+	if rep := parkedList(t, d, protocol.Request{AllProjects: true}); len(rep.Parked) != 2 {
+		t.Errorf("parked list naming no board = %+v, want both rows", rep.Parked)
+	}
+}
+
+// A row parked by a call that named no board belongs to no board. It is never
+// listed under a project — there is nothing to say it is that project's — and
+// `--all-projects` is refused (§4.4), so the one reading that reaches it is
+// the call that names no board either.
+func TestAParkedRowThatNamesNoBoardIsListedOnlyByACallThatNamesNone(t *testing.T) {
+	stateDir(t)
+	d, _ := newDaemon(t)
+	gateScript(t, d, `echo '{"decision":"defer","reason":"ask the operator"}'`)
+
+	if _, err := call(t, d, protocol.Request{
+		Verb: "dispatch", Args: map[string]any{"task": "7"}, AllProjects: true}); err == nil {
+		t.Fatal("the dispatch was not parked")
+	}
+	if held := d.Loop.Parked(); len(held) != 1 || held[0].Project != "" {
+		t.Fatalf("the parked row = %+v, want one naming no board", held)
+	}
+
+	if rep := parkedList(t, d, protocol.Request{Project: "/src/p"}); len(rep.Parked) != 0 {
+		t.Errorf("parked list on /src/p = %+v, want nothing: the row names no board", rep.Parked)
+	}
+	if rep := parkedList(t, d, protocol.Request{AllProjects: true}); len(rep.Parked) != 1 {
+		t.Errorf("parked list naming no board = %+v, want the row", rep.Parked)
+	}
+}

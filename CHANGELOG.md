@@ -5,6 +5,24 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
+## Unreleased
+
+**Fixed: `parked list` answers the board it was called on (§4.4).** A parked
+row has always carried the scope its call was made with, and the list threw it
+away: every deferral came back whatever board was named, so an operator on one
+project was handed another project's decision to make, and the daemon
+contradicted the tool description and the CLI, which both said the verb was
+project-scoped. `hdis parked list --project <path>`, and `parked_list` with
+`project`, now list that board's rows and no others. A row parked by a call
+that named no board belongs to no board: it is never listed under a project,
+and since `--all-projects` is refused here, the one reading that lists it is a
+call that names no board either — which is this daemon's every-board default,
+so `hdis parked list` with no scope is unchanged and still shows everything. A
+consumer that read `parked list --project` and got the fleet's rows sees it
+narrow; one that named no board sees the same list as before. `hdis doctor`'s
+`parked` count is deliberately untouched: it is the daemon's own health, and
+the daemon serves every board.
+
 ## 0.7.0 — 2026-08-27
 
 **Added: `[worker] mcp_config`, and the doors a worker is launched with.** A

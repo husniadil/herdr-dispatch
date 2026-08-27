@@ -246,7 +246,7 @@ arguments.
 | --- | --- |
 | `--json` | One JSON document on stdout (§6.2), wherever in the line it is written. |
 | `--project <path>` | Act on one board. Resolved here, in the door, to the §4.1 canonical project, because a relative path is relative to the caller's working directory and the daemon's is somewhere else. |
-| `--all-projects` | Act across every board, which is this daemon's default. Naming it together with `--project` is refused rather than ranked. `parked list` is the one verb that takes no `--all-projects` (§4.4) and refuses it: a parked row belongs to no board, so the flag selects nothing. |
+| `--all-projects` | Act across every board, which is this daemon's default. Naming it together with `--project` is refused rather than ranked. `parked list` is the one verb that takes no `--all-projects` (§4.4) and refuses it: it lists the named board's rows, and a call naming no board already reads every board, so the flag selects nothing. |
 | `--as <principal>` | Act as a `cron:`, `trigger:` or `plugin:` principal (§3.2). `agent` and `human` are derived from the calling process and cannot be declared. |
 
 `--project` is what makes a bare number dispatchable. A number is unique only

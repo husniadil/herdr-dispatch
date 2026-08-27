@@ -550,8 +550,8 @@ func TestNamingOneBoardAndEveryBoardIsRefusedOnTheMCPDoor(t *testing.T) {
 
 // §4.4 on this door: the scope pair is injected into every tool, and
 // `parked_list` refuses all_projects for the same reason the CLI refuses
-// --all-projects — it selects nothing, because a parked row belongs to no
-// board.
+// --all-projects — it selects nothing, because every board is already what a
+// call that names no board reads.
 func TestParkedListRefusesEveryBoardOnTheMCPDoor(t *testing.T) {
 	_, call := inProcessDaemon(t)
 	sess := session(t, call)

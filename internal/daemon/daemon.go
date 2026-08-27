@@ -327,7 +327,7 @@ func (d *Daemon) serve(ctx context.Context, v verbs.Verb, req protocol.Request) 
 	case "events":
 		return encode(d.events(req))
 	case "parked.list":
-		held := d.Loop.Parked()
+		held := parkedOn(d.Loop.Parked(), req.Project)
 		return encode(ParkedReport{Parked: held, Count: len(held)}, nil)
 	case "parked.resolve":
 		return encode(d.resolveParked(ctx, req))
@@ -975,6 +975,30 @@ type DumpReport struct {
 	// whole store" includes it: a reader who wants the document without
 	// this binary should not have to know that one list was held back.
 	Events []store.Event `json:"events"`
+}
+
+// parkedOn is §4.4's scope for `parked.list`: a parked action is resolved
+// where it was parked, so a call that names a board is answered with that
+// board's rows and no others.
+//
+// A row carries the scope its call was made with, and a call that named no
+// board leaves it empty. Such a row belongs to no board: it is never listed
+// under one, because nothing says it is that project's, and `--all-projects`
+// is not the way to reach it either — §4.4 gives this verb no such flag and
+// both doors refuse one (`cli.ScopeFor`). What reaches it is the call that
+// names no board, which is this daemon's every-board default (§4.2): it is
+// answered with every row, the projectless ones among them.
+func parkedOn(held []store.Parked, project string) []store.Parked {
+	if project == "" {
+		return held
+	}
+	out := []store.Parked{}
+	for _, p := range held {
+		if p.Project == project {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // ParkedReport is what parked_list answers with.

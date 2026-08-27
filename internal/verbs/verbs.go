@@ -171,9 +171,12 @@ var All = []Verb{
 			"target, the reason the gate gave, and whether the action is still " +
 			"waiting or was resolved and then failed. A failed row is not " +
 			"finished business — the operator decided and the verb did not run. " +
-			"This is the one list verb that takes no all_projects (§4.4), and it " +
-			"refuses one that is named: every row is listed, because a parked " +
-			"row here belongs to no board and there is no narrower answer.",
+			"The rows are the board's the call was made on (§4.4): a parked " +
+			"action is resolved where it was parked. This is the one list verb " +
+			"that takes no all_projects, and it refuses one that is named — a " +
+			"call that names no board already reads every board here, so the " +
+			"flag selects nothing. A row parked by a call that named no board " +
+			"belongs to no board, and only a call that names none lists it.",
 	},
 	{
 		Name: "parked.resolve", MCP: "parked_resolve", CLI: []string{"parked", "resolve"},

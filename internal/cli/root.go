@@ -256,11 +256,11 @@ func (g *globals) scope(v verbs.Verb) (string, bool, error) {
 
 // ScopeFor is Scope for one verb, and it is where a verb that has no scope of
 // its own refuses one the caller named. §4.4 gives `parked.list` no
-// `--all-projects`, and this plugin has nothing to answer it with either: the
-// store is bindings keyed by task id and a parked row belongs to no board, so
-// there is neither a narrower list nor a wider one to hand back. A flag that
-// selects nothing is refused rather than accepted and ignored, which is what
-// both siblings do with the same verb.
+// `--all-projects`, and here the flag would select nothing anyway: a call that
+// names no board already reads every board (§4.2), so the widest answer this
+// verb has is what it gives by default and the flag adds no reading. A flag
+// that selects nothing is refused rather than accepted and ignored, which is
+// what both siblings do with the same verb.
 //
 // The admission is here, in the door, because only a door can still tell the
 // flag from the default: every board is what this daemon does when no scope is
