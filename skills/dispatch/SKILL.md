@@ -151,8 +151,11 @@ hdis parked list --json              hdis parked resolve --reject <id>
 
 A parked call is **the operator's to decide**, not yours. Tell them the id and
 what you were trying to do; resolve one yourself only when they have said to.
-Resolving re-runs the verb as whoever the gate stopped, never as you, and the
-row records that you were the one who let it through.
+Nothing here refuses you — it is advice you confirm with them, and the trail is
+what carries it. Resolving re-runs the verb as whoever the gate stopped, never
+as you; the row records that you were the one who let it through, and so does
+the `dispatch.parked.resolved` event, filed under you and marked
+`on_behalf_of_operator` because the operator was not the one who typed it.
 
 ## What the dispatcher did
 

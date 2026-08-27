@@ -895,10 +895,16 @@ func (l *Loop) ClaimParked(id, state, by string) (store.Parked, error) {
 		l.parked[i].State = state
 		l.parked[i].ResolvedBy = by
 		l.parked[i].ResolvedMS = l.now().UnixMilli()
-		ev := l.emitLocked(store.EntityParked, KindResolved, id, "", map[string]any{
+		// §3.7: resolving a deferral is the operator's authority, so this
+		// one event is filed under the principal that decided it rather than
+		// under this daemon, and it says when that principal was not the
+		// operator. `resolved_by` stays beside the actor: it is a shipped
+		// field of the trail and of the parked row, and the row is what
+		// `parked list` prints.
+		ev := l.emitLockedAs(by, store.EntityParked, KindResolved, id, "", operatorVerb(by, map[string]any{
 			"subject": was.Subject, "verb": was.Verb, "target": was.Target,
 			"state": state, "resolved_by": by,
-		})
+		}))
 		defer l.fire(ev)
 		return was, nil
 	}

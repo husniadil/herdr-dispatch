@@ -7,6 +7,33 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+**Changed: `dispatch.parked.resolved` names the caller, not this daemon
+(§3.7).** Resolving a deferral is the operator's authority, so the event
+for it is now filed under the principal that decided it — `agent:wM:p1`,
+`human`, or the `none` of §3.7 — where it carried this daemon's own
+`plugin:hdis@<pane>` before. Every other event on the trail is unchanged and
+still this daemon acting. A consumer grouping the trail by `actor` sees the
+resolutions move off the daemon's own name; one reading `detail.resolved_by`
+is unaffected, because that field stays exactly where it was and says the same
+thing.
+
+**Added: an operator verb an agent performed labels itself.** When the
+principal resolving a parked action is not `human`, the event's `detail`
+carries `on_behalf_of_operator: true` — the key both sibling plugins
+write, so an operator reading three trails matches one word. The operator's
+own resolution carries no such key. Nothing refuses on it: §3.7 makes an
+operator verb advice an agent confirms with the user rather than a refusal a
+door makes, and the trail is what carries the accountability instead.
+
+**The declared contract revision is now 0.10.1**, up from 0.10.0. It is the
+value `hdis doctor` reports as its own top-level `contract`, distinct from the
+`board.contract` it relays from htask. 0.10.1 is the revision that catches the
+text up with what the four plugins already do; where it reaches this plugin
+it lands as a closed entry in `docs/contract-notes.md` rather than as work —
+§5.4 now names the id shape a JSON-document store mints, which is the shape
+this plugin has always minted. The two changes above are the work,
+and they are §3.7's, which 0.10.0 already required.
+
 ## 0.4.0 — 2026-08-27
 
 **Added: `hdis doctor` prints the calling principal.** `principal` is a new

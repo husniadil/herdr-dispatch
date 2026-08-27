@@ -10,6 +10,7 @@ import (
 
 	"github.com/husniadil/herdr-dispatch/internal/codes"
 	"github.com/husniadil/herdr-dispatch/internal/herdrclient"
+	"github.com/husniadil/herdr-dispatch/internal/loop"
 	"github.com/husniadil/herdr-dispatch/internal/protocol"
 	"github.com/husniadil/herdr-dispatch/internal/store"
 	"github.com/husniadil/herdr-dispatch/internal/testenv"
@@ -303,6 +304,115 @@ func TestAResolvedActionWhoseVerbFailedStaysInFrontOfTheOperator(t *testing.T) {
 	held := d.Loop.Parked()
 	if len(held) != 1 || held[0].State != store.ParkedFailed || held[0].Error == "" {
 		t.Fatalf("the failed row is %+v; an operator who decided and got nothing must see why", held)
+	}
+}
+
+// parkOne defers a dispatch and hands back the parked row's id, which is all
+// a test about the RESOLUTION needs of the deferral before it.
+func parkOne(t *testing.T, d *Daemon) string {
+	t.Helper()
+	gateScript(t, d, `echo '{"decision":"defer","reason":"ask the operator"}'`)
+	_, err := call(t, d, protocol.Request{Verb: "dispatch", Args: map[string]any{"task": "7"}, Pane: "wM:p3"})
+	id := codes.ParkedOf(err)
+	if id == "" {
+		t.Fatalf("no parked row: %v", err)
+	}
+	return id
+}
+
+// resolvedEvent is the one `dispatch.parked.resolved` on the trail, and
+// deferredEvent the `dispatch.parked.deferred` before it.
+func resolvedEvent(t *testing.T, d *Daemon) store.Event {
+	t.Helper()
+	return parkedEvent(t, d, loop.KindResolved)
+}
+
+func deferredEvent(t *testing.T, d *Daemon) store.Event {
+	t.Helper()
+	return parkedEvent(t, d, loop.KindDeferred)
+}
+
+func parkedEvent(t *testing.T, d *Daemon, kind string) store.Event {
+	t.Helper()
+	trail, err := d.Loop.Events(store.EventFilter{})
+	if err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	for _, ev := range trail {
+		if ev.Kind == kind {
+			return ev
+		}
+	}
+	t.Fatalf("no %s event on the trail of %d events", kind, len(trail))
+	return store.Event{}
+}
+
+// §3.7: resolving a deferral is the operator's authority, and an operator verb
+// performed by a principal other than the operator records the CALLING
+// principal as the event's actor. Every other event here is this daemon
+// acting; this one is not, because a trail that filed the decision under the
+// daemon would name nobody who made it.
+func TestTheResolvedEventIsFiledUnderTheCallerAndNotTheDaemon(t *testing.T) {
+	stateDir(t)
+	d, _ := newDaemon(t)
+	id := parkOne(t, d)
+
+	if _, err := call(t, d, protocol.Request{
+		Verb: "parked.resolve", Args: map[string]any{"id": id}, Pane: "wM:p1"}); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	ev := resolvedEvent(t, d)
+	if ev.Actor != "agent:wM:p1" {
+		t.Fatalf("the resolution is filed under %q, want the caller agent:wM:p1", ev.Actor)
+	}
+	// The deferral that preceded it is this daemon acting and carries this
+	// daemon's own principal, so a resolution wearing the same one is the
+	// mutation this test exists to catch.
+	if ev.Actor == deferredEvent(t, d).Actor {
+		t.Fatalf("the resolution is filed under this daemon (%q)", ev.Actor)
+	}
+	if ev.Detail["resolved_by"] != "agent:wM:p1" {
+		t.Errorf("resolved_by moved: %+v", ev.Detail)
+	}
+}
+
+// §3.7's second half: the event is MARKED as an operator verb performed by
+// someone other than the operator, under the key the sibling plugins write,
+// because an operator reading three trails matches one word.
+func TestAnAgentResolvingForTheOperatorMarksTheEvent(t *testing.T) {
+	stateDir(t)
+	d, _ := newDaemon(t)
+	id := parkOne(t, d)
+
+	if _, err := call(t, d, protocol.Request{
+		Verb: "parked.resolve", Args: map[string]any{"id": id}, Pane: "wM:p1"}); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if ev := resolvedEvent(t, d); ev.Detail[loop.OnBehalfOfOperator] != true {
+		t.Fatalf("detail = %+v, want %s: an agent performing the operator's verb labels itself",
+			ev.Detail, loop.OnBehalfOfOperator)
+	}
+}
+
+// And the mark means what it says: the operator resolving in person carries
+// none. A mark on every resolution would say nothing about any of them.
+func TestTheOperatorResolvingCarriesNoMark(t *testing.T) {
+	stateDir(t)
+	d, _ := newDaemon(t)
+	id := parkOne(t, d)
+
+	// A paneless door started with §7.5's declaration is the operator, which
+	// is the one shape of this call that is not an agent acting for them.
+	if _, err := call(t, d, protocol.Request{
+		Verb: "parked.resolve", Args: map[string]any{"id": id}, Operator: true}); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	ev := resolvedEvent(t, d)
+	if ev.Actor != "human" {
+		t.Fatalf("the operator's own resolution is filed under %q", ev.Actor)
+	}
+	if _, marked := ev.Detail[loop.OnBehalfOfOperator]; marked {
+		t.Fatalf("detail = %+v, want no %s on the operator's own call", ev.Detail, loop.OnBehalfOfOperator)
 	}
 }
 
