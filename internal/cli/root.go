@@ -232,6 +232,13 @@ func (g *globals) request(v verbs.Verb, args map[string]any) (protocol.Request, 
 		Project:     scope,
 		AllProjects: all,
 		As:          as,
+		// §3.6 with §3.7: a CLI invocation is one process per call, so this
+		// argv IS the deliberate human act §3.7 asks a paneless `human` to
+		// point at. That is what lets a paneless CLI call be the operator
+		// where a paneless server door nobody declared is not. The pane
+		// still wins (§3.2), and so does an explicit --as, so this changes
+		// nothing for a call made from inside a pane.
+		Operator: true,
 	}, nil
 }
 

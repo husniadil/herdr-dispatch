@@ -312,7 +312,7 @@ func TestAResolvedActionWhoseVerbFailedStaysInFrontOfTheOperator(t *testing.T) {
 func TestDoctorSaysWhetherAGateIsConfigured(t *testing.T) {
 	stateDir(t)
 	d, _ := newDaemon(t)
-	rep, err := d.doctor(context.Background())
+	rep, err := d.doctor(context.Background(), protocol.Request{Verb: "doctor"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +327,7 @@ func TestDoctorSaysWhetherAGateIsConfigured(t *testing.T) {
 	if _, err := call(t, d, protocol.Request{Verb: "dispatch", Args: map[string]any{"task": "7"}}); err == nil {
 		t.Fatal("a deferred dispatch succeeded")
 	}
-	rep, _ = d.doctor(context.Background())
+	rep, _ = d.doctor(context.Background(), protocol.Request{Verb: "doctor"})
 	if !rep.Gate.Configured || len(rep.Gate.Command) == 0 {
 		t.Errorf("doctor does not name the configured gate: %+v", rep.Gate)
 	}
@@ -343,7 +343,7 @@ func TestDoctorSaysWhetherAGateIsConfigured(t *testing.T) {
 func TestDoctorReportsTheHerdrSchemaItSaw(t *testing.T) {
 	stateDir(t)
 	d, _ := newDaemon(t)
-	rep, err := d.doctor(context.Background())
+	rep, err := d.doctor(context.Background(), protocol.Request{Verb: "doctor"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +363,7 @@ func TestDoctorReportsTheHerdrSchemaItSaw(t *testing.T) {
 
 	lean, leanFake := newDaemon(t)
 	leanFake.Write(t, testenv.HerdrSchemaFile, `{"protocol":1,"requests":["pane.list"]}`)
-	rep, _ = lean.doctor(context.Background())
+	rep, _ = lean.doctor(context.Background(), protocol.Request{Verb: "doctor"})
 	if !contains(rep.Herdr.Missing, herdrclient.CapTabCreate) {
 		t.Errorf("doctor does not name the missing capability: %+v", rep.Herdr)
 	}

@@ -108,6 +108,9 @@ reason it stands.
 | §6.3 | The code is one of the nine, the exit status is the one fixed for it, and a finer name is a sub-reason inside `message` | `TestEverySubReasonAnswersUnderAContractCode`, `TestTheSubReasonsMapOntoTheCodesTheContractFixes`, `TestExitIsTheStatusTheContractFixes`, `TestAFailureExitsWithTheStatusTheContractFixes` |
 | §6.3 | A parse failure of the CLI framework's own is USAGE, not the UNAVAILABLE an unnamed error would fall through to | `TestAnUnknownFlagIsAUsageRefusal`, `TestAStrayArgumentToAGroupIsARefusalAndNotItsHelp` |
 | §10.3 | `doctor` prints the state dir and the config dir | `TestDoctorNamesTheDirectoriesItResolved` |
+| §10.3 | `doctor` prints the calling principal, in both its shapes | `TestDoctorReportsTheCallingPrincipal`, `TestDoctorPrintsTheCallingPrincipal` |
+| §3.6, §3.7 | A paneless CLI invocation is the operator, because its argv is the human act | `TestAPanelessCLIInvocationIsTheOperator` |
+| §4.2 | The board `hdis mcp --project` names is the default scope of every call that names none | `TestTheMCPDoorIsStartedOnTheBoardTheProjectFlagNames`, `TestTheDoorsProjectFlagIsTheRootsOwn`, `TestTheDoorsProjectIsTheDefaultScopeOfEveryCall`, `TestADoorStartedOnNoBoardStillDefaultsToEveryBoard` |
 | §11.1 | Herdr is reached through `HERDR_BIN_PATH` | `TestTheHerdrBinaryComesFromTheVariableTheContractNames` |
 | §11.2 | `herdr api schema --json` is read once, in both accepted document shapes, and a missing capability is UNSUPPORTED at the verb that needs it, naming it | `TestTheJSONSchemaShapeIsRead`, `TestTheFlatShapeIsAlsoRead`, `TestTheSchemaIsReadOnce`, `TestAMissingCapabilityIsUnsupportedAtTheVerbThatNeedsIt`, `TestEveryVerbThatNeedsACapabilityRefusesWithoutIt` |
 | §10.3, §11.2 | `doctor` reports the Herdr schema it saw and every capability it is missing | `TestDoctorReportsTheHerdrSchemaItSaw` |
@@ -147,12 +150,25 @@ declaration, so an agent that starts a declared door gains nothing by it, and
 the startup refusal, because the half that exists to reassure a reader is the
 half a reader stops checking.
 
-What is still a gap in the contract rather than here is the visibility §7.5
-leans on: it says "`<name> doctor` (§10.3) already prints the calling
-principal", and §10.3 requires no such thing. `hdis doctor` does not print one
-today. The declaration is checkable at the two places it actually decides
-something — the gate's subject and the parked row — and that is where the
-tests above look.
+The visibility §7.5 leans on is here too, as of 2026-08-27. §7.5 says
+"`<name> doctor` (§10.3) already prints the calling principal" where §10.3
+requires no such thing, and both siblings print it, so `hdis doctor` now
+carries `principal` in its JSON and on its text line. It is `req.Caller()`
+and nothing else, so what an operator reads there is exactly what the §9 gate
+is told and what a parked row is filed under — three answers that cannot
+disagree because there is one of them.
+
+That line is also what made a second §3.6 gap visible: the CLI door sent no
+`Operator`, so a paneless `hdis doctor` answered `unknown` where §3.6 makes a
+CLI invocation `human` — its argv IS the deliberate act §3.7 asks for. The CLI
+door now says so on every request, exactly as `hsched` does. The pane still
+wins, and so does `--as`.
+
+One divergence is left and is deliberate: a caller with none of the three is
+`unknown` here where §3.7 spells it `none`. Nothing reads the string but a
+human, the gate and the parked rows already written carry `unknown`, and
+renaming it is a change to what a gate script matches on — so it is a separate
+decision rather than a rider on this one.
 
 ## What the §8 sweep added
 

@@ -292,7 +292,7 @@ func scope(req protocol.Request) string {
 func (d *Daemon) serve(ctx context.Context, v verbs.Verb, req protocol.Request) (json.RawMessage, error) {
 	switch v.Name {
 	case "doctor":
-		return encode(d.doctor(ctx))
+		return encode(d.doctor(ctx, req))
 	case "dispatch":
 		ref, _ := req.Args["task"].(string)
 		// §4.2: the door resolved --project to a canonical path already, so
@@ -371,7 +371,14 @@ type DoctorReport struct {
 	// Contract is the plugin contract THIS binary satisfies, which is not
 	// the board's: Board.Contract below is htask's own, relayed.
 	Contract string `json:"contract"`
-	Socket   string `json:"socket"`
+	// Principal is who the daemon records THIS very call as (§3.2, §3.7),
+	// derived by the door and never declared by the caller. §7.5 rests its
+	// declaration on this line being here: a doctor call through a declared
+	// door answers `human` and one through an undeclared door answers
+	// nobody in particular, which is how an operator checks which of their
+	// registrations speak for them.
+	Principal string `json:"principal"`
+	Socket    string `json:"socket"`
 	// StateDir and ConfigDir are the two directories §10.3 makes doctor
 	// print. An operator reading a stale binding or an override that is not
 	// taking effect needs to know WHICH pair of directories this daemon
@@ -547,10 +554,11 @@ type BoardHealth struct {
 // doctor never fails. It is what an operator runs when something else already
 // refused, and a board that is down is the answer rather than an obstacle to
 // giving one.
-func (d *Daemon) doctor(ctx context.Context) (DoctorReport, error) {
+func (d *Daemon) doctor(ctx context.Context, req protocol.Request) (DoctorReport, error) {
 	rep := DoctorReport{
 		Version:        d.Version,
 		Contract:       version.Contract,
+		Principal:      req.Caller(),
 		Socket:         config.SocketPath(),
 		StateDir:       config.StateDir(),
 		ConfigDir:      config.ConfigDir(),
@@ -797,10 +805,10 @@ func (d *Daemon) Policy() *gate.Gate {
 // omission.
 //
 // The subject is the caller as the daemon records it — the pane a door runs
-// in, `human` for a door started with the §7.5 declaration, and `unknown` for
-// a caller with neither. This binary derives no principal and grants nothing
-// for a pane (§3.4), so what the gate is told is what the daemon knows, and
-// never more.
+// in, `human` for a CLI invocation (§3.6) and for a door started with the
+// §7.5 declaration, and `unknown` for a caller with neither. This binary
+// derives no principal and grants nothing for a pane (§3.4), so what the gate
+// is told is what the daemon knows, and never more.
 func (d *Daemon) pass(v verbs.Verb, req protocol.Request) error {
 	if v.Gated == "" {
 		return nil

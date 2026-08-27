@@ -750,6 +750,42 @@ func doctorOf(t *testing.T, d *Daemon) DoctorReport {
 	return rep
 }
 
+// §10.3: doctor prints the calling principal, derived by the door and never
+// declared. It is the line §7.5 rests on — an operator reads it to tell which
+// of their registrations speak for them — and it is the same answer §9 gives
+// the gate, so a DENIED and a doctor line never disagree about who asked.
+func TestDoctorReportsTheCallingPrincipal(t *testing.T) {
+	stateDir(t)
+	d, _ := newDaemon(t)
+	for name, tc := range map[string]struct {
+		req  protocol.Request
+		want string
+	}{
+		// §3.6: a paneless CLI invocation is the operator, because the argv
+		// that ran is the deliberate human act §3.7 asks for.
+		"a paneless CLI call":          {protocol.Request{Verb: "doctor", Door: "cli", Operator: true}, "human"},
+		"a CLI call inside a pane":     {protocol.Request{Verb: "doctor", Door: "cli", Operator: true, Pane: "wM:p7"}, "agent:wM:p7"},
+		"a CLI call with --as":         {protocol.Request{Verb: "doctor", Door: "cli", Operator: true, As: "cron:nightly"}, "cron:nightly"},
+		"the door declared --operator": {protocol.Request{Verb: "doctor", Door: "mcp", Operator: true}, "human"},
+		"a door nobody declared":       {protocol.Request{Verb: "doctor", Door: "mcp"}, "unknown"},
+	} {
+		raw, err := call(t, d, tc.req)
+		if err != nil {
+			t.Fatalf("%s: doctor: %v", name, err)
+		}
+		var rep DoctorReport
+		if err := json.Unmarshal(raw, &rep); err != nil {
+			t.Fatalf("%s: doctor json: %v", name, err)
+		}
+		if rep.Principal != tc.want {
+			t.Errorf("%s: doctor reports principal %q, want %q", name, rep.Principal, tc.want)
+		}
+		if rep.Principal != tc.req.Caller() {
+			t.Errorf("%s: doctor reports %q and the gate is told %q", name, rep.Principal, tc.req.Caller())
+		}
+	}
+}
+
 // Doctor says whether the verification lane is on. An operator asking why a
 // submission earned no self-review shot reads it here.
 func TestDoctorReportsTheVerificationLane(t *testing.T) {

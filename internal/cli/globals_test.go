@@ -150,6 +150,36 @@ func TestWithoutAsThePrincipalIsStillTheProcessesOwnPane(t *testing.T) {
 	}
 }
 
+// §3.6 and §3.7: a CLI invocation is one process per call, so the argv that
+// ran IS the deliberate human act §3.7 asks a paneless `human` to point at.
+// The CLI door therefore says so on every request, and a paneless call is the
+// operator where a paneless server door nobody declared is not. The pane still
+// wins (§3.2), and so does an explicit --as.
+func TestAPanelessCLIInvocationIsTheOperator(t *testing.T) {
+	for name, tc := range map[string]struct {
+		pane string
+		argv []string
+		want string
+	}{
+		"outside a pane":           {"", []string{"7"}, "human"},
+		"inside a pane":            {"wM:p4", []string{"7"}, "agent:wM:p4"},
+		"outside a pane with --as": {"", []string{"--as", "cron:nightly", "7"}, "cron:nightly"},
+		"inside a pane with --as":  {"wM:p4", []string{"--as", "cron:nightly", "7"}, "cron:nightly"},
+	} {
+		t.Setenv("HERDR_PANE_ID", tc.pane)
+		req, _, err := Request(verb(t, "dispatch"), tc.argv)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !req.Operator {
+			t.Errorf("%s: the CLI door sent no human act for its own argv", name)
+		}
+		if got := req.Caller(); got != tc.want {
+			t.Errorf("%s: caller = %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
 // cobra returns help for a parent that is not Runnable BEFORE it validates
 // arguments, so NoArgs alone is unreachable on a group: `hdis parked nonsense`
 // would read as "no subcommand given", print help on stdout and exit 0, where

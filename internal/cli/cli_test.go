@@ -180,6 +180,23 @@ func TestDoctorSaysWhyADispatchWouldRefuse(t *testing.T) {
 	}
 }
 
+// §10.3: the text doctor prints carries the calling principal beside the
+// contract, so an operator reading it in a terminal sees which principal that
+// registration speaks as without asking for JSON.
+func TestDoctorPrintsTheCallingPrincipal(t *testing.T) {
+	for _, principal := range []string{"human", "agent:wM:p3", "cron:nightly", "unknown"} {
+		raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","principal":"` +
+			principal + `","board":{"reachable":true}}`)
+		var out strings.Builder
+		if err := Write("doctor", raw, false, &out); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		if !strings.Contains(out.String(), "principal   "+principal) {
+			t.Errorf("doctor printed %q, and it does not name the principal %q", out.String(), principal)
+		}
+	}
+}
+
 // Every verb the registry carries is reachable and listed. The help is
 // cobra's now rather than a block written out by hand, so what is checked is
 // that each verb is THERE: a group's members are listed under the group, and
