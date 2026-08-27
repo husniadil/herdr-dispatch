@@ -5,7 +5,7 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
-## Unreleased
+## 0.7.1 — 2026-08-27
 
 **Fixed: `parked list` answers the board it was called on (§4.4).** A parked
 row has always carried the scope its call was made with, and the list threw it
