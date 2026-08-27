@@ -5,7 +5,7 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
-## Unreleased
+## 0.7.0 — 2026-08-27
 
 **Added: `[worker] mcp_config`, and the doors a worker is launched with.** A
 worker's argv now carries `--mcp-config <path> --strict-mcp-config`, so one
