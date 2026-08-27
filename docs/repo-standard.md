@@ -59,7 +59,7 @@ internal/            see below
 docs/contract.md     the Herdr plugin contract this repo is written against
 docs/contract-notes.md   where the contract and the observed daemon disagree
 skills/<short name>/ SKILL.md, symlinked into ~/.claude/skills by hand
-scripts/             start.sh, stop.sh, restart.sh (+ on-pane-gone.sh)
+scripts/             start.sh, stop.sh, restart.sh
 Makefile             the targets below
 herdr-plugin.toml    the manifest Herdr installs
 CHANGELOG.md  README.md  LICENSE  CLAUDE.md
@@ -105,8 +105,10 @@ daemon subcommand and the MCP subcommand are the only things allowed beside it.
 
 `project` and `ids` are the two packages a plugin grows when it owns the job.
 htask and hmail both mint ULIDs and both resolve a project from the caller's
-working directory. hdis mints no ids at all — the ids it handles are the
-board's — and resolves a project from a git worktree's common directory,
+working directory. hdis mints its own event and parked ids in
+`internal/store`, in a shape of their own rather than a ULID; the task ids it
+handles stay the board's. It resolves a project from a git worktree's common
+directory,
 inside the `worktree.Manager` that made the worktree. There are two callers of
 `Manager.Project`: the loop, naming the repository a bound pane's checkout
 belongs to, and the doors, canonicalizing an explicit `--project` per §4.1

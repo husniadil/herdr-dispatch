@@ -42,8 +42,9 @@ goal was delivered, how often, and whether review was announced.
 It refuses with a name rather than a sentence to parse. The `code` is one of
 the shared contract's nine, and the sub-reason is the first word of the
 `message`: `CONFLICT` as `NOT_READY` when the board will not hand the task
-out, as `AT_CAPACITY` when the fleet is already full, or as
-`ALREADY_DISPATCHED` when this daemon is driving it; `UNSUPPORTED` as
+out, as `AT_CAPACITY` when the fleet is already full, as `AT_QUOTA` when the
+proxy account the task's profile launches through has nothing left to spend,
+or as `ALREADY_DISPATCHED` when this daemon is driving it; `UNSUPPORTED` as
 `NO_BASE_PANE` when there is nowhere to put a worker; `NOT_FOUND` when no
 board has it; `USAGE` when no task was named; and `UNAVAILABLE` when the board
 itself could not be read.
@@ -108,11 +109,14 @@ hdis doctor
 ```
 
 `doctor` **says why a dispatch would refuse** before one is tried: the
-daemon's version, the base pane it splits workers off, whether the board and
-Herdr are reachable, and whether the verification lane is on — a submission
-earning one self-review shot in the worker's own pane, re-sent while your pane
-reads idle, because a prompt Herdr accepted is not a prompt you saw. Run it
-first — a refusal is usually one of those four.
+daemon's version, the principal this very call is, the base pane it splits
+workers off, whether the board and Herdr are reachable, whether the
+verification lane is on — a submission earning one self-review shot in the
+worker's own pane, re-sent while your pane reads idle, because a prompt Herdr
+accepted is not a prompt you saw — and, where a profile launches through the
+proxy, what the serving account has spent, which carries the refusal a codex
+worker would meet right now in the words `dispatch` would use. Run it first:
+a refusal is usually one of those.
 
 ## Through MCP instead of the CLI
 

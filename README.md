@@ -61,7 +61,8 @@ field, distinct from the `board.contract` it relays from `htask`.
 
 §3.4 and §3.7 are one rule seen twice: who a call is attributed to, and how
 the trail says so. **This plugin attributes nothing on the board.** It holds
-no ledger and has no verb whose authority is anyone's in particular — the
+a trail of its own events whose actor is always this daemon, never a caller
+— the
 daemon's own README says it above: the caller's identity buys nothing, because
 every caller here is the operator's own tooling reaching a socket only the
 operator can open.
@@ -420,8 +421,9 @@ It is handed `HDIS_EVENT` (the full name), `HDIS_ENTITY`, `HDIS_ID`,
 `HDIS_DETAIL`, the event's own JSON — which pane, which task number, why a
 prompt was refused. A hook that fails does not fail the write that caused it:
 it is started after the event is on disk, and nothing waits for it. `hdis
-doctor` says whether one is configured, which is the one fact a call site
-cannot show.
+doctor --json` says whether one is configured, under `events.hook`, which is
+the one fact a call site cannot show — the human-readable `doctor` prints no
+hook line.
 
 ## The policy gate
 
@@ -729,7 +731,7 @@ $ hdis doctor
   workers     4 live (2 holding a slot while awaiting review), 0 reserved, max 4
 
 $ hdis status
-#24   wM:p4V     hdis-24  idle       hdis/task-24   prompted ... notified=true  submitted work  (holding a slot while awaiting review)
+#24   wM:p4V     hdis-24  idle       worker     hdis/task-24            prompted ... x1 notified=true  submitted work  (holding a slot while awaiting review)
 ```
 
 The JSON carries the same facts: `awaiting_review` is a count on the doctor
@@ -866,8 +868,9 @@ own is retired as a pane, and their tab stays.
 
 The label is written for two readers at once. `hdis task 41` on a tab is
 something a person can pick out of a row of tabs, which is the one thing a tab
-has that a pane does not, and `hdis status` prints it beside the pane. It is
-also what tells this daemon the tab is its own.
+has that a pane does not, and it is what tells this daemon the tab is its own.
+`hdis status` prints the tab's id beside the pane rather than the label, which
+is what a later call names the tab by.
 
 ## The readable width and height
 
