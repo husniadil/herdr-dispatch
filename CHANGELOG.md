@@ -5,6 +5,27 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
+## Unreleased
+
+**Changed: `doctor`'s `gate.parked` counts the board the call named, and
+`gate.parked_everywhere` counts the daemon (§10.3).** 0.7.1 narrowed
+`parked list` to the board it was called on and left the doctor count alone as
+the daemon's own health, and the two then disagreed in front of the operator:
+`hdis doctor --project <path>` said two parked while `hdis parked list
+--project <path>` beside it listed one, and the figure an operator acts on is
+the one they are about to read. `gate.parked` now applies the same scope as
+the list — a call naming a board counts that board's rows, a row parked by a
+call that named no board belongs to no board and is counted under none, and a
+call that names no board is this daemon's every-board default and counts
+everything, so an unscoped `hdis doctor` is unchanged. The daemon-wide figure
+is not lost: `gate.parked_everywhere` is always present and always the whole
+daemon, because one daemon serves every board and an operator standing on one
+project still has to see that another has a decision waiting. The plain-text
+`gate` line prints both when they differ, and says `none parked on this board`
+when this board is clear and another is not. A consumer reading `gate.parked`
+off a scoped `doctor` sees it narrow to that board and should read
+`gate.parked_everywhere` for the fleet figure it used to get.
+
 ## 0.7.1 — 2026-08-27
 
 **Fixed: `parked list` answers the board it was called on (§4.4).** A parked

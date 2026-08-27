@@ -777,3 +777,71 @@ func TestAParkedRowThatNamesNoBoardIsListedOnlyByACallThatNamesNone(t *testing.T
 		t.Errorf("parked list naming no board = %+v, want the row", rep.Parked)
 	}
 }
+
+// doctor's gate count answers the board the call named, the way `parked.list`
+// does (§4.4): an operator standing on one project reads what is waiting on
+// THAT project, and the two surfaces cannot contradict each other. The
+// daemon-wide figure is not lost — it moves to its own field, because one
+// daemon serves every board and its own health is still the operator's.
+func TestDoctorCountsTheParkedOnTheBoardTheCallNamed(t *testing.T) {
+	stateDir(t)
+	d, _ := newDaemon(t)
+	gateScript(t, d, `echo '{"decision":"defer","reason":"ask the operator"}'`)
+
+	for _, project := range []string{"/src/a", "/src/b"} {
+		if _, err := call(t, d, protocol.Request{
+			Verb: "dispatch", Args: map[string]any{"task": "7"}, Project: project}); err == nil {
+			t.Fatalf("the dispatch on %s was not parked", project)
+		}
+	}
+
+	for _, project := range []string{"/src/a", "/src/b"} {
+		rep, err := d.doctor(context.Background(), protocol.Request{Verb: "doctor", Project: project})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rep.Gate.Parked != 1 {
+			t.Errorf("doctor on %s reports %d parked, and that board holds one", project, rep.Gate.Parked)
+		}
+		if rep.Gate.ParkedEverywhere != 2 {
+			t.Errorf("doctor on %s reports %d parked across the daemon, and it holds two",
+				project, rep.Gate.ParkedEverywhere)
+		}
+	}
+
+	// The call that names no board is this daemon's every-board default
+	// (§4.2), so both figures are the whole daemon and they agree.
+	rep, err := d.doctor(context.Background(), protocol.Request{Verb: "doctor", AllProjects: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Gate.Parked != 2 || rep.Gate.ParkedEverywhere != 2 {
+		t.Errorf("doctor naming no board = %d parked and %d everywhere, want both rows twice",
+			rep.Gate.Parked, rep.Gate.ParkedEverywhere)
+	}
+}
+
+// A row parked by a call that named no board belongs to no board, so a doctor
+// on a project counts none of it — and the every-board figure is the only
+// place the operator sees it at all.
+func TestDoctorOnAProjectCountsNoParkedRowThatNamesNoBoard(t *testing.T) {
+	stateDir(t)
+	d, _ := newDaemon(t)
+	gateScript(t, d, `echo '{"decision":"defer","reason":"ask the operator"}'`)
+
+	if _, err := call(t, d, protocol.Request{
+		Verb: "dispatch", Args: map[string]any{"task": "7"}, AllProjects: true}); err == nil {
+		t.Fatal("the dispatch was not parked")
+	}
+	rep, err := d.doctor(context.Background(), protocol.Request{Verb: "doctor", Project: "/src/p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Gate.Parked != 0 {
+		t.Errorf("doctor on /src/p reports %d parked, and the row names no board", rep.Gate.Parked)
+	}
+	if rep.Gate.ParkedEverywhere != 1 {
+		t.Errorf("doctor on /src/p reports %d parked across the daemon, and one is held",
+			rep.Gate.ParkedEverywhere)
+	}
+}

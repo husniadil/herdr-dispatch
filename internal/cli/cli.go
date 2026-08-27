@@ -300,14 +300,27 @@ func workerLane(w daemon.WorkerHealth) string {
 // gateLane is the §9 policy gate in one line: whether one is configured, and
 // what an operator has waiting because of it. An unconfigured gate allows
 // every verb, which is what the line has to say rather than leave blank.
+//
+// The parked figure is the board the call named, so on a project it can be
+// smaller than what the daemon holds. Both are printed when they differ: the
+// first is what `hdis parked list` here will hand over, the second is the
+// daemon's own, and one daemon serves every board. A board with nothing and a
+// daemon with something is that same difference, and the line says it rather
+// than falling silent on a zero.
 func gateLane(g daemon.GateHealth) string {
 	line := "not configured: every verb is allowed (§9.2)"
 	if g.Configured {
 		line = strings.Join(g.Command, " ")
 	}
 	line += ", gating " + strings.Join(g.Verbs, " ")
-	if g.Parked > 0 {
+	switch {
+	case g.Parked > 0:
 		line += fmt.Sprintf(", %d parked for you (hdis parked list)", g.Parked)
+		if g.ParkedEverywhere > g.Parked {
+			line += fmt.Sprintf(", %d across every board", g.ParkedEverywhere)
+		}
+	case g.ParkedEverywhere > 0:
+		line += fmt.Sprintf(", none parked on this board, %d across every board", g.ParkedEverywhere)
 	}
 	return line
 }

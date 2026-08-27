@@ -611,3 +611,58 @@ func TestDoctorCallsAConfiguredWorkerMCPConfigThatIsNotThereAFinding(t *testing.
 		}
 	}
 }
+
+// doctor's gate count is the board the call named, so on a project it can be
+// smaller than what the daemon holds. The line prints both when they differ:
+// the first figure is what the operator resolves here, the second is what the
+// daemon serving every board still has waiting.
+func TestDoctorPrintsBothParkedCountsWhenTheyDiffer(t *testing.T) {
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","base_pane":"wM:p1","max_workers":2,"interval":"15s",` +
+		`"gate":{"configured":true,"command":["/s/gate.sh"],"verbs":["dispatch.dispatch"],"parked":1,"parked_everywhere":2},` +
+		`"board":{"reachable":true}}`)
+	var out strings.Builder
+	if err := Write("doctor", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	for _, want := range []string{"1 parked for you", "hdis parked list", "2 across every board"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("want %q in doctor prose %q", want, out.String())
+		}
+	}
+}
+
+// Nothing on this board and something on another is still a difference the
+// operator has to see: the line says the board is clear and the daemon is not,
+// rather than falling silent because this project's count is zero.
+func TestDoctorSaysWhenNothingIsParkedHereAndSomethingIsElsewhere(t *testing.T) {
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","base_pane":"wM:p1","max_workers":2,"interval":"15s",` +
+		`"gate":{"configured":true,"command":["/s/gate.sh"],"verbs":["dispatch.dispatch"],"parked":0,"parked_everywhere":3},` +
+		`"board":{"reachable":true}}`)
+	var out strings.Builder
+	if err := Write("doctor", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	for _, want := range []string{"none parked on this board", "3 across every board"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("want %q in doctor prose %q", want, out.String())
+		}
+	}
+}
+
+// Where the two agree there is one figure to give, and the line gives it once:
+// a call that named no board reads every board already.
+func TestDoctorPrintsOneParkedCountWhenBothAgree(t *testing.T) {
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","base_pane":"wM:p1","max_workers":2,"interval":"15s",` +
+		`"gate":{"configured":true,"command":["/s/gate.sh"],"verbs":["dispatch.dispatch"],"parked":2,"parked_everywhere":2},` +
+		`"board":{"reachable":true}}`)
+	var out strings.Builder
+	if err := Write("doctor", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if !strings.Contains(out.String(), "2 parked for you") {
+		t.Errorf("want the parked count in doctor prose %q", out.String())
+	}
+	if strings.Contains(out.String(), "every board") {
+		t.Errorf("the every-board figure is the same one and is printed twice: %q", out.String())
+	}
+}

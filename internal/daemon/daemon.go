@@ -491,8 +491,19 @@ type GateHealth struct {
 	// names it will be asked about off the running daemon.
 	Verbs []string `json:"verbs"`
 	// Parked is how many deferrals are waiting on the operator, or were
-	// resolved and then failed. Both want a human.
+	// resolved and then failed. Both want a human. It is the count for the
+	// board the call named, on §4.4's reading: a deferral is resolved where
+	// it was parked, and `parked.list` on one project answers with that
+	// project's rows, so a doctor beside it that counted the fleet would
+	// contradict the list the operator is about to read. A call that names
+	// no board is this daemon's every-board default (§4.2), and there this
+	// is the whole daemon.
 	Parked int `json:"parked"`
+	// ParkedEverywhere is the same count across every board this daemon
+	// serves. One daemon runs per user and serves every board, so its own
+	// health is not one project's: without this an operator standing on a
+	// project could not see that another one has a decision waiting.
+	ParkedEverywhere int `json:"parked_everywhere"`
 }
 
 // EventsHealth is the §8 event trail as doctor reports it.
@@ -604,6 +615,7 @@ type BoardHealth struct {
 // refused, and a board that is down is the answer rather than an obstacle to
 // giving one.
 func (d *Daemon) doctor(ctx context.Context, req protocol.Request) (DoctorReport, error) {
+	parked := d.Loop.Parked()
 	rep := DoctorReport{
 		Version:        d.Version,
 		Contract:       version.Contract,
@@ -621,11 +633,14 @@ func (d *Daemon) doctor(ctx context.Context, req protocol.Request) (DoctorReport
 		Log:            d.LogPath,
 		Readopted:      d.Loop.Readopted(),
 		Verify:         VerifyHealth{Enabled: d.Loop.Config.Verify.Enabled},
+		// One read of the parked set answers both figures, so they can
+		// never come from different moments.
 		Gate: GateHealth{
-			Configured: d.Policy().Configured(),
-			Command:    d.Policy().Command(),
-			Verbs:      verbs.GatedVerbs(),
-			Parked:     len(d.Loop.Parked()),
+			Configured:       d.Policy().Configured(),
+			Command:          d.Policy().Command(),
+			Verbs:            verbs.GatedVerbs(),
+			Parked:           len(parkedOn(parked, req.Project)),
+			ParkedEverywhere: len(parked),
 		},
 		MinPaneColumns: d.Loop.Config.Layout.MinPaneColumns,
 		MaxPanesPerTab: d.Loop.Config.Layout.MaxPanesPerTab,
