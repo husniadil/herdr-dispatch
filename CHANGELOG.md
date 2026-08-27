@@ -7,6 +7,8 @@ entry here, so every entry says what moved and what a caller does about it.
 
 ## Unreleased
 
+## 0.4.0 — 2026-08-27
+
 **Added: `hdis doctor` prints the calling principal.** `principal` is a new
 top-level field on the doctor report and a new line in its text output,
 carrying the principal this daemon recorded for that very call — the same
