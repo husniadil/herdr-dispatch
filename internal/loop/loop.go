@@ -134,6 +134,18 @@ type Loop struct {
 	// bindings because it is written with them: one document, written
 	// whole, so an event cannot reach disk without the change it records.
 	events []store.Event
+	// deaths is how often a worker's agent has died on each task, which is
+	// the one fact here that outlives every worker it counts: a binding is
+	// about a pane and goes when the pane does, and this is what the TASK
+	// carries into the next worker it would be given. It is persisted with
+	// the bindings for the same reason they are — a restart that forgot it
+	// would dispatch straight back into the failure it had already counted.
+	deaths []store.Death
+	// missing is how many prompts in a row herdr has refused with
+	// AgentNotFound, by pane. It is deliberately NOT persisted: it is a
+	// streak within one run, and a restart re-reads the pane from Herdr and
+	// starts the count again rather than inheriting a suspicion.
+	missing map[string]int
 	// rows is the last tick's board rows, by task id: the project a worker
 	// runs in, the number an operator reads, the title status prints. It is
 	// a cache of board facts and never a source of them.
@@ -148,6 +160,10 @@ func (l *Loop) Tick(ctx context.Context) error {
 			return fmt.Errorf("nothing is dispatched until a start-up reconciliation succeeds: %w", err)
 		}
 	}
+	// Before the snapshot, because the snapshot is what holds a task back
+	// for the workers that died on it, and a count somebody has since
+	// cleared must not hold it back for one more tick.
+	l.clearDeaths(ctx)
 	snap, err := l.snapshot(ctx)
 	if err != nil {
 		return err
@@ -260,6 +276,10 @@ func (l *Loop) Adopt(ctx context.Context) (int, error) {
 	// nothing to reconcile it against: it is carried forward exactly as it
 	// was written, and only an operator ever closes one.
 	l.parked = held.Parked
+	// The death counts are carried forward the same way, and for a stronger
+	// reason: they are about tasks rather than panes, so no pane a restart
+	// reads could reconcile them. Only the board clears one.
+	l.deaths = held.Deaths
 	l.readopted = len(kept)
 	// Cleared before the save, because the save is what a failed Adopt
 	// suppresses and this reconciliation is the one that earned it.
@@ -831,6 +851,7 @@ func (l *Loop) saveLocked() {
 	}
 	if err := l.Store.Save(store.State{
 		Bindings: l.bindings, Reservations: l.pending, Parked: l.parked, Events: l.events,
+		Deaths: l.deaths,
 	}); err != nil {
 		l.logf("the bindings could not be written: %v", err)
 	}
@@ -955,6 +976,7 @@ func (l *Loop) Dump() store.State {
 		Reservations: append([]store.Reservation(nil), l.pending...),
 		Parked:       append([]store.Parked(nil), l.parked...),
 		Events:       append([]store.Event(nil), l.events...),
+		Deaths:       append([]store.Death(nil), l.deaths...),
 	}
 }
 
@@ -1028,6 +1050,14 @@ func (l *Loop) snapshot(ctx context.Context) (decide.Snapshot, error) {
 		// A task stays ready until its worker claims, so a task already
 		// bound is a task already dispatched, not a task to dispatch again.
 		if bound[row.ID] || reserved[row.ID] {
+			continue
+		}
+		// A task that has already killed MaxWorkerDeaths workers is left on
+		// the board and off this list. It is not logged here — every tick
+		// would say the same thing about the same task — and it is not
+		// hidden either: doctor names it, and dispatch by name refuses with
+		// the count.
+		if l.heldBack(row.ID) {
 			continue
 		}
 		rows[row.ID] = row
@@ -1286,8 +1316,16 @@ func (l *Loop) prompt(ctx context.Context, a decide.Action) error {
 		return err
 	}
 	if err := l.Herdr.AgentPrompt(ctx, a.Pane, text); err != nil {
+		// A pane herdr still lists with no agent behind it is the one
+		// failure that never recovers on its own, and re-prompting it is
+		// what this loop did forever. The error still reaches the
+		// operator's log through the caller.
+		l.agentMissing(ctx, a, err)
 		return err
 	}
+	// The prompt went through, so there is an agent in the pane, and
+	// whatever refused before it was not a dead one.
+	l.promptLanded(a.Pane)
 	prompts := 0
 	l.mu.Lock()
 	for i := range l.bindings {
@@ -1405,6 +1443,10 @@ func (l *Loop) drop(ctx context.Context, pane string) {
 		tree = b.Worktree
 	}
 	l.bindings = kept
+	// The AgentNotFound streak is about a pane this daemon is driving, so
+	// it ends with the binding rather than outliving it under a pane id
+	// that may be given to something else.
+	delete(l.missing, pane)
 	l.saveLocked()
 	l.mu.Unlock()
 

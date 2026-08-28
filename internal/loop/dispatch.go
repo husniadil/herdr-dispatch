@@ -59,6 +59,11 @@ type Worker struct {
 	PromptedAt time.Time `json:"prompted_at"`
 	Prompts    int       `json:"prompts"`
 	Notified   bool      `json:"notified"`
+	// Deaths is how often a worker's agent has already died on this task,
+	// with its pane left alive. It is a fact about the TASK rather than
+	// about this pane, and it is here because status is where an operator
+	// reads that this is not the first attempt.
+	Deaths int `json:"deaths,omitempty"`
 	// AwaitingReview is a worker whose task is sitting in review: it has
 	// submitted, it is spending nothing, and it is still holding its slot
 	// on purpose, because a rejection puts the row back to doing and this
@@ -105,6 +110,16 @@ func (l *Loop) Dispatch(ctx context.Context, ref, project string) (Reservation, 
 	row, ok := match(ready, ref)
 	if !ok {
 		return Reservation{}, l.whyNotReady(ctx, ref, project)
+	}
+
+	// A task that has already killed MaxWorkerDeaths workers is refused by
+	// name, with the count in the sentence: the caller asked for this task
+	// specifically, and "not ready" would send them to the board to find a
+	// row that is sitting there ready.
+	if n := l.DeathsOf(row.ID); n >= MaxWorkerDeaths {
+		return Reservation{}, codes.Refusef(codes.WorkersDied,
+			"task %d has had %d worker agents die on it with its pane still alive, so no more are spent on it until somebody releases or amends the row",
+			row.Seq, n)
 	}
 
 	// Asked before the reservation is taken, and deliberately before the
@@ -228,6 +243,7 @@ func (l *Loop) Status(ctx context.Context) (Status, error) {
 			PromptedAt:  b.PromptedAt,
 			Prompts:     b.Prompts,
 			Notified:    b.Notified,
+			Deaths:      l.deathsLocked(b.TaskID),
 
 			AwaitingReview: awaitingReview(b, row.Status),
 		})

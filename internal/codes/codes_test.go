@@ -41,6 +41,7 @@ func TestTheSubReasonsMapOntoTheCodesTheContractFixes(t *testing.T) {
 		NotReady:          Conflict,
 		AtCapacity:        Conflict,
 		AtQuota:           Conflict,
+		WorkersDied:       Conflict,
 		AlreadyDispatched: Conflict,
 		AlreadyRunning:    Conflict,
 		NotRunning:        Conflict,

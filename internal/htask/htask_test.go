@@ -445,3 +445,30 @@ func TestOnlyAWholeNameMatchesTheScrub(t *testing.T) {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
+
+// The board's own trail is how this daemon learns that somebody else has
+// acted on a row it is holding a death count against. It is a READ, resumed
+// from a millisecond so a restart is not handed the whole history again.
+func TestTheBoardTrailIsReadFromAMillisecond(t *testing.T) {
+	c, f := client(t)
+	c.Principal = "plugin:hdis@wM:p1"
+	f.Bin(t, "htask", `cat <<'EOF'
+{"events":[
+  {"id":"01EV1","entity":"task","entity_id":"01AAA","project":"/src/p","at":1787203459218,"actor":"human","kind":"released"},
+  {"id":"01EV2","entity":"task","entity_id":"01BBB","project":"/src/p","at":1787203459300,"actor":"agent:wM:p3","kind":"amended"}
+],"count":2}
+EOF`)
+
+	events, err := c.Events(context.Background(), 1787203459000)
+	if err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	if len(events) != 2 || events[0].EntityID != "01AAA" || events[0].Kind != "released" ||
+		events[0].Actor != "human" || events[1].Kind != "amended" || events[1].AtMS != 1787203459300 {
+		t.Fatalf("got %+v", events)
+	}
+	want := "events --since 1787203459000 --all-projects --json --as plugin:hdis@wM:p1"
+	if got := f.Calls(t)[0]; got != want {
+		t.Fatalf("argv: got %q, want %q", got, want)
+	}
+}

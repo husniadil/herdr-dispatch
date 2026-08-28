@@ -51,6 +51,25 @@ type Reservation struct {
 	Attempts int `json:"attempts"`
 }
 
+// Death is how many workers have died on one task with their pane still
+// alive, and it is the one fact here that outlives every worker it counts.
+//
+// A binding is about a pane and goes when the pane does; this is about the
+// TASK, and it is why a task that has killed two agents is not handed a
+// third. Nothing else records it: the board sees a task released with a note
+// and Herdr sees a pane that closed, and neither of them is counting.
+type Death struct {
+	TaskID  string `json:"task"`
+	Project string `json:"project,omitempty"`
+	Count   int    `json:"count"`
+	// SinceMS is where a reader of the BOARD's own trail resumes from when
+	// it asks whether anyone has since acted on this row. It is set past
+	// the release this daemon made when it counted the death, so the
+	// release that is this daemon's own act is never read back as somebody
+	// else clearing the count.
+	SinceMS int64 `json:"since_ms,omitempty"`
+}
+
 // State is everything the dispatcher remembers across a restart: the
 // bindings, and the reservations that have not become bindings yet. They
 // share one document because it is written whole, so saving either can never
@@ -69,6 +88,10 @@ type State struct {
 	// can never land without the change it records, or the change without
 	// the event.
 	Events []Event
+	// Deaths is how often a worker has died on each task, kept per task
+	// rather than per binding because it is what a task carries into the
+	// NEXT worker it would be given.
+	Deaths []Death
 }
 
 type document struct {
@@ -83,6 +106,11 @@ type document struct {
 	// Events is omitted when there are none, so a document written by a
 	// binary with an event trail stays readable to one without.
 	Events []Event `json:"events,omitempty"`
+	// Deaths is omitted when there are none, which is the same shape every
+	// field added since version 1: the version says what this binary knows
+	// how to read, and a set nobody has written stays absent rather than
+	// making an older binary's document unreadable.
+	Deaths []Death `json:"deaths,omitempty"`
 }
 
 // reservation is one reservation as it is written.
@@ -177,7 +205,7 @@ func (b *Bindings) Load() (State, error) {
 			Attempts: r.Attempts,
 		})
 	}
-	return State{Bindings: out, Reservations: held, Parked: doc.Parked, Events: doc.Events}, nil
+	return State{Bindings: out, Reservations: held, Parked: doc.Parked, Events: doc.Events, Deaths: doc.Deaths}, nil
 }
 
 // Save writes the whole set, atomically: a temp file in the same directory,
@@ -212,6 +240,7 @@ func (b *Bindings) Save(state State) error {
 	}
 	doc.Parked = state.Parked
 	doc.Events = Rotate(state.Events)
+	doc.Deaths = state.Deaths
 	raw, err := json.Marshal(doc)
 	if err != nil {
 		return fmt.Errorf("encode the bindings: %w", err)

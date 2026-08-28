@@ -5,6 +5,36 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
+## Unreleased
+
+**Fixed: a worker whose agent dies in a pane that stays alive is ended, and
+its task is not handed worker after worker.** Herdr keeps listing a pane whose
+agent has gone, so nothing unbound it and every tick re-delivered a nudge that
+came back `agent_not_found` — forever, with the task still claimed, no lease
+released, and `doctor` and `status` both reporting a healthy fleet. Three of
+those refusals in a row on one pane, with no prompt landing in between, now
+declare the worker dead: the pane is retired through the same teardown a
+cancelled task uses, and htask's own pane-gone sweep is what returns the task
+— `hdis` says nothing to the board, because htask releases a row to its holder
+or to the operator and the holder is the dead worker's own agent principal.
+The reason is on this daemon's trail instead: `dispatch.worker.died`, with the
+task, the pane, the refusals it took and the task's running death count.
+
+**Added: `doctor.workers_died`, `status`'s `deaths`, and `CONFLICT:
+WORKERS_DIED`.** The death count is per TASK and is persisted beside the
+bindings, so it survives a restart. At two deaths the task keeps its place on
+the board and stops being handed panes: the watching loop passes over it,
+`hdis dispatch` on it refuses `CONFLICT` as `WORKERS_DIED` naming the count,
+and `hdis doctor` lists it under a new `workers_died` array (`[]` when there
+is none). `hdis status` carries `deaths` on a worker's row when the task has
+lost one before, and `hdis dump` carries the whole set under `deaths`. The
+count is cleared by a release with a note or an amendment made by anybody
+other than this daemon, read off htask's own event trail; the board's own
+pane-gone sweep does NOT clear it, since that sweep is this daemon's retire
+coming back under another name. A caller reading
+only the nine contract codes is unaffected: `WORKERS_DIED` is a sub-reason
+inside `message`, under `CONFLICT`, like every other refusal here.
+
 ## 0.7.2 — 2026-08-27
 
 **Changed: `doctor`'s `gate.parked` counts the board the call named, and

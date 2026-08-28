@@ -31,7 +31,11 @@ func TestTheBoardAdapterCarriesNoReviewVerb(t *testing.T) {
 	// GetIn is Get scoped to one project: the read a pane's number needs,
 	// because a number is unique only inside one. It reads a row and no
 	// more, exactly as Get does.
-	want := []string{"Doctor", "Get", "GetIn", "Held", "Ready", "Release"}
+	// Events is a READ of the board's own trail, and the only question it
+	// is asked is whether somebody other than this daemon has acted on a
+	// row this daemon is counting dead workers against. It renders no
+	// verdict and writes nothing.
+	want := []string{"Doctor", "Events", "Get", "GetIn", "Held", "Ready", "Release"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("the board adapter's verbs are %v, and the ones this binary may have are %v", got, want)
 	}

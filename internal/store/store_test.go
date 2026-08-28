@@ -342,3 +342,47 @@ func TestABindingKeepsTheProfileItsWorkerLaunchedWith(t *testing.T) {
 		t.Fatalf("bindings: %+v", held.Bindings)
 	}
 }
+
+// A task's death count is what keeps a fleet from spending worker after
+// worker on a task whose agent cannot stay up, so it has to survive the
+// daemon that counted it: a restart that forgot would start the count again
+// from nothing and dispatch into the same failure.
+func TestATasksDeathCountSurvivesARestart(t *testing.T) {
+	s := tempStore(t)
+	if err := s.Save(State{Deaths: []Death{
+		{TaskID: "01AAA", Project: "/src/p", Count: 2, SinceMS: 1787203459218},
+	}}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	state, err := s.Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(state.Deaths) != 1 {
+		t.Fatalf("loaded %d death records, want 1: %+v", len(state.Deaths), state.Deaths)
+	}
+	got := state.Deaths[0]
+	if got.TaskID != "01AAA" || got.Project != "/src/p" || got.Count != 2 || got.SinceMS != 1787203459218 {
+		t.Fatalf("death record came back as %+v", got)
+	}
+}
+
+// The deaths share the one document with everything else in it, and the
+// document is written whole: saving the bindings must not drop the counts
+// beside them, or a spawn would clear the record of the spawn before it.
+func TestSavingBindingsKeepsTheDeathCountsBesideThem(t *testing.T) {
+	s := tempStore(t)
+	if err := s.Save(State{
+		Bindings: []decide.Binding{{TaskID: "01AAA", Pane: "wM:p9"}},
+		Deaths:   []Death{{TaskID: "01BBB", Count: 1}},
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	state, err := s.Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(state.Bindings) != 1 || len(state.Deaths) != 1 {
+		t.Fatalf("loaded %d bindings and %d deaths, want one of each", len(state.Bindings), len(state.Deaths))
+	}
+}

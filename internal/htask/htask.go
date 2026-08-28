@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -199,6 +200,37 @@ func (c *Client) Held(ctx context.Context) ([]Task, error) {
 func (c *Client) Release(ctx context.Context, id, note string) error {
 	_, err := c.run(ctx, "release", id, "--all-projects", "--note", note, "--json")
 	return err
+}
+
+// Event is one entry of the BOARD's own trail, as this dispatcher reads it.
+// It is htask's ledger and never copied into this one: the only reason to
+// read it is to learn that somebody other than this daemon has acted on a
+// row, which no board row itself records.
+type Event struct {
+	ID       string `json:"id"`
+	Entity   string `json:"entity"`
+	EntityID string `json:"entity_id"`
+	Project  string `json:"project"`
+	AtMS     int64  `json:"at"`
+	Actor    string `json:"actor"`
+	Kind     string `json:"kind"`
+}
+
+// Events reads the board's trail from a Unix millisecond, across every
+// project.
+//
+// It is resumed rather than read whole on purpose: `htask events` with no
+// --since starts at the beginning of everything the board still holds, and a
+// daemon asking that on a tick would carry the board's whole history through
+// a pipe for the sake of the handful of entries written since it last looked.
+func (c *Client) Events(ctx context.Context, sinceMS int64) ([]Event, error) {
+	var page struct {
+		Events []Event `json:"events"`
+	}
+	if err := c.json(ctx, &page, "events", "--since", strconv.FormatInt(sinceMS, 10), "--all-projects", "--json"); err != nil {
+		return nil, err
+	}
+	return page.Events, nil
 }
 
 func (c *Client) json(ctx context.Context, into any, args ...string) error {

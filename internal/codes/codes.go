@@ -87,6 +87,11 @@ const (
 	// NoBasePane is a daemon with no pane to split a worker off, which is
 	// every daemon started outside a Herdr pane and given no --pane.
 	NoBasePane Reason = "NO_BASE_PANE"
+	// WorkersDied is a task that has already killed its worker's agent
+	// MaxWorkerDeaths times over. Nothing about the next tick makes the
+	// next agent likelier to stay up, so the task is held back and the
+	// count is named rather than a worker spent on it in silence.
+	WorkersDied Reason = "WORKERS_DIED"
 	// AlreadyDispatched is a task this daemon is already driving.
 	AlreadyDispatched Reason = "ALREADY_DISPATCHED"
 	// AlreadyRunning is a second daemon meeting the first one's lock.
@@ -105,6 +110,7 @@ var carries = map[Reason]Code{
 	NotReady:          Conflict,
 	AtCapacity:        Conflict,
 	AtQuota:           Conflict,
+	WorkersDied:       Conflict,
 	AlreadyDispatched: Conflict,
 	AlreadyRunning:    Conflict,
 	NotRunning:        Conflict,

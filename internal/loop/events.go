@@ -34,6 +34,11 @@ const (
 	KindRetired = "retired"
 	// KindGone is a worker pane that disappeared, whose binding is dropped.
 	KindGone = "gone"
+	// KindDied is a worker whose AGENT died while its pane stayed alive:
+	// the task was handed back, the pane was retired, and the task carries
+	// one more death. It is not KindGone — nothing disappeared, which is
+	// exactly why nothing was ending it.
+	KindDied = "died"
 	// KindDeferred is the policy gate parking a call (§9.3).
 	KindDeferred = "deferred"
 	// KindResolved is the operator deciding a parked call, either way.

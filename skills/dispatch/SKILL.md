@@ -37,14 +37,25 @@ with `status`, which is one row per binding: the task, the pane its worker
 lives in, the tab that pane is in, the worker's `agent_status` as Herdr reports
 it, the branch its commits are on — marked `(behind)` when the project's HEAD
 has moved past it, which is what makes a fast-forward merge refuse — when the
-goal was delivered, how often, and whether review was announced.
+goal was delivered, how often, whether review was announced, and how often a
+worker's agent has already died on that task, so a second attempt says so.
+
+**A worker whose agent dies in a pane that stays alive is ended.** Herdr keeps
+listing the pane, so nothing else would: after three prompts in a row come
+back `agent_not_found`, the pane is retired and htask's own pane-gone sweep
+returns the task — `hdis` never releases it, because the board hands a row
+back to its holder and the holder is the dead worker. The reason is on
+`dispatch.worker.died`. The task carries the count, and at two deaths nothing
+dispatches it again until somebody releases it with a note or amends it on the
+board; the sweep that returned it does not count.
 
 It refuses with a name rather than a sentence to parse. The `code` is one of
 the shared contract's nine, and the sub-reason is the first word of the
 `message`: `CONFLICT` as `NOT_READY` when the board will not hand the task
 out, as `AT_CAPACITY` when the fleet is already full, as `AT_QUOTA` when the
 proxy account the task's profile launches through has nothing left to spend,
-or as `ALREADY_DISPATCHED` when this daemon is driving it; `UNSUPPORTED` as
+as `WORKERS_DIED` when two workers have already died on that task, or as
+`ALREADY_DISPATCHED` when this daemon is driving it; `UNSUPPORTED` as
 `NO_BASE_PANE` when there is nowhere to put a worker; `NOT_FOUND` when no
 board has it; `USAGE` when no task was named; and `UNAVAILABLE` when the board
 itself could not be read.
@@ -133,7 +144,10 @@ proxy, what the serving account has spent, which carries the refusal a codex
 worker would meet right now in the words `dispatch` would use. Run it first:
 a refusal is usually one of those.
 
-Three of its lines answer questions a caller asks often. The `gate` line says
+Four of its lines answer questions a caller asks often. A `died` line names
+every task nothing will dispatch again because the workers put on it kept
+dying — the same `workers_died` list the JSON carries — and it is the only
+place a ready task that never moves explains itself. The `gate` line says
 what is waiting on the operator, and it counts twice: `parked` is the board the
 call named, `parked_everywhere` is the whole daemon, so a project with nothing
 parked still shows a decision waiting on another one. The `worker` line names
@@ -196,8 +210,9 @@ hdis events --follow                 hdis events --limit 20 --json
 ```
 
 `events` is the trail of what this dispatcher did: a task reserved or given
-back, a worker spawned, adopted, prompted, retired or gone, review announced,
-a call the policy gate parked. It is what answers "what happened last night"
+back, a worker spawned, adopted, prompted, retired, gone or died — died being
+the agent going while its pane stayed — review announced, a call the policy
+gate parked. It is what answers "what happened last night"
 without reading the daemon log.
 
 Board facts are **not** here. A task claimed, submitted, approved or rejected

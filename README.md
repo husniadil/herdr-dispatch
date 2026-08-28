@@ -307,8 +307,9 @@ first word of the message, so nothing a caller could branch on before is lost:
 `USAGE` when no task was named; `CONFLICT` as `NOT_READY` when the board will
 not hand the task out, as `AT_CAPACITY` when `--max-workers` are already live
 or reserved, as `AT_QUOTA` when the task would launch through the proxy and
-the account it routes through has nothing left to spend, or as
-`ALREADY_DISPATCHED` when this daemon is already driving it; `UNSUPPORTED` as `NO_BASE_PANE` when there is nowhere to put a worker;
+the account it routes through has nothing left to spend, as `WORKERS_DIED`
+when two workers have already died on the task with their panes left alive, or
+as `ALREADY_DISPATCHED` when this daemon is already driving it; `UNSUPPORTED` as `NO_BASE_PANE` when there is nowhere to put a worker;
 `NOT_FOUND` when the board has no such task; and `UNAVAILABLE` when the board
 itself could not be read. The exit status is the one §6.3 fixes for the code —
 2, 3, 4, 6, 7 and the rest — and with `--json` a failure is exactly one
@@ -354,7 +355,8 @@ answer is not cached and the next verb asks again.
 
 `hdis dump --json` prints everything this daemon remembers across restarts in
 one document (§5.8): the bindings, the reservations no tick has spawned for
-yet, the parked actions, decided ones included, and the event trail. It is the daemon's own
+yet, the parked actions, decided ones included, the event trail, and how often
+a worker's agent has died on each task. It is the daemon's own
 live set rather than a re-read of the file, so it is what the next save will
 write, and the document names the file so a reader who wants it without this
 binary knows where to look.
@@ -389,6 +391,7 @@ The names are `dispatch.<entity>.<kind>`:
 | `dispatch.worker.prompt_refused`     | A condition did not fit its budget, so nothing was sent   |
 | `dispatch.worker.retired`            | This dispatcher closed a worker's pane                    |
 | `dispatch.worker.gone`               | A worker's pane disappeared and its binding was dropped   |
+| `dispatch.worker.died`               | A worker's agent died while its pane stayed alive         |
 | `dispatch.parked.deferred`           | The policy gate parked a call (§9.3)                      |
 | `dispatch.parked.resolved`           | A parked call was decided, either way, by the actor named |
 | `dispatch.parked.failed`             | A resolved call's verb then errored, by the same actor    |
@@ -1259,8 +1262,9 @@ claims. They are written to `<state_dir>/dispatch-bindings.json` on every change
 and taken back at the next start.
 
 **What is persisted.** Only what is not derivable: the pane, the task id, the
-time the goal was delivered, the prompt count, and whether review was
-announced. Board facts — status, claim, lease, evidence — are read from the
+time the goal was delivered, the prompt count, whether review was announced,
+and — per task rather than per pane — how often a worker's agent has died on
+it. Board facts — status, claim, lease, evidence — are read from the
 board every tick, and pane facts from Herdr; neither is written here.
 
 An on-demand dispatch's reservation is persisted beside them, and it carries
@@ -1413,6 +1417,60 @@ Two smaller truths about a restart:
 - The settings file a spawn wrote for a pane is remembered in memory only. A
   re-adopted pane retired after a restart is closed, and its settings file is
   left in the temp dir for the operating system to clear.
+
+## When a worker's agent dies
+
+A pane that disappears ends its worker: the core unbinds it, the board's own
+sweep returns the task, and there is nothing left to decide. **An agent that
+dies inside a pane that stays alive ends nothing at all** — Herdr still lists
+the pane, so nothing unbinds it, and every tick re-delivers a nudge that comes
+back `agent_not_found`. Measured on a live box, that repeated forever: the
+task stayed claimed, no lease was released, `doctor` and `status` both said
+the fleet was healthy, and the worker slot was spent on a pane with nobody in
+it.
+
+`agent_not_found` is now counted. **Three of them in a row on the same pane,
+with no prompt landing in between, declare the worker dead**, and a prompt
+that goes through starts the count again — one refusal is a pane mid-restart
+or an agent Herdr has not registered yet, and a worker dropped on the first of
+them is a live worker's task handed away. On the third:
+
+- The pane is retired through the same teardown a cancelled task uses, and the
+  binding goes with its checkout.
+- **That retire is what hands the task back**, through htask's own pane-gone
+  sweep (§11.5): the pane closes, the sweep releases the claim as `swept` with
+  its own note, and the lease timer sits behind it. Nothing is said to the
+  board from here. htask releases a row to its holder or to the operator, and
+  the holder of a dead worker's task is that worker's own `agent:<pane>`, so a
+  release under this plugin's principal is refused every time — it would be a
+  call that always fails carrying a note nobody ever reads.
+- `dispatch.worker.died` lands on the trail, carrying the task, the pane, the
+  refusals it took and the task's running death count. The reason lives there
+  because that is the only place it can: the board's sweep can say a pane
+  exited and no more, and only this daemon saw the agent stop answering while
+  its pane stayed up.
+
+**The count is per task, and it outlives every worker it counts.** A binding
+is about a pane and goes when the pane does; this is what the TASK carries
+into the next worker it would be given, so it is persisted beside the bindings
+and comes back with them. At `2` the task stops being handed panes: the
+watching loop passes over it, `hdis dispatch` on it refuses with
+`CONFLICT: WORKERS_DIED` naming the count, and `hdis doctor` lists it under
+`workers_died` — because a task quietly skipped every tick is the same silence
+this whole rule exists to end. `hdis status` carries the count on a worker's
+row, so an operator reading the second attempt is told about the first.
+
+**Only the board clears it.** The count is a record of workers dying and not a
+verdict on the task, so a release with a note or an amendment BY ANYBODY ELSE
+forgets it. The pane-gone sweep that returned the task does not: it is `swept`
+rather than `released`, and it is this daemon's own retire coming back under
+another name — counting it would clear every death on the tick that counted
+it. That is read off htask's own event trail rather than off the row:
+a row says when it last changed and not who changed it or how, so a count
+cleared from the row alone would be cleared by the very next worker claiming
+it. This daemon's own release — the one it makes when it counts the death — is
+filtered out by its actor, and the trail is only read at all when something is
+counted, so a fleet losing no workers pays no board call for the rule.
 
 ## The boundary
 

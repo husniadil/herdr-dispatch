@@ -77,6 +77,7 @@ case "$1" in
   esac ;;
 "goal") cat "$HDIS_FAKE_DIR/goal.txt" ;;
 "release") echo '{"released":true}' ;;
+"events") cat "$HDIS_FAKE_DIR/events.json" 2>/dev/null || echo '{"events":[],"count":0}' ;;
 "doctor "*|"doctor") cat "$HDIS_FAKE_DIR/doctor.json" ;;
 *) echo "htask: this fake board does not serve '$1' (task verbs are top-level: 'get', not 'task get')" >&2; exit 1 ;;
 esac`

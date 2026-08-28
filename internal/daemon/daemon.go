@@ -322,6 +322,7 @@ func (d *Daemon) serve(ctx context.Context, v verbs.Verb, req protocol.Request) 
 			Reservations: append([]store.Reservation{}, held.Reservations...),
 			Parked:       append([]store.Parked{}, held.Parked...),
 			Events:       append([]store.Event{}, held.Events...),
+			Deaths:       append([]store.Death{}, held.Deaths...),
 		}
 		return encode(rep, nil)
 	case "events":
@@ -395,6 +396,13 @@ type DoctorReport struct {
 	// kept on purpose: a rejection carries on in the same pane.
 	AwaitingReview int `json:"awaiting_review"`
 	Pending        int `json:"pending"`
+	// WorkersDied is every task this daemon will not dispatch again
+	// because the workers put on it kept dying with their panes alive. It
+	// is the answer to the question an operator asks when a board with
+	// ready work stops moving and nothing else here says anything is
+	// wrong, and it is spelled the way the refusal a dispatch by name
+	// answers with is spelled.
+	WorkersDied []loop.DeadTask `json:"workers_died"`
 	// Bindings is the file the pane-to-task mapping is kept in, and
 	// Readopted is how many of them this daemon took back when it started.
 	Bindings  string `json:"bindings"`
@@ -629,6 +637,7 @@ func (d *Daemon) doctor(ctx context.Context, req protocol.Request) (DoctorReport
 		Workers:        len(d.Loop.Bindings()),
 		AwaitingReview: d.Loop.AwaitingReview(),
 		Pending:        len(d.Loop.Pending()),
+		WorkersDied:    d.Loop.WorkersDied(),
 		Bindings:       d.Loop.BindingsPath(),
 		Log:            d.LogPath,
 		Readopted:      d.Loop.Readopted(),
@@ -990,6 +999,11 @@ type DumpReport struct {
 	// whole store" includes it: a reader who wants the document without
 	// this binary should not have to know that one list was held back.
 	Events []store.Event `json:"events"`
+	// Deaths is how often a worker's agent has died on each task. It is
+	// part of the store for the same reason the trail is — §5.8 is the
+	// WHOLE store — and it is the one list here a reader cannot rebuild
+	// from the board and Herdr.
+	Deaths []store.Death `json:"deaths"`
 }
 
 // parkedOn is §4.4's scope for `parked.list`: a parked action is resolved

@@ -139,6 +139,12 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 		if line := accountsLane(rep.Proxy); line != "" {
 			fmt.Fprintf(out, "  accounts    %s\n", line)
 		}
+		// The same rule, for the same reason: a fleet that has lost no
+		// worker has nothing here. When it has, this is the only line
+		// that says why a ready task is sitting still.
+		if line := diedLane(rep.WorkersDied); line != "" {
+			fmt.Fprintf(out, "  died        %s\n", line)
+		}
 		fmt.Fprintf(out, "  layout      min_pane_columns %d, max_panes_per_tab %d per task\n",
 			rep.MinPaneColumns, rep.MaxPanesPerTab)
 		// Every worker is launched with --strict-mcp-config against this
@@ -189,6 +195,13 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 			title := w.Title
 			if w.AwaitingReview {
 				title += "  (" + HeldPhrase + ")"
+			}
+			if w.Deaths > 0 {
+				// Said on the row because it is a fact about the task
+				// this worker is the next attempt at, and an operator
+				// reading a second worker on the same task is owed the
+				// first one's ending.
+				title += fmt.Sprintf("  (%d worker agent(s) died here before)", w.Deaths)
 			}
 			fmt.Fprintf(out, "#%-4d %-10s %-8s %-10s %-10s %-23s prompted %s x%d notified=%t  %s\n",
 				w.Seq, w.Pane, or(w.Tab, "-"), or(state, "unknown"), or(w.Profile, "-"), branch,
@@ -380,6 +393,26 @@ func accountsLane(p daemon.ProxyHealth) string {
 	}
 	return strings.Join(named, ", ") +
 		", which " + or(p.Binary, "proxenos") + " does not hold: its worker is refused at launch and again at the turn"
+}
+
+// diedLane is the tasks nothing will dispatch again, as one line: the number
+// an operator reads, the count that held it back, and what ends the hold.
+// Empty when nothing is held back, so the line is absent rather than
+// reassuring.
+func diedLane(held []loop.DeadTask) string {
+	if len(held) == 0 {
+		return ""
+	}
+	named := make([]string, 0, len(held))
+	for _, t := range held {
+		name := t.TaskID
+		if t.Seq > 0 {
+			name = fmt.Sprintf("#%d", t.Seq)
+		}
+		named = append(named, fmt.Sprintf("%s has lost %d worker agent(s)", name, t.Deaths))
+	}
+	return strings.Join(named, ", ") +
+		": no more are spent on them until somebody releases or amends the row"
 }
 
 // quotaLane is the proxy's quota as one line: what the account has spent
