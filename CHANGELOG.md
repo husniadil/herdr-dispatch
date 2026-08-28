@@ -5,7 +5,7 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
-## Unreleased
+## 0.8.0 — 2026-08-28
 
 **Fixed: a worker whose agent dies in a pane that stays alive is ended, and
 its task is not handed worker after worker.** Herdr keeps listing a pane whose
