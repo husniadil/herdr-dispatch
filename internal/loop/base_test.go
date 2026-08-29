@@ -69,25 +69,78 @@ func TestAdoptingABaseSkipsAPaneAlreadyBoundToATask(t *testing.T) {
 // Herdr with nothing to adopt leaves the daemon exactly as it was: still
 // pane-less, still saying so, and free to ask again on the next tick.
 func TestABaseIsNotAdoptedWhenHerdrHasNoPaneToOffer(t *testing.T) {
-	l, _ := newLoop(t)
+	l, f := newLoop(t)
 	l.BasePane = ""
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[]}}`)
 
 	if got := l.EnsureBase(context.Background()); got != "" {
 		t.Fatalf("EnsureBase() = %q, want empty", got)
 	}
 }
 
-// A daemon that inherited a pane keeps it. The operator's own answer is not
-// re-decided every tick, and Herdr is not asked at all.
-func TestADaemonThatAlreadyHasABaseAdoptsNothing(t *testing.T) {
+// A daemon that inherited a live pane keeps it. Herdr is asked whether the
+// pane is still there — that is the one question — and never asked which pane
+// would be better: the operator's own answer is not re-decided every tick.
+func TestADaemonWhoseBasePaneIsStillLiveKeepsIt(t *testing.T) {
 	l, f := newLoop(t)
 
 	if got, want := l.EnsureBase(context.Background()), "wM:p1"; got != want {
 		t.Fatalf("EnsureBase() = %q, want %q", got, want)
 	}
-	if got := calls(t, f, "pane list"); len(got) != 0 {
-		t.Fatalf("a daemon with a base asked herdr anyway: %v", got)
+	if got := calls(t, f, "tab list"); len(got) != 0 {
+		t.Fatalf("a daemon with a live base went looking for another one: %v", got)
 	}
+}
+
+// The failure this exists for, measured on 2026-08-29: a worker in bypass mode
+// ran `herdr workspace close w3`, taking this daemon's own base pane with it,
+// and hdis went on reporting `base_pane w3:p1` while `herdr pane list` had no
+// w3 at all. Nothing refused — the base is only read for the workspace a
+// worker's tab opens in — so every spawn after that landed wherever Herdr
+// chose, and the recorded base and the pane placement used were two different
+// answers.
+func TestABasePaneHerdrNoLongerHoldsIsReplaced(t *testing.T) {
+	l, f := newLoop(t)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[`+
+		`{"pane_id":"w9:p4","workspace_id":"w9","tab_id":"w9:t1","agent_status":"idle"}]}}`)
+
+	if got, want := l.EnsureBase(context.Background()), "w9:p4"; got != want {
+		t.Fatalf("EnsureBase() = %q, want %q: the base that is gone was kept", got, want)
+	}
+	if got, want := l.Base(), "w9:p4"; got != want {
+		t.Fatalf("Base() = %q, want %q: the replacement did not stick", got, want)
+	}
+}
+
+// And a base with nothing to replace it is dropped rather than kept: a pane id
+// Herdr does not hold is not an address, and dispatch refusing by name is a
+// better answer than a placement nobody can see.
+func TestABasePaneHerdrNoLongerHoldsIsDroppedWhenNothingCanReplaceIt(t *testing.T) {
+	l, f := newLoop(t)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[]}}`)
+
+	if got := l.EnsureBase(context.Background()); got != "" {
+		t.Fatalf("EnsureBase() = %q, want empty", got)
+	}
+	if got := l.Base(); got != "" {
+		t.Fatalf("Base() = %q, want empty: a pane herdr does not hold was kept as the base", got)
+	}
+}
+
+// A Herdr that cannot be reached is not a pane that is gone. Dropping a live
+// base on an unreadable pane list would refuse every dispatch until Herdr
+// answered again, which is a failure this daemon invents for itself.
+func TestAnUnreadablePaneListLeavesTheBaseExactlyAsItWas(t *testing.T) {
+	l, f := newLoop(t)
+	f.Bin(t, "herdr", `echo "herdr is down" >&2; exit 1`)
+
+	if got, want := l.EnsureBase(context.Background()), "wM:p1"; got != want {
+		t.Fatalf("EnsureBase() = %q, want %q", got, want)
+	}
+	if got, want := l.Base(), "wM:p1"; got != want {
+		t.Fatalf("Base() = %q, want %q", got, want)
+	}
+	_ = f
 }
 
 // The refusal is the last word, not the first: a dispatch on a pane-less
@@ -109,8 +162,9 @@ func TestDispatchAdoptsABaseRatherThanRefusingWhenHerdrHasOne(t *testing.T) {
 // And when there is nothing to adopt the refusal is unchanged, with the same
 // name a caller could read before.
 func TestDispatchStillRefusesWhenThereIsNoPaneToAdopt(t *testing.T) {
-	l, _ := newLoop(t)
+	l, f := newLoop(t)
 	l.BasePane = ""
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[]}}`)
 
 	_, err := l.Dispatch(context.Background(), "7", "")
 	if got, want := codes.ReasonOf(err), codes.NoBasePane; got != want {

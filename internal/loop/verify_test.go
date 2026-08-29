@@ -1,6 +1,7 @@
 package loop
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log"
@@ -130,7 +131,10 @@ func splits(t *testing.T, f *testenv.Fake) [][]string {
 // pane renders a pane list herdr would answer with, one entry per id/status
 // pair given.
 func paneList(entries ...string) string {
-	var rows []string
+	// The daemon's own base pane leads the list. Every loop in this package
+	// is built with wM:p1 as its base, and a base herdr does not list is a
+	// base this daemon drops and re-adopts — see Loop.EnsureBase.
+	rows := []string{`{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"idle"}`}
 	for i := 0; i+1 < len(entries); i += 2 {
 		rows = append(rows, `{"pane_id":"`+entries[i]+`","name":"n","agent":"claude","agent_status":"`+entries[i+1]+
 			`","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}`)
@@ -190,6 +194,7 @@ enabled = true
 		Store:     &store.Bindings{Path: filepath.Join(t.TempDir(), "dispatch-bindings.json")},
 		BasePane:  "wM:p1",
 		Now:       func() time.Time { return clock },
+		Sleep:     func(time.Duration) {},
 		Log:       log.New(io.Discard, "", 0),
 	}
 	return l, f, project
@@ -609,5 +614,45 @@ func TestAPromptedGoalOverItsBudgetIsNotDelivered(t *testing.T) {
 	// has no measured ceiling to clamp against.
 	if err := promptBudget(strings.Repeat("x", spawn.PromptedGoalBudget*2), decide.ReasonStalled); err != nil {
 		t.Errorf("a plain nudge was clamped against a ceiling that is not its own: %v", err)
+	}
+}
+
+// A pane that is gone leaves a claim behind, and the operator is owed the
+// reason it is still there.
+//
+// The claimant on the row is that pane's own `agent:<pane>` principal, and
+// htask refuses this daemon both ways past it — measured against htask 0.9.1
+// (contract 0.10.1) on 2026-08-29, `release --as plugin:hdis@…` answers
+// FORBIDDEN "only the holder may release it" and `sweep --pane --as
+// plugin:hdis@…` answers FORBIDDEN "that pane or the operator releases them".
+// So this daemon cannot hand the task back itself, and the one thing it can do
+// is say so rather than leave a task sitting in `doing` behind a pane that no
+// longer exists with nothing anywhere explaining it.
+func TestAGonePaneSaysWhoStillHoldsItsClaim(t *testing.T) {
+	l, f, _ := newVerifyLoop(t, true)
+	var said bytes.Buffer
+	l.Log = log.New(&said, "", 0)
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
+	f.Write(t, "panes.json", paneList()) // the worker's pane is gone
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+
+	for _, want := range []string{"pane wM:p9 is gone", "agent:wM:p9", "only that pane or the operator"} {
+		if !strings.Contains(said.String(), want) {
+			t.Errorf("the log does not say %q:\n%s", want, said.String())
+		}
+	}
+	var named bool
+	for _, ev := range l.Dump().Events {
+		if ev.Kind == KindGone && ev.Detail["claim_held_by"] == "agent:wM:p9" {
+			named = true
+		}
+	}
+	if !named {
+		t.Errorf("the trail does not name who still holds the claim: %+v", l.Dump().Events)
 	}
 }

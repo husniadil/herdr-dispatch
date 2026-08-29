@@ -117,7 +117,7 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 		fmt.Fprintf(out, "  principal   %s\n", rep.Principal)
 		fmt.Fprintf(out, "  state dir   %s\n", rep.StateDir)
 		fmt.Fprintf(out, "  config dir  %s\n", rep.ConfigDir)
-		fmt.Fprintf(out, "  base pane   %s\n", or(rep.BasePane, "none yet: one is adopted when a live pane can be, and until then nothing is spawned and dispatch refuses"))
+		fmt.Fprintf(out, "  base pane   %s%s\n", or(rep.BasePane, "none yet: one is adopted when a live pane can be, and until then nothing is spawned and dispatch refuses"), basePaneNote(rep))
 		fmt.Fprintf(out, "  workers     %d live%s, %d reserved, max %d\n",
 			rep.Workers, held(rep.AwaitingReview), rep.Pending, rep.MaxWorkers)
 		fmt.Fprintf(out, "  tick        every %s\n", rep.Interval)
@@ -517,6 +517,19 @@ func quotaLane(q daemon.QuotaHealth) string {
 		return spent + ": no codex worker is spawned, because " + q.Refusal
 	}
 	return spent
+}
+
+// basePaneNote is what doctor adds beside a base pane Herdr no longer holds.
+// A dead pane printed as though it were the answer is what an operator read
+// on 2026-08-29 while `herdr pane list` had no such workspace at all.
+func basePaneNote(rep daemon.DoctorReport) string {
+	switch {
+	case rep.BasePaneGone:
+		return " (gone: herdr no longer holds it, so one is re-adopted on the next tick and worker tabs open wherever herdr chooses until then)"
+	case rep.BasePaneUnknown:
+		return " (herdr could not be asked whether it is still there)"
+	}
+	return ""
 }
 
 func or(s, fallback string) string {

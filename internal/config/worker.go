@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // WorkerMCPFile is the default document's name, under the state dir.
@@ -119,4 +120,109 @@ func EnsureWorkerMCPConfig(path string) error {
 		return fmt.Errorf("worker mcp config %s: %w", path, err)
 	}
 	return nil
+}
+
+// WorkerDeniedBash are the shell commands no worker of this dispatcher may
+// run, whatever permission mode it is in.
+//
+// The failure they exist for, measured on 2026-08-29: a worker given a vague
+// task in the Herdr checkout, running in `bypassPermissions`, ran
+// `herdr workspace close w3`. That closed this daemon's own base pane, another
+// task's live worker and a whole workspace — one command, three losses, and
+// nothing in the task asked for any of them.
+//
+// Deny is the only rule shape that reaches a bypass-mode worker. Claude Code's
+// own documentation is explicit about it: "Deny rules block in every mode,
+// including bypassPermissions. Allow rules have no effect in
+// bypassPermissions" (code.claude.com/docs/en/permission-modes, read
+// 2026-08-29), and deny is evaluated before ask and allow at every scope, so
+// nothing a profile or a project settings file says can hand one back.
+//
+// The verbs are the destructive half of `herdr --help` as it stands on herdr
+// 0.8.2, and they are denied because none of them is a worker's to run: the
+// panes, tabs and workspaces a worker lives in are this daemon's to open and
+// retire, the server and the session belong to the operator, and the worktrees
+// are handed out and reaped here. A worker that believes it needs one of these
+// is a worker that should say so in its report.
+//
+// The `*` sits AFTER the subcommand, which is what bounds each rule to the
+// verb it names: Claude Code matches everything before the first `*` as
+// written. `Bash(herdr server*)` covers the bare `herdr server` as well as its
+// subcommands, which is deliberate — a worker starting a second headless
+// server is its own outage.
+var WorkerDeniedBash = []string{
+	"Bash(herdr workspace close*)",
+	"Bash(herdr tab close*)",
+	"Bash(herdr pane close*)",
+	"Bash(herdr pane move*)",
+	"Bash(herdr pane swap*)",
+	"Bash(herdr worktree remove*)",
+	"Bash(herdr session stop*)",
+	"Bash(herdr session delete*)",
+	"Bash(herdr server*)",
+	"Bash(herdr update*)",
+	"Bash(herdr config reset-keys*)",
+}
+
+// WorkerSettings is the `--settings` document a worker is launched with: the
+// launcher's own document with this dispatcher's deny rules spliced into it.
+//
+// The launcher's half is passed in whole and never rewritten — a codex spawn's
+// document already carries `permissions.deny` of its own, and dropping an
+// entry of it here would silently undo a rule somebody else set. The two lists
+// are merged, ours added only where it is not already there, so the result is
+// the same document however many times it is composed.
+//
+// An empty document is the claude provider, which has no launcher half. It
+// still gets a settings file, because the rules are about what a WORKER may do
+// and not about how it is routed.
+//
+// The result is one line. herdr refuses an agent argument containing a
+// newline, and the path this document is written to travels on a line herdr
+// types into the pane.
+func WorkerSettings(launcher string) (string, error) {
+	root := map[string]json.RawMessage{}
+	if doc := strings.TrimSpace(launcher); doc != "" {
+		if err := json.Unmarshal([]byte(doc), &root); err != nil {
+			return "", fmt.Errorf("worker settings: the launcher's document is not a JSON object: %w", err)
+		}
+	}
+	perms := map[string]json.RawMessage{}
+	if raw, ok := root["permissions"]; ok {
+		if err := json.Unmarshal(raw, &perms); err != nil {
+			return "", fmt.Errorf("worker settings: the launcher's document has a `permissions` that is not an object: %w", err)
+		}
+	}
+	var deny []string
+	if raw, ok := perms["deny"]; ok {
+		if err := json.Unmarshal(raw, &deny); err != nil {
+			return "", fmt.Errorf("worker settings: the launcher's document has a `permissions.deny` that is not a list of rules: %w", err)
+		}
+	}
+	have := make(map[string]bool, len(deny))
+	for _, rule := range deny {
+		have[rule] = true
+	}
+	for _, rule := range WorkerDeniedBash {
+		if !have[rule] {
+			deny = append(deny, rule)
+			have[rule] = true
+		}
+	}
+
+	denyDoc, err := json.Marshal(deny)
+	if err != nil {
+		return "", fmt.Errorf("worker settings: %w", err)
+	}
+	perms["deny"] = denyDoc
+	permsDoc, err := json.Marshal(perms)
+	if err != nil {
+		return "", fmt.Errorf("worker settings: %w", err)
+	}
+	root["permissions"] = permsDoc
+	out, err := json.Marshal(root)
+	if err != nil {
+		return "", fmt.Errorf("worker settings: %w", err)
+	}
+	return string(out), nil
 }

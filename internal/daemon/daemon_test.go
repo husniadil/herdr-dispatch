@@ -91,7 +91,7 @@ func newDaemon(t *testing.T) (*Daemon, *testenv.Fake) {
 	f.Write(t, "ready.json", `{"tasks":[{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"todo"}],"count":1}`)
 	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"todo"}}`)
 	f.Write(t, "doctor.json", `{"version":"0.4.0","contract":"0.3","binary":"/bin/htask","socket_live":true,"herdr_reachable":true}`)
-	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[]}}`)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"idle"}]}}`)
 	f.Write(t, "screen.txt", "⎿  Goal set: do the thing\n  ◎ /goal active\n")
 	f.Write(t, "agentget.json", `{"id":"x","result":{"type":"agent_info","agent":{"pane_id":"wM:p9","agent_status":"idle","interactive_ready":true,"revision":1}}}`)
 
@@ -329,8 +329,9 @@ func TestDispatchOverTheSocketAnswersWithAReservation(t *testing.T) {
 
 func TestDispatchRefusesWithTheCodeTheLoopGave(t *testing.T) {
 	stateDir(t)
-	d, _ := newDaemon(t)
+	d, f := newDaemon(t)
 	d.Loop.BasePane = ""
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[]}}`)
 
 	_, err := call(t, d, protocol.Request{Verb: "dispatch", Args: map[string]any{"task": "7"}})
 	if got, want := codes.ReasonOf(err), codes.NoBasePane; got != want {
@@ -469,8 +470,9 @@ func TestServeAnswersOnTheSocketAndStopsWithItsContext(t *testing.T) {
 // connection.
 func TestARefusalTravelsAsANamedCode(t *testing.T) {
 	stateDir(t)
-	d, _ := newDaemon(t)
+	d, f := newDaemon(t)
 	d.Loop.BasePane = ""
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[]}}`)
 	ln, err := Listen()
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -501,6 +503,7 @@ func TestADaemonWithNoBasePaneDoesNotTick(t *testing.T) {
 	stateDir(t)
 	d, f := newDaemon(t)
 	d.Loop.BasePane = ""
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[]}}`)
 	ln, err := Listen()
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -540,6 +543,7 @@ func TestAPaneLessDaemonAdoptsABaseAndStartsTicking(t *testing.T) {
 	stateDir(t)
 	d, f := newDaemon(t)
 	d.Loop.BasePane = ""
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[]}}`)
 	d.Interval = 20 * time.Millisecond
 	ln, err := Listen()
 	if err != nil {
@@ -712,7 +716,7 @@ func TestStopEndsTheTick(t *testing.T) {
 // took back, which is the only place an operator can see either.
 func TestDoctorSaysWhereTheBindingsLiveAndHowManyCameBack(t *testing.T) {
 	d, f := newDaemon(t)
-	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9","agent":"claude","agent_status":"working","revision":1}]}}`)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"idle"},{"pane_id":"wM:p9","agent":"claude","agent_status":"working","revision":1}]}}`)
 	if err := d.Loop.Store.Save(store.State{Bindings: []decide.Binding{{
 		TaskID: "01AAA", Pane: "wM:p9", PromptedAt: time.Now().UTC(), Prompts: 1,
 	}}}); err != nil {
@@ -1368,5 +1372,68 @@ account = "personal-codex"
 	}
 	if !strings.Contains(rep.Proxy.AccountsError, "could not be opened") {
 		t.Fatalf("doctor says why it could not check: %q", rep.Proxy.AccountsError)
+	}
+}
+
+// The base pane doctor prints must be one Herdr still holds.
+//
+// Measured on 2026-08-29: a worker running in bypass mode ran
+// `herdr workspace close w3`, which took this daemon's own base pane with it,
+// and doctor went on answering `base_pane w3:p1` while `herdr pane list` had
+// no w3 at all. Nothing refused, because the base is only read for the
+// workspace a worker's tab opens in — so every spawn after that landed
+// wherever Herdr chose, and the one line an operator would have checked said
+// the daemon was fine.
+func TestDoctorSaysWhenTheBasePaneIsGone(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		herdr         string
+		gone, unknown bool
+	}{
+		{"live", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"idle"}]}}`, false, false},
+		{"gone", `{"id":"x","result":{"type":"pane_list","panes":[]}}`, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, f := newDaemon(t)
+			f.Write(t, "panes.json", tc.herdr)
+
+			var rep DoctorReport
+			raw, err := call(t, d, protocol.Request{Verb: "doctor"})
+			if err != nil {
+				t.Fatalf("doctor: %v", err)
+			}
+			if err := json.Unmarshal(raw, &rep); err != nil {
+				t.Fatalf("doctor json: %v", err)
+			}
+			if rep.BasePane != "wM:p1" {
+				t.Fatalf("doctor says the base pane is %q, want wM:p1", rep.BasePane)
+			}
+			if rep.BasePaneGone != tc.gone || rep.BasePaneUnknown != tc.unknown {
+				t.Fatalf("doctor reports gone=%v unknown=%v, want gone=%v unknown=%v",
+					rep.BasePaneGone, rep.BasePaneUnknown, tc.gone, tc.unknown)
+			}
+		})
+	}
+}
+
+// A Herdr that could not be asked is not a pane that is gone, and doctor never
+// prints one as the other.
+func TestDoctorSeparatesABasePaneItCouldNotAskAboutFromOneThatIsGone(t *testing.T) {
+	d, f := newDaemon(t)
+	f.Bin(t, "herdr", `echo "herdr is down" >&2; exit 1`)
+
+	raw, err := call(t, d, protocol.Request{Verb: "doctor"})
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+	var rep DoctorReport
+	if err := json.Unmarshal(raw, &rep); err != nil {
+		t.Fatalf("doctor json: %v", err)
+	}
+	if rep.BasePaneGone {
+		t.Error("doctor called the base pane gone on a herdr that never answered")
+	}
+	if !rep.BasePaneUnknown {
+		t.Error("doctor did not say the base pane could not be checked")
 	}
 }

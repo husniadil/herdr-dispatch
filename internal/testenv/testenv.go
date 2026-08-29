@@ -5,11 +5,51 @@
 package testenv
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// RunIsolated runs one package's tests with the operator's own home, state and
+// config directories replaced by a temporary one, and returns the code
+// TestMain should exit with:
+//
+//	func TestMain(m *testing.M) { os.Exit(testenv.RunIsolated(m)) }
+//
+// It is TestMain rather than a per-test helper because the directory a case
+// writes is not always a directory the case names. config.StateDir() reads the
+// environment wherever it is called from, so a spawn that mentions no path at
+// all still resolves the operator's own — measured on 2026-08-29, where a unit
+// test's default worker MCP document landed in the live
+// ~/.local/state/dispatch/worker.mcp.json naming a `htask` inside a t.TempDir
+// that no longer existed, and every worker spawned on that machine afterwards
+// had a dead tasks door.
+//
+// The whole home moves rather than only the two XDG names, because the fallback
+// under them is the home directory itself. config.StateDir refuses to resolve
+// under the real home inside a test binary, so a package that reaches it
+// without this fails loud instead of writing.
+func RunIsolated(m *testing.M) int {
+	dir, err := os.MkdirTemp("", "hdis-test-home-")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "testenv: no temporary home, so the operator's own would be used: %v\n", err)
+		return 1
+	}
+	defer os.RemoveAll(dir)
+	for name, value := range map[string]string{
+		"HOME":            dir,
+		"XDG_STATE_HOME":  filepath.Join(dir, "state"),
+		"XDG_CONFIG_HOME": filepath.Join(dir, "config"),
+	} {
+		if err := os.Setenv(name, value); err != nil {
+			fmt.Fprintf(os.Stderr, "testenv: %s could not be moved off the operator's own: %v\n", name, err)
+			return 1
+		}
+	}
+	return m.Run()
+}
 
 // Fake is one directory of stand-in binaries, first on PATH for the test that
 // made it. Scripts find it again as $HDIS_FAKE_DIR.

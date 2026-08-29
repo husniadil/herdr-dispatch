@@ -385,12 +385,25 @@ type DoctorReport struct {
 	// taking effect needs to know WHICH pair of directories this daemon
 	// resolved, and the environment that decides them is the daemon's, not
 	// the caller's.
-	StateDir   string `json:"state_dir"`
-	ConfigDir  string `json:"config_dir"`
-	BasePane   string `json:"base_pane"`
-	MaxWorkers int    `json:"max_workers"`
-	Interval   string `json:"interval"`
-	Workers    int    `json:"workers"`
+	StateDir  string `json:"state_dir"`
+	ConfigDir string `json:"config_dir"`
+	BasePane  string `json:"base_pane"`
+	// BasePaneGone says Herdr no longer holds the pane above. It is not a
+	// field an operator should ever have to infer: a base pane closed out
+	// from under this daemon — a worker running `herdr workspace close`
+	// took one on 2026-08-29 — leaves every later worker tab opening
+	// wherever Herdr chooses, and doctor went on printing the dead pane as
+	// though it were the answer. Absent when the base is live, when there
+	// is none, and when Herdr could not be asked; BasePaneUnknown is that
+	// last case.
+	BasePaneGone bool `json:"base_pane_gone,omitempty"`
+	// BasePaneUnknown says Herdr could not be asked whether the base is
+	// still there. A pane list that did not come back is not a pane that is
+	// gone, and doctor never reports one as the other.
+	BasePaneUnknown bool   `json:"base_pane_unknown,omitempty"`
+	MaxWorkers      int    `json:"max_workers"`
+	Interval        string `json:"interval"`
+	Workers         int    `json:"workers"`
 	// AwaitingReview is how many of those workers are holding a slot while
 	// a human decides on what they submitted. They spend nothing and are
 	// kept on purpose: a rejection carries on in the same pane.
@@ -710,6 +723,9 @@ func (d *Daemon) doctor(ctx context.Context, req protocol.Request) (DoctorReport
 		},
 		MinPaneColumns: d.Loop.Config.Layout.MinPaneColumns,
 		MaxPanesPerTab: d.Loop.Config.Layout.MaxPanesPerTab,
+	}
+	if live, known := d.Loop.BaseLive(ctx); rep.BasePane != "" {
+		rep.BasePaneGone, rep.BasePaneUnknown = known && !live, !known
 	}
 	rep.Worker = d.workerHealth()
 	rep.Events = d.eventsHealth()

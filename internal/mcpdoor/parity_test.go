@@ -46,7 +46,7 @@ var pinnedTools = []string{
 
 // inProcessDaemon is a real daemon over a fake board and a fake herdr. No
 // socket: both doors are tested against the same Handle the socket serves.
-func inProcessDaemon(t *testing.T) (*daemon.Daemon, Caller) {
+func inProcessDaemon(t *testing.T) (*daemon.Daemon, Caller, *testenv.Fake) {
 	t.Helper()
 	f := testenv.New(t)
 	f.Bin(t, "htask", `case "$1" in
@@ -54,7 +54,7 @@ func inProcessDaemon(t *testing.T) (*daemon.Daemon, Caller) {
 "get") echo '{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"todo"}}' ;;
 *) echo '{"version":"0.4.0","contract":"0.3","binary":"/bin/htask","socket_live":true,"herdr_reachable":true}' ;;
 esac`)
-	f.Bin(t, "herdr", `echo '{"id":"x","result":{"type":"pane_list","panes":[]}}'`)
+	f.Bin(t, "herdr", `echo '{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"idle"}]}}'`)
 	t.Setenv("HERDR_PANE_ID", "wM:p1")
 
 	cfg, err := config.Parse([]byte(`default = "worker"
@@ -85,7 +85,7 @@ provider = "claude"
 	}
 	return d, func(req protocol.Request) (json.RawMessage, error) {
 		return d.Handle(context.Background(), req)
-	}
+	}, f
 }
 
 // session connects an in-memory MCP client to a door nobody declared, which
@@ -123,7 +123,7 @@ func text(res *mcp.CallToolResult) string {
 
 // The list a caller on another harness binds to. It moves only on purpose.
 func TestTheServedToolListIsPinned(t *testing.T) {
-	_, call := inProcessDaemon(t)
+	_, call, _ := inProcessDaemon(t)
 	sess := session(t, call)
 
 	tools, err := sess.ListTools(context.Background(), nil)
@@ -145,7 +145,7 @@ func TestTheServedToolListIsPinned(t *testing.T) {
 // The parity guard: every verb reaches both doors, under the same name, and
 // neither door carries one the other does not.
 func TestNeitherDoorCarriesAVerbTheOtherLacks(t *testing.T) {
-	_, call := inProcessDaemon(t)
+	_, call, _ := inProcessDaemon(t)
 	sess := session(t, call)
 	tools, err := sess.ListTools(context.Background(), nil)
 	if err != nil {
@@ -178,7 +178,7 @@ func TestNeitherDoorCarriesAVerbTheOtherLacks(t *testing.T) {
 // Same arguments on both doors: the schema is rendered from the same Args the
 // CLI reads its positionals from, and nothing else may appear in it.
 func TestTheSchemaDeclaresExactlyWhatTheCLITakes(t *testing.T) {
-	_, call := inProcessDaemon(t)
+	_, call, _ := inProcessDaemon(t)
 	sess := session(t, call)
 	tools, err := sess.ListTools(context.Background(), nil)
 	if err != nil {
@@ -292,7 +292,7 @@ func TestBothDoorsBuildTheSameRequest(t *testing.T) {
 // The same document reaches both callers: what --json prints is what the tool
 // hands back, byte for byte.
 func TestBothDoorsHandBackTheSameDocument(t *testing.T) {
-	_, call := inProcessDaemon(t)
+	_, call, _ := inProcessDaemon(t)
 
 	fromCLI, err := call(protocol.Request{Verb: "status", Args: map[string]any{}})
 	if err != nil {
@@ -319,8 +319,10 @@ func TestBothDoorsHandBackTheSameDocument(t *testing.T) {
 // A refusal is a tool error carrying the daemon's own code, never a protocol
 // error the caller cannot read.
 func TestARefusalReachesTheCallerAsAToolErrorWithItsCode(t *testing.T) {
-	d, call := inProcessDaemon(t)
+	d, call, f := inProcessDaemon(t)
 	d.Loop.BasePane = ""
+	// And no live pane for it to adopt in place of the one it never had.
+	f.Bin(t, "herdr", `echo '{"id":"x","result":{"type":"pane_list","panes":[]}}'`)
 	sess := session(t, call)
 
 	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{
@@ -356,7 +358,7 @@ func TestARefusalReachesTheCallerAsAToolErrorWithItsCode(t *testing.T) {
 // The door holds itself to the schema it published: an argument no verb
 // declares is refused rather than dropped in silence.
 func TestTheDoorRefusesAnArgumentItsSchemaForbids(t *testing.T) {
-	_, call := inProcessDaemon(t)
+	_, call, _ := inProcessDaemon(t)
 	sess := session(t, call)
 
 	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{
@@ -373,7 +375,7 @@ func TestTheDoorRefusesAnArgumentItsSchemaForbids(t *testing.T) {
 }
 
 func TestARequiredArgumentIsRefusedWhenItIsMissing(t *testing.T) {
-	_, call := inProcessDaemon(t)
+	_, call, _ := inProcessDaemon(t)
 	sess := session(t, call)
 
 	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{Name: "dispatch"})
@@ -402,7 +404,7 @@ func TestTheServerRegistersUnderTheRepositoryAndServesBareVerbs(t *testing.T) {
 // A door is spawned per client session, so it must take nothing from the
 // process that spawned it beyond the pane it was told about.
 func TestTheDoorKeepsNoStateOfItsOwn(t *testing.T) {
-	_, call := inProcessDaemon(t)
+	_, call, _ := inProcessDaemon(t)
 	first := New("0.1.0", call, Options{})
 	second := New("0.1.0", call, Options{})
 	if first == second {
@@ -438,7 +440,7 @@ func TestTheDoorKeepsNoStateOfItsOwn(t *testing.T) {
 // where a caller reads it, which is the verb's own Long — checked here, so a
 // later edit cannot quietly drop the warning while keeping the tool.
 func TestStopIsServedWithItsBlastRadiusStated(t *testing.T) {
-	_, call := inProcessDaemon(t)
+	_, call, _ := inProcessDaemon(t)
 	sess := session(t, call)
 
 	v, ok := verbs.ByName("stop")
@@ -476,7 +478,7 @@ func TestStopIsServedWithItsBlastRadiusStated(t *testing.T) {
 // --all-projects become are injected into every tool's schema, so a caller on
 // MCP can narrow to one board the way a caller on the CLI can.
 func TestEveryToolTakesTheScopeArguments(t *testing.T) {
-	_, call := inProcessDaemon(t)
+	_, call, _ := inProcessDaemon(t)
 	sess := session(t, call)
 	tools, err := sess.ListTools(context.Background(), nil)
 	if err != nil {
@@ -536,7 +538,7 @@ func TestAnExplicitProjectIsResolvedInTheMCPDoor(t *testing.T) {
 // Naming one board and every board is refused rather than ranked, the same
 // way the CLI refuses --project with --all-projects.
 func TestNamingOneBoardAndEveryBoardIsRefusedOnTheMCPDoor(t *testing.T) {
-	_, call := inProcessDaemon(t)
+	_, call, _ := inProcessDaemon(t)
 	sess := session(t, call)
 	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "status", Arguments: map[string]any{argProject: ".", argAllProjects: true}})
@@ -553,7 +555,7 @@ func TestNamingOneBoardAndEveryBoardIsRefusedOnTheMCPDoor(t *testing.T) {
 // --all-projects — it selects nothing, because every board is already what a
 // call that names no board reads.
 func TestParkedListRefusesEveryBoardOnTheMCPDoor(t *testing.T) {
-	_, call := inProcessDaemon(t)
+	_, call, _ := inProcessDaemon(t)
 	sess := session(t, call)
 	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "parked_list", Arguments: map[string]any{argAllProjects: true}})
@@ -579,7 +581,7 @@ func TestParkedListRefusesEveryBoardOnTheMCPDoor(t *testing.T) {
 // The injected arguments are held to the types the schema publishes, the same
 // way the declared ones are.
 func TestTheScopeArgumentsAreHeldToTheirTypes(t *testing.T) {
-	_, call := inProcessDaemon(t)
+	_, call, _ := inProcessDaemon(t)
 	sess := session(t, call)
 	for _, args := range []map[string]any{
 		{argProject: 7},

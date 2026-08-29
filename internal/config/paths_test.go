@@ -181,3 +181,56 @@ provider = "claude"
 		t.Errorf("BasePaneOr(\"\") = %q, want empty", got)
 	}
 }
+
+// The state directory is where EVERY path this daemon writes lives — the
+// bindings, the worktrees a worker is checked out into, the default worker MCP
+// document, the log, the socket and the lock — so a test that resolves the
+// operator's own is a test that can edit the live fleet.
+//
+// It happened. On 2026-08-29 a unit test's fake `htask`, written into a
+// t.TempDir and put on PATH, was resolved into the operator's live
+// ~/.local/state/dispatch/worker.mcp.json by a spawn that named no path at all,
+// and every worker the laptop brought up afterwards had a tasks door pointing
+// at a binary the test had already deleted.
+//
+// This pins both halves: this package's own TestMain moves the home out of the
+// way, and StateDir refuses the operator's home from a test binary whether or
+// not a package remembered to.
+func TestATestNeverResolvesTheOperatorsOwnStateDir(t *testing.T) {
+	if realHome == "" {
+		t.Skip("this machine has no home directory to protect")
+	}
+	if got := StateDir(); underRoot(got, realHome) {
+		t.Fatalf("StateDir() = %q, inside the operator's own home %s", got, realHome)
+	}
+}
+
+func TestTheStateDirGuardRefusesAPathInTheOperatorsHome(t *testing.T) {
+	if realHome == "" {
+		t.Skip("this machine has no home directory to protect")
+	}
+	if !underTest() {
+		t.Fatal("the guard cannot see that this is a test binary, so it protects nothing")
+	}
+
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Errorf("the guard let %s through", filepath.Join(realHome, ".local", "state", Name))
+			}
+		}()
+		guardOperatorStateDir(filepath.Join(realHome, ".local", "state", Name))
+	}()
+
+	// And a directory of the test's own is exactly what it is for.
+	guardOperatorStateDir(filepath.Join(t.TempDir(), Name))
+}
+
+// A sibling directory whose name merely STARTS with the home's is a different
+// directory, and the guard must not read it as one inside the home.
+func TestTheStateDirGuardComparesDirectoriesRatherThanStrings(t *testing.T) {
+	if realHome == "" {
+		t.Skip("this machine has no home directory to protect")
+	}
+	guardOperatorStateDir(realHome + "-elsewhere")
+}

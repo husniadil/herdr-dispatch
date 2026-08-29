@@ -30,6 +30,7 @@ func restarted(t *testing.T, l *Loop) *Loop {
 		Worktrees: l.Worktrees,
 		BasePane:  l.BasePane,
 		Now:       l.Now,
+		Sleep:     l.Sleep,
 		Log:       log.New(io.Discard, "", 0),
 	}
 	return next
@@ -99,7 +100,7 @@ func TestARestartDropsABindingWhosePaneIsGone(t *testing.T) {
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("tick: %v", err)
 	}
-	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[]}}`)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"idle"}]}}`)
 
 	next := restarted(t, l)
 	var said strings.Builder
@@ -314,7 +315,7 @@ func TestARestartRetiresNoPaneItDidNotStrand(t *testing.T) {
 		}
 		// A second pane herdr lists that this daemon never opened, alongside
 		// the one it did, whose task has finished.
-		f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[`+
+		f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"idle"},`+
 			`{"pane_id":"wM:p9","agent":"claude","agent_status":"idle","focused":false,"revision":1},`+
 			`{"pane_id":"wM:pX","agent":"claude","agent_status":"working","focused":false,"revision":1}]}}`)
 		f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"done"},"ready":false,"dependents":[]}`)
@@ -336,6 +337,10 @@ func TestARestartRetiresNoPaneItDidNotStrand(t *testing.T) {
 			t.Fatalf("tick: %v", err)
 		}
 		f.Write(t, "panes.json", panesWith("working"))
+		// And herdr says the same of the agent inside it, which is what
+		// Adopt asks before it keeps a binding: a pane it took back that
+		// stays idle is a pane a restart brought up without a worker.
+		f.Write(t, "agentget.json", `{"id":"x","result":{"type":"agent_info","agent":{"pane_id":"wM:p9","agent_status":"working","interactive_ready":false,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}}}`)
 		f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"doing","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`)
 
 		next := restarted(t, l)
@@ -402,7 +407,7 @@ func TestARestartTouchesNothingThatIsNotItsOwn(t *testing.T) {
 	t.Run("a pane this daemon never opened", func(t *testing.T) {
 		l, f := newLoop(t)
 		agentsAre(t, f, `{"name":"someone-else","pane_id":"wM:pX","agent":"claude","agent_status":"working"}`)
-		f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[`+
+		f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"idle"},`+
 			`{"pane_id":"wM:pX","agent":"claude","agent_status":"working","focused":false,"revision":1}]}}`)
 		f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
 
@@ -421,7 +426,7 @@ func TestARestartTouchesNothingThatIsNotItsOwn(t *testing.T) {
 		l, f := newLoop(t)
 		l.Board = &htask.Client{Principal: htask.PrincipalFor(l.BasePane)}
 		heldByUs(t, f, htask.PrincipalFor("wM:pZ"))
-		f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[]}}`)
+		f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"idle"}]}}`)
 		f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
 
 		if _, err := l.Adopt(context.Background()); err != nil {
@@ -624,7 +629,7 @@ func TestAPaneWhoseAgentNameHerdrDroppedIsStillAdoptedAndStillRetired(t *testing
 
 			// A live pane with NO name field, which is the whole point, and
 			// an agent list that does not mention it either.
-			f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[`+
+			f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"idle"},`+
 				`{"pane_id":"wM:p9","agent":"claude","agent_status":"working","cwd":"`+tree+
 				`","tab_id":"wM:t9","workspace_id":"wM","focused":false,"revision":1}]}}`)
 			agentsAre(t, f, "")
@@ -668,5 +673,121 @@ func TestAPaneWhoseAgentNameHerdrDroppedIsStillAdoptedAndStillRetired(t *testing
 				t.Fatalf("a nameless pane was closed %d time(s), want %d", got, tc.closed)
 			}
 		})
+	}
+}
+
+// agentGetIs makes herdr's `agent get` answer with one status for the worker
+// pane, which is what Adopt asks about a pane it took back.
+func agentGetIs(t *testing.T, f *testenv.Fake, status string) {
+	t.Helper()
+	f.Write(t, "agentget.json", `{"id":"x","result":{"type":"agent_info","agent":{"pane_id":"wM:p9",`+
+		`"agent_status":"`+status+`","interactive_ready":true,"focused":false,"launch_pending":false,`+
+		`"revision":1,"screen_detection_skipped":false}}}`)
+}
+
+// A box restart leaves a pane behind that looks exactly like a worker and is
+// not one.
+//
+// Measured on a fleet box on 2026-08-29: `docker restart` while a worker was
+// working. Herdr restored the pane by relaunching `claude --resume <session>`
+// in the worktree WITHOUT the `proxenos env` its shell had carried, so the
+// client came back unauthenticated and sat at its prompt. hdis re-adopted the
+// binding, counted one live worker against MaxWorkers and never questioned it;
+// the task stayed `doing`, claimed by that pane, until the board's 900s lease
+// sweep — and even then only once a person had closed the pane by hand.
+func TestARestoredPaneWithNoWorkerInItIsRetiredRatherThanReadopted(t *testing.T) {
+	l, f := newLoop(t)
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	f.Write(t, "panes.json", panesWith("idle"))
+	agentGetIs(t, f, "idle")
+	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"doing","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`)
+
+	next := restarted(t, l)
+	n, err := next.Adopt(context.Background())
+	if err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("re-adopted %d bindings; a pane with no worker in it is not a worker", n)
+	}
+	if got := calls(t, f, "tab close"); len(got) != 1 {
+		t.Fatalf("the pane with no worker in it was not retired, closed %d times", len(got))
+	}
+	if len(next.Bindings()) != 0 {
+		t.Fatalf("the binding outlived the pane it named: %+v", next.Bindings())
+	}
+
+	// And the trail says WHY, because this daemon is the only thing that
+	// knows: the board's own sweep can say a lease lapsed and nothing more.
+	var said bool
+	for _, ev := range next.Dump().Events {
+		if ev.Kind != KindRetired {
+			continue
+		}
+		if ev.Detail["reason"] == ReasonRestoredWithNoWorker {
+			said = true
+		}
+	}
+	if !said {
+		t.Fatalf("nothing on the trail says why the pane was retired: %+v", next.Dump().Events)
+	}
+}
+
+// Every answer but a clear idle keeps the pane. A worker that is working, one
+// Herdr will not say anything definite about, and a Herdr that could not be
+// asked are all workers that may be at work, and closing a pane on any of them
+// takes a live worker's task away mid-flight.
+func TestARestoredPaneIsOnlyRetiredOnAClearIdle(t *testing.T) {
+	for _, status := range []string{"working", "unknown", "blocked"} {
+		t.Run(status, func(t *testing.T) {
+			l, f := newLoop(t)
+			if err := l.Tick(context.Background()); err != nil {
+				t.Fatalf("tick: %v", err)
+			}
+			f.Write(t, "panes.json", panesWith("idle"))
+			agentGetIs(t, f, status)
+			f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"doing","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`)
+
+			next := restarted(t, l)
+			n, err := next.Adopt(context.Background())
+			if err != nil {
+				t.Fatalf("adopt: %v", err)
+			}
+			if n != 1 {
+				t.Fatalf("a worker herdr calls %q was retired: re-adopted %d bindings, want 1", status, n)
+			}
+			if got := calls(t, f, "tab close"); len(got) != 0 {
+				t.Fatalf("a worker herdr calls %q had its pane closed: %v", status, got)
+			}
+		})
+	}
+}
+
+// A submission is idle because it is finished, and a task waiting on its worker
+// to claim is the claim timeout's business. Neither is a pane to close, so only
+// a row the board still has in `doing` is asked about at all.
+func TestOnlyADoingRowMakesARestoredPaneSuspect(t *testing.T) {
+	for _, row := range []string{
+		`{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"review","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`,
+		`{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"todo"},"ready":true,"dependents":[]}`,
+	} {
+		l, f := newLoop(t)
+		if err := l.Tick(context.Background()); err != nil {
+			t.Fatalf("tick: %v", err)
+		}
+		f.Write(t, "panes.json", panesWith("idle"))
+		agentGetIs(t, f, "idle")
+		f.Write(t, "get.json", row)
+
+		next := restarted(t, l)
+		n, err := next.Adopt(context.Background())
+		if err != nil {
+			t.Fatalf("adopt: %v", err)
+		}
+		if n != 1 {
+			t.Fatalf("re-adopted %d bindings for %s, want 1", n, row)
+		}
 	}
 }

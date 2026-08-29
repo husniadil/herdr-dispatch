@@ -149,7 +149,7 @@ func newLoop(t *testing.T) (*Loop, *testenv.Fake) {
 	f.Write(t, "doctor.json", `{"version":"0.4.0","contract":"0.10.0","binary":"/bin/htask","socket_live":true,"herdr_reachable":true}`)
 	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"todo"},"ready":false,"dependents":[]}`)
 	f.Write(t, "goal.txt", "do the thing · Done when: it is done")
-	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[]}}`)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"idle"}]}}`)
 	f.Write(t, "tabs.json", `{"id":"x","result":{"type":"tab_list","tabs":[]}}`)
 	f.Write(t, "agents.json", `{"id":"x","result":{"type":"agent_list","agents":[]}}`)
 	f.Write(t, "screen.txt", "⎿  Goal set: do the thing\n  ◎ /goal active\n")
@@ -178,6 +178,7 @@ provider = "claude"
 		Worktrees: &worktree.Manager{Root: t.TempDir(), Git: fakeGit(t, f)},
 		BasePane:  "wM:p1",
 		Now:       func() time.Time { return clock },
+		Sleep:     func(time.Duration) {},
 		Log:       log.New(io.Discard, "", 0),
 	}
 	return l, f
@@ -243,7 +244,7 @@ func TestASecondTickDoesNotDispatchATaskItAlreadyPrompted(t *testing.T) {
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("first tick: %v", err)
 	}
-	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"working","interactive_ready":false,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"idle"},{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"working","interactive_ready":false,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
 
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("second tick: %v", err)
@@ -265,7 +266,7 @@ func TestReviewIsAnnouncedOnceAndNeverActedOn(t *testing.T) {
 	}
 	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
 	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"review","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`)
-	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"idle"},{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
 
 	for i := 0; i < 2; i++ {
 		if err := l.Tick(context.Background()); err != nil {
@@ -311,7 +312,7 @@ func TestAnUnclaimedWorkerIsNudgedAfterTheClaimTimeout(t *testing.T) {
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("first tick: %v", err)
 	}
-	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"idle"},{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
 	l.Now = func() time.Time { return clock.Add(10 * time.Minute) }
 
 	if err := l.Tick(context.Background()); err != nil {
@@ -374,7 +375,7 @@ func TestAFlakyReadStillReachesTheReviewNotification(t *testing.T) {
 
 	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
 	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"review","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`)
-	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"idle"},{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
 
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("second tick: %v", err)
@@ -410,7 +411,7 @@ func TestAnUnreadableConfirmKeepsTheBindingSoReviewIsStillAnnounced(t *testing.T
 	// The worker was alive all along: it claimed, worked, and submitted.
 	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
 	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"review","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`)
-	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"idle"},{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
 
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("second tick: %v", err)
@@ -429,7 +430,7 @@ func panesWith(status string) string {
 	if status == "unknown" {
 		agent = ""
 	}
-	return `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9",` + agent +
+	return `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"idle"},{"pane_id":"wM:p9",` + agent +
 		`"agent_status":"` + status + `","focused":false,"revision":1}]}}`
 }
 
@@ -670,7 +671,7 @@ esac`)
 	}
 	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
 	f.Write(t, "get.json", `{"task":{"id":"01ZZZ","seq":42,"project":"/src/other","title":"elsewhere","status":"review","claimed_by":"agent:wM:p9"},"ready":false,"dependents":[]}`)
-	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9","name":"hdis-42","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"idle"},{"pane_id":"wM:p9","name":"hdis-42","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
 
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("second tick: %v", err)
@@ -749,7 +750,7 @@ func doingRow(feedback string) string {
 // stalled rule and the rejected rule are both decided from.
 func idlePane(t *testing.T, f *testenv.Fake) {
 	t.Helper()
-	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"idle"},{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
 }
 
 // nudgeAfterFirstTick spawns a worker, then puts the board and the pane in

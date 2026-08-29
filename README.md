@@ -138,11 +138,26 @@ machine comes back. Adopting names a pane that already exists; nothing is
 opened, because a dispatcher that made itself a pane would put one on the
 operator's screen that nobody asked for.
 
+A base that has GONE is the same question arriving later, so the pane list is
+read even when a base is already held: if Herdr no longer lists it, the base is
+dropped and one is adopted in its place. Measured on 2026-08-29, a worker in
+bypass mode ran `herdr workspace close w3`, which took this daemon's own base
+pane with it, and hdis went on reporting `base_pane w3:p1` while
+`herdr pane list` had no w3 at all. Nothing refused — the base is only read for
+the workspace a worker's tab opens in — so every spawn after that landed
+wherever Herdr chose and said nothing. A Herdr that cannot be reached changes
+nothing: a pane list that did not come back is not a pane that is gone, and
+dropping a live base on that reading would refuse every dispatch until Herdr
+answered again.
+
 Until a pane can be adopted the daemon still comes up and still answers both
 doors, but it does not tick and every dispatch refuses with
 `UNSUPPORTED: NO_BASE_PANE`. Every spawn it could reach for would fail on the
 same missing pane, once per interval forever, and a log of one error repeated
-is a log nobody reads. `doctor` names the state: `base pane none yet`.
+is a log nobody reads. `doctor` names the state: `base pane none yet`, and
+`base pane <id> (gone: …)` for one Herdr no longer holds — with a third
+wording for a Herdr that could not be asked, because a pane list that did not
+come back is a different fact from a pane that is not there.
 
 At startup it reads `htask doctor --json` and says what is unreachable. It
 says it rather than obeying it: a board that is down comes back, and `doctor`
@@ -1022,9 +1037,14 @@ whole of it.
 
 ## What a spawn actually does
 
-1. For a `codex` profile, `proxenos settings` first. A daemon that is
-   down fails here, in the daemon's own words, rather than thirty seconds
-   later as a startup timeout with the cause hidden in a pane.
+1. The settings document every worker is launched with. For a `codex`
+   profile it starts as `proxenos settings` — a launcher that is down fails
+   here, in its own words, rather than thirty seconds later as a startup
+   timeout with the cause hidden in a pane — and on either provider hdis
+   splices its own `permissions.deny` rules into it. See
+   [What a worker may not run](#what-a-worker-may-not-run). A profile that
+   carries its own `--settings` is refused rather than overridden: the client
+   keeps only the last of two and drops the first without saying so.
 2. `herdr tab create` in the filer's workspace, in the task's own checkout,
    with `--label "hdis task <n>"`, `--env HDIS_DISPATCHER_PANE=<the report
    address>`, `--env FORCE_PROMPT_CACHING_5M=1` and one `--env` for every name
@@ -1033,12 +1053,12 @@ whole of it.
    [The environment a worker gets](#the-environment-a-worker-gets),
    [The dispatcher's address](#the-dispatchers-address) and
    [The worker's prompt cache](#the-workers-prompt-cache).
-3. For a `codex` profile, the routing arrives in two halves. The settings
-   document goes to a private file and is spliced into the worker's argv as
-   `--settings <path>`, because that argv is TYPED into the pane and the
-   document inline was most of what made the line long enough to break.
-   `eval "$(proxenos env)"` runs in the pane itself, so the worker inherits
-   the environment half as a direct child of the shell.
+3. The settings document goes to a private file and is spliced into the
+   worker's argv as `--settings <path>`, because that argv is TYPED into the
+   pane and the document inline was most of what made the line long enough to
+   break. For a `codex` profile the routing's other half,
+   `eval "$(proxenos env)"`, runs in the pane itself, so the worker inherits
+   it as a direct child of the shell.
 4. `herdr agent start`, once herdr agrees the pane's shell is free to take it
    — `agent_pane_busy` is herdr's own refusal and the only signal worth
    retrying on, since the `eval` above is still running when the start would
@@ -1075,6 +1095,49 @@ whole of it.
    past interactive readiness, so the command times out, and a goal that is
    refused leaves the worker idle, so the command succeeds. A spawn that
    cannot confirm the goal retires its own half-built pane.
+
+   The BOARD is the last evidence, asked once when the screen and Herdr's
+   status have run out of ceiling. A worker can claim, work and submit inside
+   the confirmation window, and then the pane's last screen is a finished
+   transcript with no goal marker on it and Herdr calls the worker idle —
+   which is the exact shape of a goal that was refused. That happened on
+   2026-08-29: a spawn was reported as a failure, its pane retired and its
+   checkout removed, while the board had the work in review. A row this pane
+   has CLAIMED is a goal that registered, because nothing else claims as
+   `agent:<pane>`; a row somebody else holds never is, because that is another
+   pane's success and this one is exactly the pane to retire.
+
+## What a worker may not run
+
+Every worker is launched against a settings document carrying this
+dispatcher's own `permissions.deny` rules, and they are the one rule shape
+that reaches a worker running in `bypassPermissions`. Claude Code's own
+documentation is explicit: "Deny rules block in every mode, including
+`bypassPermissions`. Allow rules have no effect in `bypassPermissions`"
+([permission modes](https://code.claude.com/docs/en/permission-modes), read
+2026-08-29), and deny is evaluated before ask and allow at every scope, so
+nothing a project or user settings file says hands one back. A file passed
+with `--settings` sits second in the settings precedence, under managed
+settings and above everything else.
+
+What they deny is the destructive half of `herdr --help` — `workspace close`,
+`tab close`, `pane close`, `pane move`, `pane swap`, `worktree remove`,
+`session stop`, `session delete`, `server`, `update` and `config reset-keys`,
+each as a `Bash(herdr <verb>*)` rule with the `*` after the subcommand so it
+is bounded to the verb it names. None of them is a worker's to run: the panes,
+tabs and workspaces a worker lives in are this daemon's to open and retire,
+the server and the session belong to the operator, and the checkouts are
+handed out and reaped here.
+
+The failure they exist for, measured on 2026-08-29: a worker given a vague
+task in the Herdr checkout, running in bypass mode, ran
+`herdr workspace close w3`. That closed this daemon's own base pane, another
+task's live worker and a whole workspace — one command, three losses, and
+nothing in the task asked for any of them.
+
+They are added to the launcher's own document rather than written over it: a
+codex spawn's `proxenos settings` already carries a `permissions.deny` of its
+own, and the two lists are merged with nothing dropped.
 
 ## Where a worker comes up
 
@@ -1540,6 +1603,34 @@ The answers, all of them consequences of the one question:
   survived is taken back whole, and a pane with no binding — a worker that
   already CLAIMED, so the board's holder is the worker's own pane and no hold
   under this daemon's principal names it — is bound from what is read now.
+- The row is `doing` and the pane a binding named holds no worker: the pane is
+  retired instead of adopted. A binding that came back off disk is a record of
+  a worker, not evidence of one, and a restart of the BOX is where the two come
+  apart. Measured on a fleet box on 2026-08-29: `docker restart` while a worker
+  was working, and Herdr restored the pane by relaunching
+  `claude --resume <session>` in the worktree WITHOUT the `proxenos env` its
+  shell had carried, so the client came back unauthenticated and sat at its
+  prompt. hdis re-adopted the binding, counted one live worker against
+  `max_workers` and never questioned it; the task stayed `doing`, claimed by
+  that pane, until the board's 900s lease sweep — and even then only once a
+  person had closed the pane by hand. The screen is not what tells the two
+  apart, because the restored pane still showed the goal marker; Herdr's own
+  status is. A pane this daemon believes it is driving that stays IDLE for the
+  whole of `loop.RestoredWorkerConfirm` has nothing armed in it. Every other
+  answer keeps the pane: a status Herdr will not give, one it calls unknown or
+  blocked, or a single sample that is not idle, is a worker that may be at
+  work, and closing a pane on any of them takes a live worker's task away
+  mid-flight.
+
+  Retiring the pane is the whole of the hand-back this daemon can make. The
+  claimant is that pane's own `agent:<pane>` principal, and htask refuses this
+  daemon both ways past it — measured against htask 0.9.1 (contract 0.10.1) on
+  2026-08-29, `htask release <id> --as plugin:hdis@…` answers `FORBIDDEN: only
+  the holder may release it` and `htask sweep --pane <pane> --as plugin:hdis@…`
+  answers `FORBIDDEN: that pane or the operator releases them`. So the pane is
+  closed, which is what a pane-gone sweep or the lease timer then acts on, and
+  the REASON is written to this daemon's trail, where it is the only thing that
+  knows it: the board's own sweep can say a lease lapsed and nothing more.
 - The row is done or cancelled: the pane is retired. Nothing else will ever
   close a pane this daemon opened for work that is over.
 - The row is claimed by a pane that is not this one: the pane is let go
@@ -1551,7 +1642,11 @@ The answers, all of them consequences of the one question:
   whose checkout names no repository, since nothing can then say which board
   its number belongs to.
 - A binding whose pane Herdr no longer lists names nothing to reconcile, and
-  is dropped with a line in the log.
+  is dropped with a line in the log. The claim that pane left on the board is
+  not this daemon's to release either, for the same reason and with the same
+  two refusals behind it, so the log and the trail name who still holds it
+  rather than leaving a task sitting in `doing` behind a pane that no longer
+  exists with nothing anywhere explaining it.
 - If **Herdr** cannot be reached at all, nothing is adopted, the failure is
   loud, and the store is left where it is for the next start. Adopting on that
   guess is how a live worker's task ends up in a second pane, which is the
@@ -1707,16 +1802,28 @@ no route is how a lane built to catch undelivered claims makes one of its own.
 `htask` refuses `submit` on a row that is not `doing`, so a worker whose
 task is in review cannot amend the report it already sent; findings with
 nowhere to go die in the pane while the board stays green. The route is the
-mail door at `$HDIS_DISPATCHER_PANE`, the desk that owns the work. It beats a
-board note on three counts: the address is already in the pane's environment
-and already named by the condition the worker booted with, so nothing new is
-introduced to look at; `htask` has no task-scoped note verb, so a note would
-land on the notes board detached from the row under review; and durability,
-the one real argument for the note, is already the mail store's, since `inbox`
-lists what was sent whether or not the pane marker arrived. It names the DOOR
-and never `hmail` — a dispatched pane works in a worktree where a plugin
-binary kept in a project's own `bin/` is not on PATH, measured live on
-2026-08-23 with `hmail` answering `command not found` while the door answered.
+mail door, addressed to `human` — the operator — as a notify, which owes no
+reply, and it names the task in the body because a message to the operator
+carries no row of its own. It beats a board note on two counts: `htask` has no
+task-scoped note verb, so a note would land on the notes board detached from
+the row under review, and durability — the one real argument for the note — is
+already the mail store's, since `inbox` lists what was sent whether or not a
+pane marker arrived. It names the DOOR and never `hmail` — a dispatched pane
+works in a worktree where a plugin binary kept in a project's own `bin/` is not
+on PATH, measured live on 2026-08-23 with `hmail` answering `command not found`
+while the door answered.
+
+The address used to be `$HDIS_DISPATCHER_PANE`, and it was wrong everywhere it
+mattered. That variable is a PANE, and on a fleet box the desk it resolves to
+is the daemon's own base pane — a plain shell with no agent in it. The pane
+marker failed every time: measured on 2026-08-29, `agent target not found` on
+the laptop and `pane no longer exists` on the box, hmail counting every
+self-review report undeliverable and `mail` reporting a degraded mailbox on
+every box that had ever verified a task. Nothing was ever lost, because the
+store is authoritative and the message reached the inbox and the hub either
+way — but a degraded flag that is permanently on is a signal that has stopped
+meaning anything. `human` is an address rather than a pane, so no marker is
+attempted and nothing can be undeliverable.
 
 **And one pass is not aimed at the report at all.** Everything above is scoped
 to what the report CLAIMS, so a defect nobody claimed passes the whole
@@ -1910,6 +2017,23 @@ make build       # bin/hdis
 Layers 1 and 2 reach no real board, no real Herdr server and no real proxy
 daemon: every case that shells out answers its own calls with a stand-in
 binary on `PATH`. A green `make test` is not a green gate.
+
+**No test writes the operator's own state directory.** Every package whose
+tests can reach `config.StateDir` has a `TestMain` calling
+`testenv.RunIsolated`, which moves `HOME`, `XDG_STATE_HOME` and
+`XDG_CONFIG_HOME` to a temporary directory for the whole test binary, and
+`config.StateDir` PANICS inside a test binary when it resolves under the real
+home — so a package that reaches it without that `TestMain` fails loud instead
+of writing. It is one guard for all of it, because everything this daemon
+writes lives under that directory: the bindings, the worktrees, the default
+worker MCP document, the log, the socket and the lock.
+
+It is not hypothetical. On 2026-08-29 the operator's live
+`~/.local/state/dispatch/worker.mcp.json` named a `htask` inside a `t.TempDir`
+that no longer existed — written by a spawn case that mentioned no path at all,
+because `config.WorkerMCPConfigPath()` reads the environment wherever it is
+called from — and every worker the laptop brought up afterwards had a dead
+tasks door.
 
 `make e2e` is layer 3 and is deliberately outside `make test-full`. It builds
 `htask` from the sibling `herdr-tasks` checkout — beside this repository, or

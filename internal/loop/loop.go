@@ -82,6 +82,10 @@ type Loop struct {
 	BasePane string
 	// Now is time.Now unless a test replaces it.
 	Now func() time.Time
+	// Sleep is time.Sleep unless a test replaces it. The one wait this loop
+	// makes is Adopt's confirmation window on a pane a restart took back;
+	// everything else it does is a call and an answer.
+	Sleep func(time.Duration)
 	// Log is where the operator hears about anything that went wrong.
 	Log *log.Logger
 	// OnEvent is handed every event this loop appends to the trail, after
@@ -545,6 +549,20 @@ func (l *Loop) reconcile(ctx context.Context, p ourPane) (decide.Binding, htask.
 	}
 
 	if p.binding != nil {
+		// A binding that came back off disk is a record of a worker, not
+		// evidence of one. A restart of the BOX is where those come apart:
+		// Herdr restores the pane by relaunching the client, and a client
+		// that comes back without the environment its shell carried comes
+		// back unable to work. See restoredWorkerIsLive.
+		//
+		// Only a row the board still has in `doing` is asked about. A task
+		// waiting on its worker to claim is the claim timeout's business
+		// and gets re-prompted; a task in review is a worker that is idle
+		// because it is finished.
+		if row.Status == "doing" && !l.restoredWorkerIsLive(ctx, p.pane) {
+			l.retireRestored(ctx, p.pane, row)
+			return decide.Binding{}, htask.Task{}, false
+		}
 		b := *p.binding
 		if b.Tab == "" {
 			b.Tab = p.tab
@@ -1152,12 +1170,25 @@ func (l *Loop) apply(ctx context.Context, actions []decide.Action) {
 			err = l.retire(ctx, a)
 		case decide.Unbind:
 			// The pane is gone. Dropping the binding and the settings file
-			// its spawn wrote is all there is to do: releasing the lease is
-			// the board's own sweep.
-			l.logf("task %s: pane %s is gone, dropping its binding", a.TaskID, a.Pane)
+			// its spawn wrote is all there is to do HERE, and the claim the
+			// pane left on the board is not this daemon's to release: the
+			// claimant is that pane's own `agent:<pane>` principal, and
+			// htask refuses both ways past it — measured against htask
+			// 0.9.1 (contract 0.10.1) on 2026-08-29, `release --as
+			// plugin:hdis@…` answers FORBIDDEN "only the holder may release
+			// it" and `sweep --pane --as plugin:hdis@…` answers FORBIDDEN
+			// "that pane or the operator releases them". So the log says
+			// what is owed and who owes it, because a task sitting in
+			// `doing` behind a pane that no longer exists is otherwise a
+			// silence until the lease runs out.
+			l.logf("task %s: pane %s is gone, dropping its binding; the claim it left is held by "+
+				"agent:%s and only that pane or the operator may release it, so the task comes back "+
+				"when the board's own pane-gone sweep or its lease reaches it", a.TaskID, a.Pane, a.Pane)
 			l.Spawn.Discard(a.Pane)
 			l.drop(ctx, a.Pane)
-			l.emit(store.EntityWorker, KindGone, a.TaskID, l.projectOf(a.TaskID), map[string]any{"pane": a.Pane})
+			l.emit(store.EntityWorker, KindGone, a.TaskID, l.projectOf(a.TaskID), map[string]any{
+				"pane": a.Pane, "claim_held_by": "agent:" + a.Pane,
+			})
 		case decide.GiveUp:
 			l.logf("task %s: %s after %d prompts, retiring pane %s",
 				a.TaskID, a.Reason, l.promptsFor(a.Pane), a.Pane)
@@ -1228,6 +1259,7 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 	pane, err := l.Spawn.Run(ctx, spawn.Request{
 		Name:       workerName(row.Seq),
 		Label:      spawn.TabLabel(row.Seq),
+		TaskID:     row.ID,
 		BasePane:   l.Base(),
 		OriginPane: row.PaneID,
 		Project:    row.Project,

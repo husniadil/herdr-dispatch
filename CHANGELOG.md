@@ -5,6 +5,83 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
+## Unreleased
+
+**Added: every worker is launched against `permissions.deny` rules that stop
+it taking the fleet down.** A worker given a vague task in the Herdr checkout,
+running in `bypassPermissions`, ran `herdr workspace close w3` — closing this
+daemon's own base pane, another task's live worker and a whole workspace. hdis
+now splices its own `permissions.deny` into the `--settings` document every
+worker gets, on BOTH providers: the destructive half of `herdr --help`
+(`workspace close`, `tab close`, `pane close`, `pane move`, `pane swap`,
+`worktree remove`, `session stop`, `session delete`, `server`, `update`,
+`config reset-keys`), each as a `Bash(herdr <verb>*)` rule. Deny is the only
+rule shape that reaches a bypass-mode worker, and it is evaluated before ask
+and allow at every scope. **What a caller changes:** a `claude` profile now
+carries `--settings <path>` in its worker argv where it carried none before,
+and a profile of EITHER provider that sets its own `--settings` is refused at
+the spawn instead of silently overriding — the client keeps only the last of
+two and the one it drops is the one holding these rules. A `codex` profile's
+`proxenos settings` document is merged into rather than replaced, so a deny
+rule the launcher sets is kept. `spawn.TypedLineBudget` moves 640 → 768 to
+cover the flag on the claude path.
+
+**Fixed: a working spawn is no longer reported as a failed one.** A worker
+that claimed, worked and submitted its task inside the goal-confirmation
+ceiling left a finished transcript with no goal marker on it and an idle
+status — the exact shape of a goal that was refused — so the spawn was called
+a failure, its pane retired and its checkout removed while the board had the
+work in review. The goal confirmation now asks the BOARD once when the screen
+and Herdr's status have run out of ceiling: a row this pane has claimed, or a
+row past `doing` that nobody holds, is a goal that registered. A row somebody
+else holds is not, and a board that cannot be read decides nothing.
+
+**Fixed: a box restart no longer leaves a task stuck behind a pane with no
+worker in it.** Herdr restores a worker's pane by relaunching its client
+without the environment the pane's shell had carried, so the client comes back
+unable to work; hdis re-adopted the binding, counted a live worker against
+`max_workers` and left the task in `doing` until the board's lease sweep. A
+readopted binding on a `doing` row is now confirmed against Herdr's own status
+for `loop.RestoredWorkerConfirm`, and a pane that stays idle for the whole of
+it is retired with the reason on this daemon's trail
+(`dispatch.worker.retired`, `reason` = "the pane was restored without a worker
+in it"). Every other answer keeps the pane. hdis cannot release the claim
+itself — the claimant is that pane's own `agent:<pane>` principal, and htask
+refuses both `release` and `sweep --pane` to a plugin principal — so closing
+the pane is the hand-back, and a pane found gone now names on the log and the
+trail (`claim_held_by`) who still holds its claim.
+
+**Fixed: `doctor` says when the recorded base pane is gone, and the daemon
+adopts another.** hdis went on reporting `base_pane w3:p1` after a worker had
+closed that workspace, while `herdr pane list` had no w3 at all, and every
+spawn after it landed wherever Herdr chose without saying so. `EnsureBase` now
+checks the base against Herdr's pane list every time it is asked and adopts a
+replacement when it is gone, so the pane doctor reports is the pane placement
+uses. **What a caller changes:** `hdis doctor --json` grows
+`base_pane_gone` and `base_pane_unknown` — both omitted when false, and never
+both true, because a pane list that did not come back is a different fact from
+a pane that is not there.
+
+**Fixed: the self-review report goes to `human` instead of a pane.** The
+verification lane told a worker to mail `$HDIS_DISPATCHER_PANE`, which on a
+fleet box is the daemon's own base pane — a plain shell with no agent in it —
+so the pane marker failed every time ("agent target not found", "pane no
+longer exists"), hmail counted every self-review report undeliverable, and
+`mail` showed a permanently degraded mailbox on every box that had verified a
+task. Nothing was ever lost; the flag was. The condition now sends to `human`
+as a notify and names the task in the body. The door is still the mail MCP
+door and never the `hmail` binary, which a worker's worktree cannot resolve.
+
+**Fixed: no test can write the operator's own state directory.** A unit
+test's fake `htask`, put on `PATH` in a `t.TempDir`, was written into the
+operator's live `~/.local/state/dispatch/worker.mcp.json` by a spawn case that
+named no path at all, and every worker that laptop brought up afterwards had a
+dead tasks door. Every package whose tests can reach `config.StateDir` now has
+a `TestMain` calling `testenv.RunIsolated`, and `config.StateDir` panics inside
+a test binary when it resolves under the real home, so a package without one
+fails loud instead of writing. One guard covers every path this daemon writes,
+because all of them are under that directory.
+
 ## 0.9.1 — 2026-08-29
 
 **Added: `[worker] env`, exported into every worker's pane.** A worker's own

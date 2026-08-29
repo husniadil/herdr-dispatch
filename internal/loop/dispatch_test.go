@@ -187,8 +187,10 @@ func TestDispatchRefusesWhenTheFleetIsAtMaxWorkers(t *testing.T) {
 }
 
 func TestDispatchRefusesWithoutABasePane(t *testing.T) {
-	l, _ := newLoop(t)
+	l, f := newLoop(t)
 	l.BasePane = ""
+	// And nothing for it to adopt in place of the one it never had.
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[]}}`)
 
 	_, err := l.Dispatch(context.Background(), "7", "")
 	if got, want := codes.ReasonOf(err), codes.NoBasePane; got != want {
@@ -234,7 +236,7 @@ func TestStatusReportsTheBindingsAndWhatHerdrSaysAboutTheirPanes(t *testing.T) {
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("tick: %v", err)
 	}
-	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"working","interactive_ready":false,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"idle"},{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"working","interactive_ready":false,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
 
 	st, err := l.Status(context.Background())
 	if err != nil {
@@ -380,7 +382,7 @@ func TestStatusNamesTheBranchBesideThePane(t *testing.T) {
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("tick: %v", err)
 	}
-	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9","name":"n","agent":"claude","agent_status":"working","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"idle"},{"pane_id":"wM:p9","name":"n","agent":"claude","agent_status":"working","interactive_ready":true,"focused":false,"launch_pending":false,"revision":1,"screen_detection_skipped":false}]}}`)
 
 	st, err := l.Status(context.Background())
 	if err != nil {

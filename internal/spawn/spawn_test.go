@@ -15,6 +15,7 @@ import (
 
 	"github.com/husniadil/herdr-dispatch/internal/config"
 	"github.com/husniadil/herdr-dispatch/internal/herdrclient"
+	"github.com/husniadil/herdr-dispatch/internal/htask"
 	"github.com/husniadil/herdr-dispatch/internal/proxy"
 	"github.com/husniadil/herdr-dispatch/internal/testenv"
 )
@@ -312,7 +313,11 @@ func TestCodexRunsTheTwoMeasuredSteps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the worker's settings file: %v", err)
 	}
-	if got, want := string(body), `{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8787"}}`; got != want {
+	want, err := config.WorkerSettings(`{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8787"}}`)
+	if err != nil {
+		t.Fatalf("worker settings: %v", err)
+	}
+	if got := string(body); got != want {
 		t.Fatalf("settings: got %q, want %q", got, want)
 	}
 	if strings.ContainsAny(string(body), "\n\r") {
@@ -701,8 +706,12 @@ func TestTheSettingsDocumentTravelsAsAFileOnlyItsOwnerCanRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the worker's settings file: %v", err)
 	}
-	if string(body) != realProxySettings {
-		t.Fatalf("the file does not carry the proxy's document:\n%s", body)
+	want, err := config.WorkerSettings(realProxySettings)
+	if err != nil {
+		t.Fatalf("worker settings: %v", err)
+	}
+	if string(body) != want {
+		t.Fatalf("the file does not carry the proxy's document with this dispatcher's deny rules in it:\n%s", body)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -793,24 +802,30 @@ func TestAKeptPaneKeepsItsSettingsFile(t *testing.T) {
 	}
 }
 
-// The claude provider types no settings at all, so it writes no file.
-func TestTheClaudeProviderWritesNoSettingsFile(t *testing.T) {
+// The claude provider has no launcher half, and still gets a settings file:
+// the deny rules in it are about what a WORKER may do rather than about how it
+// is routed, and a claude-provider worker in bypass mode is in exactly the
+// same position as a codex one about `herdr workspace close`.
+func TestTheClaudeProviderGetsASettingsFileForTheDenyRules(t *testing.T) {
 	h := newHarness(t, []string{goalActive}, startRegistered)
 
 	if _, err := h.pipe.Run(context.Background(), req(claudeProfile())); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	for _, a := range agentArgsOf(t, h) {
-		if a == "--settings" {
-			t.Fatalf("the claude provider spliced a --settings: %v", agentArgsOf(t, h))
-		}
+	args := agentArgsOf(t, h)
+	if args[0] != "--settings" {
+		t.Fatalf("the claude provider spliced no --settings: %v", args)
 	}
-	entries, err := os.ReadDir(h.pipe.SettingsDir)
+	body, err := os.ReadFile(args[1])
 	if err != nil {
-		t.Fatalf("read settings dir: %v", err)
+		t.Fatalf("the worker's settings file: %v", err)
 	}
-	if len(entries) != 0 {
-		t.Fatalf("the claude provider wrote %d settings files", len(entries))
+	want, err := config.WorkerSettings("")
+	if err != nil {
+		t.Fatalf("worker settings: %v", err)
+	}
+	if string(body) != want {
+		t.Fatalf("the claude provider's settings file is %s, want %s", body, want)
 	}
 }
 
@@ -846,15 +861,15 @@ func TestARereadRequestIsNotASelfReviewCondition(t *testing.T) {
 		// before it: every mechanical step intact, a route named, and no word
 		// about what the worker may DO with a gap it just proved. Two workers
 		// in a row had to invent that rule; the third must be told it.
-		"no rule for findings": "Task 23 is submitted and not yet judged. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to $" + DispatcherPaneVar + ".",
+		"no rule for findings": "Task 23 is submitted and not yet judged. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to `human` naming task 23.",
 		// And each boundary alone is not the pair. Both of these carry every
 		// other ask, so each isolates exactly one: drop only the ask it
 		// targets from the guard and only that near-miss stops being caught.
 		// Without the line holding it to proven gaps, "keep fixing" reads as
 		// "keep building"; without a route for everything else, a worker with
 		// a second thought has nowhere to put it but the branch.
-		"no boundary on the fix":     "Task 23 is submitted. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to $" + DispatcherPaneVar + ". KEEP FIXING what a mutation proved unpinned, and name the new head in the first line of that message. Send anything else as a proposal that waits for a verdict. Then read the diff itself, not your report of it, and name what you would attack if it were someone else's: a gap your report never claimed, an inconsistency between two parts of the change, a case the code does not handle. For each, either prove it with a mutation or a run, or say plainly that it is a suspicion you could not prove. An unproven suspicion is worth sending; one dressed as a finding is not. Send everything you have before your pane closes with the task; nothing waits for later.",
-		"no route for anything else": "Task 23 is submitted. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to $" + DispatcherPaneVar + ". KEEP FIXING what a mutation proved unpinned, and name the new head in the first line of that message. Fix only a gap a mutation proved or something the operator named. Then read the diff itself, not your report of it, and name what you would attack if it were someone else's: a gap your report never claimed, an inconsistency between two parts of the change, a case the code does not handle. For each, either prove it with a mutation or a run, or say plainly that it is a suspicion you could not prove. An unproven suspicion is worth sending; one dressed as a finding is not. Send everything you have before your pane closes with the task; nothing waits for later.",
+		"no boundary on the fix":     "Task 23 is submitted. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to `human` naming task 23. KEEP FIXING what a mutation proved unpinned, and name the new head in the first line of that message. Send anything else as a proposal that waits for a verdict. Then read the diff itself, not your report of it, and name what you would attack if it were someone else's: a gap your report never claimed, an inconsistency between two parts of the change, a case the code does not handle. For each, either prove it with a mutation or a run, or say plainly that it is a suspicion you could not prove. An unproven suspicion is worth sending; one dressed as a finding is not. Send everything you have before your pane closes with the task; nothing waits for later.",
+		"no route for anything else": "Task 23 is submitted. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to `human` naming task 23. KEEP FIXING what a mutation proved unpinned, and name the new head in the first line of that message. Fix only a gap a mutation proved or something the operator named. Then read the diff itself, not your report of it, and name what you would attack if it were someone else's: a gap your report never claimed, an inconsistency between two parts of the change, a case the code does not handle. For each, either prove it with a mutation or a run, or say plainly that it is a suspicion you could not prove. An unproven suspicion is worth sending; one dressed as a finding is not. Send everything you have before your pane closes with the task; nothing waits for later.",
 		// And the open half's three asks, each isolated the same way: every
 		// other ask intact, and exactly one clause of the accepted text
 		// swapped out. Without the proof floor an open invitation returns
@@ -863,9 +878,9 @@ func TestARereadRequestIsNotASelfReviewCondition(t *testing.T) {
 		// finds what the frame already contains; without the task's criteria
 		// as a third frame, a change that is internally consistent and fully
 		// mutation-proof still passes with a criterion nothing implements.
-		"open pass with no proof floor":                  "Task 23 is submitted and not yet judged. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to $" + DispatcherPaneVar + ". KEEP FIXING what a mutation proved unpinned, and name the new head in the first line of that message. Fix only a gap a mutation proved or something the operator named; send anything else as a proposal that waits for a verdict. Then read the diff itself, not your report of it, against what the task asked for: a criterion the diff never implements, a gap your report never claimed, a case the code does not handle. Name anything else you noticed. Send everything you have before your pane closes with the task; nothing waits for later.",
-		"open pass aimed at the report":                  "Task 23 is submitted and not yet judged. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to $" + DispatcherPaneVar + ". KEEP FIXING what a mutation proved unpinned, and name the new head in the first line of that message. Fix only a gap a mutation proved or something the operator named; send anything else as a proposal that waits for a verdict. Then read your own report again, against what the task asked for: a criterion the diff never implements, a gap your report never claimed, a case the code does not handle. Prove each with a mutation or a run, or say plainly that it is a suspicion you could not prove. Send everything you have before your pane closes with the task; nothing waits for later.",
-		"open pass that never reads the task's criteria": "Task 23 is submitted and not yet judged. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to $" + DispatcherPaneVar + ". KEEP FIXING what a mutation proved unpinned, and name the new head in the first line of that message. Fix only a gap a mutation proved or something the operator named; send anything else as a proposal that waits for a verdict. Then read the diff itself, not your report of it, with fresh eyes: a gap your report never claimed, a case the code does not handle. Prove each with a mutation or a run, or say plainly that it is a suspicion you could not prove. Send everything you have before your pane closes with the task; nothing waits for later.",
+		"open pass with no proof floor":                  "Task 23 is submitted and not yet judged. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to `human` naming task 23. KEEP FIXING what a mutation proved unpinned, and name the new head in the first line of that message. Fix only a gap a mutation proved or something the operator named; send anything else as a proposal that waits for a verdict. Then read the diff itself, not your report of it, against what the task asked for: a criterion the diff never implements, a gap your report never claimed, a case the code does not handle. Name anything else you noticed. Send everything you have before your pane closes with the task; nothing waits for later.",
+		"open pass aimed at the report":                  "Task 23 is submitted and not yet judged. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to `human` naming task 23. KEEP FIXING what a mutation proved unpinned, and name the new head in the first line of that message. Fix only a gap a mutation proved or something the operator named; send anything else as a proposal that waits for a verdict. Then read your own report again, against what the task asked for: a criterion the diff never implements, a gap your report never claimed, a case the code does not handle. Prove each with a mutation or a run, or say plainly that it is a suspicion you could not prove. Send everything you have before your pane closes with the task; nothing waits for later.",
+		"open pass that never reads the task's criteria": "Task 23 is submitted and not yet judged. For every guard, refusal or invariant your report claims, write a COMPILING mutation that removes it, run the tests your report names, and confirm they FAIL. Revert each one. Then report which mutations bit and which did not, and for each that did not, say whether you believe it is a missing test or bad aim, with the mail MCP send to `human` naming task 23. KEEP FIXING what a mutation proved unpinned, and name the new head in the first line of that message. Fix only a gap a mutation proved or something the operator named; send anything else as a proposal that waits for a verdict. Then read the diff itself, not your report of it, with fresh eyes: a gap your report never claimed, a case the code does not handle. Prove each with a mutation or a run, or say plainly that it is a suspicion you could not prove. Send everything you have before your pane closes with the task; nothing waits for later.",
 	} {
 		if missing := mechanicalAsks(text); len(missing) == 0 {
 			t.Errorf("%q passes as a self-review condition: %s", name, text)
@@ -890,7 +905,7 @@ func mechanicalAsks(goal string) []string {
 		"the mutation reverted":              {"revert"},
 		"which mutations bit":                {"which mutations bit and which did not"},
 		"a reading of the ones that did not": {"missing test or bad aim"},
-		"somewhere for the findings to go":   {strings.ToLower("the mail MCP send to $" + DispatcherPaneVar)},
+		"somewhere for the findings to go":   {"the mail mcp send to `human`"},
 		// What to DO with a finding. A condition that asks for mutations and
 		// stops there leaves the worker to invent the rule, which is what two
 		// workers in a row had to do. Each boundary is its own ask, because a
@@ -1947,11 +1962,11 @@ func TestTheWorkerIsLaunchedAgainstItsOwnMCPConfig(t *testing.T) {
 	}
 
 	args := agentArgsOf(t, h)
-	if len(args) < 3 || args[0] != "--mcp-config" || args[2] != "--strict-mcp-config" {
-		t.Fatalf("the doors must lead the agent argv: %v", args)
+	if len(args) < 5 || args[0] != "--settings" || args[2] != "--mcp-config" || args[4] != "--strict-mcp-config" {
+		t.Fatalf("the settings must lead the agent argv and the doors follow: %v", args)
 	}
-	if args[1] != h.pipe.WorkerMCPPath {
-		t.Fatalf("the document is %q, want the default file %q", args[1], h.pipe.WorkerMCPPath)
+	if args[3] != h.pipe.WorkerMCPPath {
+		t.Fatalf("the document is %q, want the default file %q", args[3], h.pipe.WorkerMCPPath)
 	}
 	// The flag is variadic — `--mcp-config <configs...>` — so it may never
 	// sit last: the goal is positional and would be swallowed as a second
@@ -2023,8 +2038,8 @@ func TestAConfiguredMCPConfigIsUsedAsWritten(t *testing.T) {
 	}
 
 	args := agentArgsOf(t, h)
-	if args[1] != own {
-		t.Fatalf("the document is %q, want %q", args[1], own)
+	if args[3] != own {
+		t.Fatalf("the document is %q, want %q", args[3], own)
 	}
 	if _, err := os.Stat(h.pipe.WorkerMCPPath); err == nil {
 		t.Fatal("a configured document must not make the default file be written")
@@ -2198,5 +2213,192 @@ func TestEveryNameTheSpawnSetsIsReservedFromTheWorkerEnv(t *testing.T) {
 		if !config.WorkerEnvReserved(name) {
 			t.Errorf("%s is set on every worker pane and a document may still write it", name)
 		}
+	}
+}
+
+// fakeRows is a board that answers one row, and counts how often it was asked.
+type fakeRows struct {
+	row  htask.Task
+	err  error
+	asks int
+}
+
+func (f *fakeRows) Get(context.Context, string) (htask.Task, error) {
+	f.asks++
+	return f.row, f.err
+}
+
+// A worker that beat the ceiling is not a worker that never started.
+//
+// Measured on the fleet on 2026-08-29: the pane claimed the task, did the work
+// and submitted it INSIDE the two-minute confirmation window, so by the time
+// the last read happened the screen was a finished transcript with no goal
+// marker on it and herdr called the worker idle — the exact shape of a goal
+// that was refused. The spawn was reported as a failure, the pane was retired
+// and its checkout removed, while the board showed the work in review.
+//
+// The board is the evidence the screen cannot argue with: nothing but the
+// worker in this pane claims as `agent:<pane>`.
+func TestAGoalTheBoardShowsThisPaneWorkingIsNotAFailedSpawn(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		row  htask.Task
+	}{
+		{"claimed by this pane", htask.Task{ID: "01AAA", Status: "doing", ClaimedBy: "agent:wM:p9"}},
+		{"already submitted by this pane", htask.Task{ID: "01AAA", Status: "review", ClaimedBy: "agent:wM:p9"}},
+		{"in review with the claim gone", htask.Task{ID: "01AAA", Status: "review"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, []string{goalRefused + "\n" + promptBox},
+				strings.Replace(startRefused, "PLACEHOLDER", agentJSON("idle"), 1))
+			board := &fakeRows{row: tc.row}
+			h.pipe.Board = board
+
+			r := req(claudeProfile())
+			r.TaskID = "01AAA"
+			pane, err := h.pipe.Run(context.Background(), r)
+			if err != nil {
+				t.Fatalf("the board says this pane is working it, so the spawn stands: %v", err)
+			}
+			if pane != "wM:p9" {
+				t.Fatalf("pane: %q", pane)
+			}
+			if n := count(h.verbs(t), "tab close"); n != 0 {
+				t.Fatalf("a worker the board shows at work had its tab closed %d times", n)
+			}
+			if board.asks != 1 {
+				t.Fatalf("the board was asked %d times; it is the last evidence, asked once", board.asks)
+			}
+		})
+	}
+}
+
+// The board is evidence FOR this pane and never for another one. A row some
+// other worker holds, or a row nobody has touched, leaves the screen's verdict
+// exactly where it was.
+func TestABoardRowThatIsNotThisPanesLeavesTheSpawnAFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		board *fakeRows
+	}{
+		{"held by another pane", &fakeRows{row: htask.Task{ID: "01AAA", Status: "doing", ClaimedBy: "agent:wM:p4"}}},
+		{"still on the ready list", &fakeRows{row: htask.Task{ID: "01AAA", Status: "todo"}}},
+		{"unreadable", &fakeRows{err: errors.New("htask is down")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, []string{goalRefused + "\n" + promptBox},
+				strings.Replace(startRefused, "PLACEHOLDER", agentJSON("idle"), 1))
+			h.pipe.Board = tc.board
+
+			r := req(claudeProfile())
+			r.TaskID = "01AAA"
+			if _, err := h.pipe.Run(context.Background(), r); err == nil {
+				t.Fatal("a goal that never registered must still fail the spawn")
+			}
+			if n := count(h.verbs(t), "tab close"); n != 1 {
+				t.Fatalf("a failed spawn must retire its half-built tab, closed %d times", n)
+			}
+		})
+	}
+}
+
+// The verifier's findings go to the OPERATOR, not to a pane.
+//
+// $HDIS_DISPATCHER_PANE is an address for the worker's first report and is
+// right for that. It is wrong for this one: on a fleet box it resolves to the
+// daemon's own base pane, which is a plain shell with no agent in it, so the
+// pane marker failed every time — "agent target not found" on the laptop,
+// "pane no longer exists" on the box, measured 2026-08-29 — and hmail counted
+// every self-review report undeliverable. Nothing was lost, because the store
+// is authoritative and the inbox had the message either way, but every box
+// that had verified a task reported a permanently degraded mailbox.
+//
+// `human` is an address rather than a pane, so no marker is attempted and
+// nothing can be undeliverable. The task number travels in the body, because a
+// message to the operator carries no row of its own.
+func TestTheSelfReviewReportGoesToTheOperatorAndNotToAPane(t *testing.T) {
+	goal := SelfReviewCondition(23)
+	if strings.Contains(goal, DispatcherPaneVar) {
+		t.Errorf("the self-review condition still routes its report at a pane through %s: %s", DispatcherPaneVar, goal)
+	}
+	if !strings.Contains(goal, "send to `human`") {
+		t.Errorf("the self-review condition does not send its report to the operator: %s", goal)
+	}
+	if !strings.Contains(goal, "naming task 23") {
+		t.Errorf("the self-review condition does not name the task in the message it asks for: %s", goal)
+	}
+	// The door and never the binary: a worker's pane is opened in a worktree
+	// under the state directory, where a plugin binary kept in a project's
+	// own bin/ is not on PATH. Measured from a live worker pane on
+	// 2026-08-23, `hmail` came back `command not found` while the door
+	// answered.
+	if strings.Contains(goal, "hmail") {
+		t.Errorf("the self-review condition names the hmail binary, which a worker pane cannot resolve: %s", goal)
+	}
+	if !strings.Contains(goal, "mail MCP") {
+		t.Errorf("the self-review condition does not name the mail door: %s", goal)
+	}
+}
+
+// The deny rules reach the worker on every provider, in the document the argv
+// names. It is the whole of the guard: on 2026-08-29 a bypass-mode worker ran
+// `herdr workspace close w3` and took this daemon's base pane, another task's
+// live worker and a workspace with it.
+func TestEveryWorkerIsLaunchedAgainstTheDenyRules(t *testing.T) {
+	for name, p := range map[string]config.Profile{
+		"claude": claudeProfile(),
+		"codex":  codexProfile(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, []string{goalActive}, startRegistered)
+			h.Bin(t, "proxenos", `cat "$HDIS_FAKE_DIR/settings.json"`)
+			h.Write(t, "settings.json", realProxySettings)
+
+			if _, err := h.pipe.Run(context.Background(), req(p)); err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			args := agentArgsOf(t, h)
+			if args[0] != "--settings" {
+				t.Fatalf("no settings document reached the worker: %v", args)
+			}
+			body, err := os.ReadFile(args[1])
+			if err != nil {
+				t.Fatalf("the worker's settings file: %v", err)
+			}
+			for _, want := range config.WorkerDeniedBash {
+				if !strings.Contains(string(body), want) {
+					t.Errorf("the worker's settings do not deny %s: %s", want, body)
+				}
+			}
+		})
+	}
+}
+
+// A profile that carries its own --settings is refused rather than overridden,
+// on either provider. The client keeps only the last of two and drops the
+// first without saying so, and the dropped one is the one holding the rules
+// that stop a worker closing the fleet's panes.
+func TestAProfileCarryingItsOwnSettingsIsRefusedOnEitherProvider(t *testing.T) {
+	for name, p := range map[string]config.Profile{
+		"claude": claudeProfile(),
+		"codex":  codexProfile(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, []string{goalActive}, startRegistered)
+			h.Bin(t, "proxenos", `cat "$HDIS_FAKE_DIR/settings.json"`)
+			h.Write(t, "settings.json", realProxySettings)
+			p.Args = append(append([]string{}, p.Args...), "--settings", "/somewhere/else.json")
+
+			_, err := h.pipe.Run(context.Background(), req(p))
+			if err == nil {
+				t.Fatal("a profile with its own --settings must be refused")
+			}
+			if !strings.Contains(err.Error(), "--settings") {
+				t.Fatalf("the refusal does not name the flag: %v", err)
+			}
+			if n := count(h.verbs(t), "tab create"); n != 0 {
+				t.Fatalf("a refusal at step zero opened %d tabs", n)
+			}
+		})
 	}
 }

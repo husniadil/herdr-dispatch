@@ -17,7 +17,7 @@ func TestDoctorCountsTheSlotsHeldByPanesAwaitingReview(t *testing.T) {
 	if err := d.Loop.Tick(context.Background()); err != nil {
 		t.Fatalf("first tick: %v", err)
 	}
-	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","revision":1}]}}`)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"idle"},{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","revision":1}]}}`)
 	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"review"}}`)
 	if err := d.Loop.Tick(context.Background()); err != nil {
 		t.Fatalf("second tick: %v", err)

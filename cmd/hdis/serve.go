@@ -125,8 +125,13 @@ func serve(f *daemonFlags) error {
 			Routes: loop.Routes(cfg),
 		},
 		Spawn: &spawn.Pipeline{
-			Herdr:          pens,
-			Proxy:          &proxy.Client{Bin: cfg.Proxy.Bin},
+			Herdr: pens,
+			Proxy: &proxy.Client{Bin: cfg.Proxy.Bin},
+			// The board is the goal confirmation's last evidence: a
+			// worker that claimed and submitted inside the ceiling
+			// leaves a finished transcript and an idle status, and
+			// only the row says it ever worked.
+			Board:          board,
 			StartTimeout:   f.startTimeout,
 			DialogCeiling:  20 * time.Second,
 			ConfirmCeiling: f.confirmCeiling,

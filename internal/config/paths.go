@@ -1,9 +1,11 @@
 package config
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Name is this plugin's SHORT NAME (§13.2), which is what the contract names
@@ -26,7 +28,64 @@ const EnvPrefix = "DISPATCH_"
 // does: the bindings are the dispatcher's only state, and they are the one
 // thing about them that is not derivable from the board or from Herdr.
 func StateDir() string {
-	return dirFrom(EnvPrefix+"STATE_DIR", "XDG_STATE_HOME", filepath.Join(".local", "state"))
+	dir := dirFrom(EnvPrefix+"STATE_DIR", "XDG_STATE_HOME", filepath.Join(".local", "state"))
+	guardOperatorStateDir(dir)
+	return dir
+}
+
+// realHome is the operator's own home directory as the process found it,
+// captured at package init — before any test can move HOME — because that is
+// the only moment it is still knowable.
+var realHome = func() string {
+	h, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return h
+}()
+
+// underTest reports whether this binary is a `go test` binary. The flag the
+// testing package registers before it runs anything is the evidence: importing
+// `testing` into a production package to ask the question outright would put
+// the test harness into the shipped binary.
+func underTest() bool { return flag.Lookup("test.v") != nil }
+
+// guardOperatorStateDir stops a TEST resolving the operator's own state
+// directory, and it is the whole of what keeps a suite off the live fleet.
+//
+// Everything this daemon writes lives under StateDir — the bindings, the
+// worktrees a worker is checked out into, the default worker MCP document, the
+// log, the socket and the lock — so one guard here covers all of them. Nothing
+// in a test names those paths: config.WorkerMCPConfigPath() reads the
+// environment wherever it is called from, and on 2026-08-29 a spawn case that
+// mentioned no path at all wrote the operator's live
+// ~/.local/state/dispatch/worker.mcp.json with a `htask` door pointing at a
+// fake binary in a t.TempDir the test then deleted. Every worker spawned on
+// that machine afterwards had a dead tasks door.
+//
+// A panic rather than a returned error, and only ever inside a test binary: it
+// is a programming error in the SUITE — a package with no
+// testenv.RunIsolated — and it must fail the run rather than be handled. A
+// shipped hdis never reaches it.
+func guardOperatorStateDir(dir string) {
+	if !underTest() || realHome == "" || !underRoot(dir, realHome) {
+		return
+	}
+	panic(fmt.Sprintf("config.StateDir() resolved to %s, inside the operator's own home %s, "+
+		"from a test binary: a test that wrote there would edit the live fleet's state. "+
+		"Give the package a TestMain that calls testenv.RunIsolated, or set %sSTATE_DIR "+
+		"or XDG_STATE_HOME to a temporary directory for the case.",
+		dir, realHome, EnvPrefix))
+}
+
+// underRoot says whether dir is root or sits inside it. The separator is what
+// makes it a directory test rather than a string test.
+func underRoot(dir, root string) bool {
+	root = strings.TrimSuffix(root, string(os.PathSeparator))
+	if root == "" {
+		return false
+	}
+	return dir == root || strings.HasPrefix(dir, root+string(os.PathSeparator))
 }
 
 // ConfigDir is DISPATCH_CONFIG_DIR, else

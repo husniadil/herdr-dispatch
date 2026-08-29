@@ -41,7 +41,7 @@ func TestStatusMarksAWorkerHoldingItsSlotWhileAwaitingReview(t *testing.T) {
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("first tick: %v", err)
 	}
-	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","revision":1}]}}`)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"idle"},{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"idle","revision":1}]}}`)
 	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"review"},"ready":false,"dependents":[]}`)
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("second tick: %v", err)
@@ -69,7 +69,7 @@ func TestAWorkingWorkerIsNotCountedAsAwaitingReview(t *testing.T) {
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("first tick: %v", err)
 	}
-	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"working","revision":1}]}}`)
+	f.Write(t, "panes.json", `{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p1","workspace_id":"wM","tab_id":"wM:t1","agent_status":"idle"},{"pane_id":"wM:p9","name":"hdis-7","agent":"claude","agent_status":"working","revision":1}]}}`)
 	f.Write(t, "get.json", `{"task":{"id":"01AAA","seq":7,"project":"/src/p","title":"do the thing","status":"doing","pane":"wM:p9"},"ready":false,"dependents":[]}`)
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("second tick: %v", err)

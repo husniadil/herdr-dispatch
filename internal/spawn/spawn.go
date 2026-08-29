@@ -41,6 +41,7 @@ import (
 
 	"github.com/husniadil/herdr-dispatch/internal/config"
 	"github.com/husniadil/herdr-dispatch/internal/herdrclient"
+	"github.com/husniadil/herdr-dispatch/internal/htask"
 	"github.com/husniadil/herdr-dispatch/internal/proxy"
 )
 
@@ -185,17 +186,27 @@ func PointerGoal(seq int) string {
 // already sent, and findings with nowhere to go die in the pane while the
 // board stays green.
 //
-// The route is the mail door at $HDIS_DISPATCHER_PANE, which is the desk that
-// owns the work — the pane the task was created from, not whoever started the
-// daemon. Three reasons it beats a board note. The address is already in the
-// pane's environment and already named by the condition the worker booted
-// with, so shot two reuses an address the conversation is holding rather than
-// introducing a second place to look. A board note is not task-scoped: htask
-// has no task-scoped note verb, so the findings would land on the notes board
-// as a pre-decision idea, detached from the row the operator is about to
-// judge. And durability, the one real argument for the note, is already the
-// mail store's: `inbox` lists what was sent whether or not the pane marker
-// ever arrived, so an unread notify sits there rather than evaporating.
+// The route is the mail door, addressed to `human` — the operator — as a
+// notify, which owes no reply. It names the task in the body, because a
+// message to the operator is not task-scoped and the row it belongs to is the
+// one thing its reader needs first.
+//
+// It used to be $HDIS_DISPATCHER_PANE, and that was wrong everywhere it
+// mattered. That variable is a PANE, and on a fleet box the desk it resolves
+// to is the daemon's own base pane, which is a plain shell with no agent in
+// it: measured on 2026-08-29, the pane marker came back "agent target not
+// found" on the laptop and "pane no longer exists" on the box, hmail counted
+// the message undeliverable, and `mail` reported degraded on every box that
+// had ever verified a task. Nothing was lost — the store is authoritative and
+// the message reached the inbox and the hub either way — but a permanently
+// degraded mailbox is a signal that stops meaning anything. `human` is an
+// address rather than a pane, so no marker is attempted and nothing can be
+// undeliverable.
+//
+// A board note was the alternative and is still refused: htask has no
+// task-scoped note verb, so the findings would land on the notes board as a
+// pre-decision idea, detached from the row the operator is about to judge.
+// Durability, the one real argument for it, is already the mail store's.
 //
 // It is the DOOR and never `hmail`, for the reason the verifier's condition
 // recorded before it: a dispatched pane is opened in a worktree under the
@@ -271,7 +282,7 @@ func SelfReviewCondition(seq int) string {
 		"invariant your report claims, write a COMPILING mutation that removes it, run the "+
 		"tests your report names, and confirm they FAIL. Revert each one. Then report which "+
 		"mutations bit and which did not, and for each that did not, say whether you believe "+
-		"it is a missing test or bad aim, with the mail MCP send to $"+DispatcherPaneVar+". "+
+		"it is a missing test or bad aim, with the mail MCP send to `human` naming task %d. "+
 		"KEEP FIXING what a mutation proved unpinned, and name the new head in the first line "+
 		"of that message. Fix only a gap a mutation proved or something the operator named; "+
 		"send anything else as a proposal that waits for a verdict. Then read the diff itself, "+
@@ -279,7 +290,7 @@ func SelfReviewCondition(seq int) string {
 		"implements, a gap your report never claimed, a case the code does not handle. Prove "+
 		"each with a mutation or a run, or say plainly that it is a suspicion you could not "+
 		"prove. Send everything you have "+
-		"before your pane closes with the task; nothing waits for later.", seq)
+		"before your pane closes with the task; nothing waits for later.", seq, seq)
 }
 
 // PromptedGoalBudget bounds a /goal that arrives through `herdr agent
@@ -321,12 +332,22 @@ const PromptedGoalBudget = 1023
 // the 506 the same shape rendered without them, and still inside this budget,
 // so it did not move.
 //
-// It sits at 640 now: the same headroom the 512 was chosen for — a longer temp
-// path, another profile flag and a five-digit task number — and still under
-// half of the ~1.4k line that came out broken on the live shell. What bounds
-// this is the measured break, never the budget's own roundness, and the test
-// that types the corrupted shape still refuses it at this ceiling.
-const TypedLineBudget = 640
+// The settings document then joined the CLAUDE provider's line as well. It was
+// the codex provider's alone while it carried only the launcher's routing
+// half; it now carries this dispatcher's own deny rules, which are about what
+// a worker may DO and so belong on every worker. `--settings <path>` is 11
+// characters plus the path, and the path is a temp file: measured on
+// 2026-08-29 against a macOS temp directory of 48 characters, a claude-profile
+// line for a two-digit task rendered 661 characters, where the same shape
+// without it rendered 573.
+//
+// It sits at 768 now, which is the 640 plus that 88 and the same headroom the
+// 512 and the 640 were each chosen for — a longer temp path, another profile
+// flag and a five-digit task number. It is still comfortably under the ~1.4k
+// line that came out broken on the live shell, and what bounds this is that
+// measured break rather than the budget's own roundness: the test that types
+// the corrupted shape still refuses it at this ceiling.
+const TypedLineBudget = 768
 
 // TypedLine reconstructs the command line herdr types into a worker's pane
 // for an agent argv: the client's own name, then every argument, quoted the
@@ -442,10 +463,22 @@ type KeepPaneError struct {
 func (e *KeepPaneError) Error() string { return e.Err.Error() }
 func (e *KeepPaneError) Unwrap() error { return e.Err }
 
+// Rows is the board, as this pipeline reads it: one task by its id. It is an
+// interface rather than the adapter itself so a test can answer it without a
+// board, the same way the fake herdr answers the pane reads.
+type Rows interface {
+	Get(ctx context.Context, id string) (htask.Task, error)
+}
+
 // Pipeline holds the adapters and the bounds of every wait it makes.
 type Pipeline struct {
 	Herdr *herdrclient.Client
 	Proxy *proxy.Client
+	// Board is the SECOND evidence that a goal registered, asked once when
+	// the screen and Herdr's status have run out of ceiling. A nil Board is
+	// a pipeline with no board to ask, which is every test that is not
+	// about this, and it costs only that evidence.
+	Board Rows
 
 	// SettingsDir is where a codex spawn writes its settings file; empty
 	// means the system temp directory.
@@ -529,6 +562,12 @@ type Request struct {
 	// there before the pane's shell is. Empty is a document that named
 	// none, and then the pane carries only what this pipeline sets.
 	Env []config.EnvVar
+	// TaskID is the board row this worker is being brought up for. It is
+	// what the goal confirmation asks the board about when the screen has
+	// said nothing: a row this pane has already claimed is a goal that
+	// registered, whatever the screen went on to show. Empty leaves the
+	// screen and Herdr's status as the only evidence.
+	TaskID string
 	// Project is the task's project directory, as the board records it. It
 	// is what a live pane's cwd is measured against to find the desk that
 	// owns the work; empty means no desk can be found that way. It is NOT
@@ -617,18 +656,31 @@ func under(dir, root string) bool {
 func (p *Pipeline) Run(ctx context.Context, req Request) (string, error) {
 	agentArgs := req.Profile.AgentArgs()
 
-	// Step zero for the codex provider, before anything is built: the proxy
-	// publishes the client-policy half, and a down daemon says so here.
-	var settingsDoc string
+	// Step zero, before anything is built: the settings document every
+	// worker is launched with. It carries two halves — the launcher's
+	// client policy, which only the codex provider has and which a down
+	// daemon reports here rather than as a startup timeout with the cause
+	// hidden in the pane, and this dispatcher's own deny rules, which every
+	// worker gets because they are about what a worker may DO.
+	//
+	// A profile carrying its own --settings is refused rather than
+	// overridden: the client keeps only the last of two and drops the first
+	// without saying so, and the one it would drop is the one holding the
+	// deny rules.
+	if req.Profile.HasSettingsArg() {
+		return "", fmt.Errorf("spawn %s: the profile already carries --settings, which this dispatcher must splice itself; the client keeps only the last of two and drops the first without saying so, and the dropped one is what denies a worker the commands that would take the fleet down", req.Name)
+	}
+	var launcherDoc string
 	if req.Profile.Provider == config.ProviderCodex {
-		if req.Profile.HasSettingsArg() {
-			return "", fmt.Errorf("spawn %s: the profile already carries --settings, which the codex provider must splice itself; the client keeps only the last of two and drops the first without saying so", req.Name)
-		}
 		doc, err := p.Proxy.Settings(ctx)
 		if err != nil {
 			return "", fmt.Errorf("spawn %s: %w", req.Name, err)
 		}
-		settingsDoc = doc
+		launcherDoc = doc
+	}
+	settingsDoc, err := config.WorkerSettings(launcherDoc)
+	if err != nil {
+		return "", fmt.Errorf("spawn %s: %w", req.Name, err)
 	}
 
 	// The doors, before a pane is opened: a document the operator named and
@@ -988,22 +1040,26 @@ func (p *Pipeline) writeSettings(pane, doc string) (string, error) {
 }
 
 func (p *Pipeline) build(ctx context.Context, req Request, pane, settingsDoc string, agentArgs []string) error {
-	if req.Profile.Provider == config.ProviderCodex {
-		// The settings half travels as a file rather than inline, because
-		// the argv is typed into the pane and the document is most of what
-		// made that line long enough to break. `claude --settings <path>`
-		// loads a path exactly as it loads the same JSON inline, measured
-		// against claude 2.1.238: the same document in a file and on the
-		// command line produced the same behaviour, and a path that does
-		// not exist is refused with "Settings file not found: <path>".
-		path, err := p.writeSettings(pane, settingsDoc)
-		if err != nil {
-			return fmt.Errorf("spawn %s: %w", req.Name, err)
-		}
-		agentArgs = append([]string{"--settings", path}, agentArgs...)
+	// The settings document travels as a file rather than inline, because
+	// the argv is typed into the pane and the document is most of what made
+	// that line long enough to break. `claude --settings <path>` loads a
+	// path exactly as it loads the same JSON inline, measured against claude
+	// 2.1.238: the same document in a file and on the command line produced
+	// the same behaviour, and a path that does not exist is refused with
+	// "Settings file not found: <path>".
+	//
+	// Every worker gets one, on either provider. The deny rules in it are
+	// what a bypass-mode worker cannot talk its way past, and a claude-provider
+	// worker is in exactly the same position as a codex one about that.
+	path, err := p.writeSettings(pane, settingsDoc)
+	if err != nil {
+		return fmt.Errorf("spawn %s: %w", req.Name, err)
+	}
+	agentArgs = append([]string{"--settings", path}, agentArgs...)
 
-		// The environment half belongs to the pane's shell, which the agent
-		// then inherits as a direct child.
+	if req.Profile.Provider == config.ProviderCodex {
+		// The environment half of the codex launch belongs to the pane's
+		// shell, which the agent then inherits as a direct child.
 		if err := p.Herdr.PaneRun(ctx, pane, p.Proxy.EnvCommand(req.Profile.Account)); err != nil {
 			return fmt.Errorf("spawn %s: %w", req.Name, err)
 		}
@@ -1018,7 +1074,7 @@ func (p *Pipeline) build(ctx context.Context, req Request, pane, settingsDoc str
 			req.Name, len(line), TypedLineBudget)
 	}
 
-	err := p.startWhenShellIsFree(ctx, herdrclient.StartRequest{
+	err = p.startWhenShellIsFree(ctx, herdrclient.StartRequest{
 		Name:      req.Name,
 		Kind:      Kind,
 		Pane:      pane,
@@ -1032,7 +1088,7 @@ func (p *Pipeline) build(ctx context.Context, req Request, pane, settingsDoc str
 	if err := p.answerStartupDialog(ctx, pane); err != nil {
 		return fmt.Errorf("spawn %s: %w", req.Name, err)
 	}
-	if err := p.confirmGoal(ctx, pane); err != nil {
+	if err := p.confirmGoal(ctx, req, pane); err != nil {
 		var keep *KeepPaneError
 		if errors.As(err, &keep) {
 			keep.Err = fmt.Errorf("spawn %s: %w", req.Name, keep.Err)
@@ -1093,6 +1149,21 @@ func (p *Pipeline) answerStartupDialog(ctx context.Context, pane string) error {
 // confirmGoal reads the pane until the goal shows, and falls back to the
 // worker's own status: a registered goal puts it to work immediately.
 //
+// The BOARD is the third evidence, and the only one the screen cannot
+// contradict. Measured on 2026-08-29: a worker claimed its task, did the work
+// and submitted it INSIDE this ceiling, so the pane's last screen was a
+// finished transcript with no goal marker on it and herdr called the worker
+// idle — the exact shape of a goal that was refused. This reported "the goal
+// never registered", retired a pane that had already done the work, and
+// removed its checkout while the board showed the work in review. A row this
+// pane has CLAIMED is a goal that registered: nothing else claims as
+// `agent:<pane>`.
+//
+// It is asked ONCE, after the ceiling, rather than on every poll. This is the
+// evidence that decides a failure, and one board process per failing spawn is
+// all that costs; a read per poll would be sixty of them per worker for the
+// same answer.
+//
 // Running out of ceiling is not a verdict. Only one thing on this screen is:
 // herdr calling the worker idle means it is sitting at its prompt box with
 // nothing armed, and no goal is coming. Everything else — a read that never
@@ -1101,7 +1172,7 @@ func (p *Pipeline) answerStartupDialog(ctx context.Context, pane string) error {
 // with two live workers: the pane dies, the task goes back to ready, and the
 // next tick spawns another on top of it. Those panes are kept, and the ticks
 // that follow decide.
-func (p *Pipeline) confirmGoal(ctx context.Context, pane string) error {
+func (p *Pipeline) confirmGoal(ctx context.Context, req Request, pane string) error {
 	var last, status string
 	var readErr error
 	for i, n := 0, attempts(p.confirmCeiling(), p.Poll); i < n; i++ {
@@ -1123,6 +1194,9 @@ func (p *Pipeline) confirmGoal(ctx context.Context, pane string) error {
 		}
 		p.sleep(p.Poll)
 	}
+	if p.boardSaysItRegistered(ctx, req, pane) {
+		return nil
+	}
 	if readErr != nil {
 		return &KeepPaneError{Pane: pane, Err: fmt.Errorf(
 			"pane %s could not be read in %s, so whether the goal registered is unknown: %w; "+
@@ -1139,6 +1213,45 @@ func (p *Pipeline) confirmGoal(ctx context.Context, pane string) error {
 	return fmt.Errorf("the goal never registered in pane %s within %s and herdr calls the worker idle, "+
 		"so it is at its prompt with nothing armed; the pane last showed: %s",
 		pane, p.confirmCeiling(), tail(last))
+}
+
+// boardSaysItRegistered reports whether the board already shows this pane's
+// worker at work on the task, which is the one evidence a finished transcript
+// cannot argue with.
+//
+// It is evidence FOR THIS PANE and never for another. A row somebody else
+// holds is another worker's success, and this pane is exactly the one to
+// retire. A row past `doing` that nobody holds counts, because the claim ends
+// with the work and the board is not this pipeline's to predict.
+//
+// A board that cannot be read says nothing either way, and the screen's own
+// verdict stands: deciding that a worker is fine because htask is down is how
+// one task ends up with two live panes.
+func (p *Pipeline) boardSaysItRegistered(ctx context.Context, req Request, pane string) bool {
+	if p.Board == nil || req.TaskID == "" {
+		return false
+	}
+	row, err := p.Board.Get(ctx, req.TaskID)
+	if err != nil {
+		p.logf("pane %s showed no goal, and the board could not be asked whether it claimed task %s either: %v",
+			pane, req.TaskID, err)
+		return false
+	}
+	if claimed := row.Pane(); claimed != "" {
+		if claimed != pane {
+			return false
+		}
+		p.logf("pane %s shows no goal marker, but the board has task %s %s and claimed by it; the goal registered",
+			pane, req.TaskID, row.Status)
+		return true
+	}
+	switch row.Status {
+	case "review", "done", "cancelled":
+		p.logf("pane %s shows no goal marker, but the board has task %s in %s and unheld; the goal registered",
+			pane, req.TaskID, row.Status)
+		return true
+	}
+	return false
 }
 
 // statusOrUnknown names what herdr said, including when it never answered.
