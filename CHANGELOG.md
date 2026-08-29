@@ -5,6 +5,48 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
+## Unreleased
+
+**Added: a profile falls back to another when its account is at quota, with
+`fallback`.** A `codex` profile whose account is spent stopped the tasks
+routed to it dead, however much room a second account or a `claude` profile
+had. `fallback = "<profile>"` names where such a spawn goes instead, and the
+chain is walked at the spawn by a tick and by `hdis dispatch` alike: each step
+is evaluated against ITS OWN account, and a `claude` profile spends no proxy
+quota and is therefore always eligible, so it is an end a chain can always
+reach. A `fallback` naming a profile nobody defined, a chain that returns to a
+profile it has already tried, and a chain naming more than four profiles are
+all refused when the document is read. A fleet whose profiles name no
+`fallback` is unchanged in every word: its chain is one profile long, and the
+`AT_QUOTA` sentence it is refused with is the one it always was.
+
+**Changed: the quota gate reads the PROFILE's account, not only the account
+the proxy serves.** A profile pinned with `account = "..."` was gated on the
+proxy's top-level rollup, which is the serving account's — a different account
+from the one its workers really spend. It is now gated on its own account's
+figures, read out of the same one `proxenos usage --json` call the gate
+already made, so a chain across three accounts still costs one process per
+tick. An account the proxy did not report is an unknown quota and gates
+nothing, the same as a rollup that came back unread; the name is already a
+`doctor` finding under `proxy.missing_accounts`. A profile naming no `account`
+is gated on the serving rollup exactly as before.
+
+**Added: `doctor.profiles`, `status`'s `asked_profile`, and both names on
+`worker.spawned`.** `hdis doctor` prints one `profiles` line per profile that
+names a fallback — none for a fleet naming none — carrying the chain, each
+step's own quota state and which step a spawn would really launch through, and
+the JSON carries the same under `profiles` (a list either way) with `profile`,
+`fallback`, `launches` and a `chain` of `{profile, gated, account, refusal}`.
+A binding records the profile its worker really launched with AND the one the
+routing asked for, so `hdis status` names both on the row and in
+`asked_profile`, and a restart still reports both. The move is announced on
+the daemon's log — the channel every other finding of this dispatcher's
+reaches an operator on — and on the trail under `worker.spawned`'s
+`asked_profile` and `quota`. Nothing is said to the board: notes are the
+board's own verbs and this binary writes none of them. A caller reading only
+the nine contract codes is unaffected; `AT_QUOTA` is unchanged as a code and
+only names more profiles when a whole chain is spent.
+
 ## 0.8.1 — 2026-08-29
 
 **Fixed: the trust-folder dialog is answered where its cursor sits, so a

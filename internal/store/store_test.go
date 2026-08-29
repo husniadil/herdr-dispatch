@@ -3,6 +3,7 @@ package store
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -384,5 +385,49 @@ func TestSavingBindingsKeepsTheDeathCountsBesideThem(t *testing.T) {
 	}
 	if len(state.Bindings) != 1 || len(state.Deaths) != 1 {
 		t.Fatalf("loaded %d bindings and %d deaths, want one of each", len(state.Bindings), len(state.Deaths))
+	}
+}
+
+// A restart reads back BOTH names where a quota moved a spawn down a chain.
+// The pane is running one profile and the fleet asked for another, and a
+// restart that kept only the first would report a fleet running as configured
+// while its first account is still spent.
+func TestABindingKeepsTheProfileItWasAskedForAsWellAsTheOneItRan(t *testing.T) {
+	b := &Bindings{Path: filepath.Join(t.TempDir(), "dispatch-bindings.json")}
+	if err := b.Save(State{Bindings: []decide.Binding{{
+		TaskID: "01AAA", Pane: "wM:p9", Kind: decide.KindWorker,
+		Profile: "spare", AskedProfile: "routed",
+	}}}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	held, err := b.Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(held.Bindings) != 1 {
+		t.Fatalf("bindings: %+v", held.Bindings)
+	}
+	if got := held.Bindings[0]; got.Profile != "spare" || got.AskedProfile != "routed" {
+		t.Fatalf("the binding came back as profile %q asked %q", got.Profile, got.AskedProfile)
+	}
+}
+
+// A worker that launched with the profile it was asked for records one name.
+// The key is omitted rather than written empty, which is what every binding
+// on disk before chains existed reads as.
+func TestABindingThatDidNotFallBackWritesNoAskedProfile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dispatch-bindings.json")
+	b := &Bindings{Path: path}
+	if err := b.Save(State{Bindings: []decide.Binding{{
+		TaskID: "01AAA", Pane: "wM:p9", Kind: decide.KindWorker, Profile: "routed",
+	}}}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if strings.Contains(string(raw), "asked_profile") {
+		t.Fatalf("a binding that moved nowhere wrote an asked profile: %s", raw)
 	}
 }

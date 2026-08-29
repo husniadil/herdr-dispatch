@@ -34,6 +34,15 @@ type Usage struct {
 	// Plan is the serving account's plan, for a report to print beside the
 	// figure. Nothing gates on it.
 	Plan string
+	// Accounts is the same three facts for every OTHER account the proxy
+	// holds, keyed by stored name. The rollup above is the serving account
+	// and answers for a profile that names none; a profile pinned to an
+	// account with `account = "..."` spends THAT one, and the gate has to
+	// read its figures rather than the serving account's.
+	//
+	// It is read out of the same one `usage --json` call, so a chain of
+	// profiles on different accounts still costs one process per tick.
+	Accounts map[string]Usage
 }
 
 // usagePayload is the shape `usage --json` answers with, read for the rollup
@@ -56,6 +65,19 @@ type usagePayload struct {
 	Windows []struct {
 		UsedPercent float64 `json:"used_percent"`
 	} `json:"windows"`
+	// Accounts is every account the proxy holds, each carrying the same
+	// fields as the rollup. It is decoded for the accounts a PROFILE names:
+	// the rollup answers for the serving account alone, and a profile
+	// pinned elsewhere spends a quota that is only in here.
+	Accounts []struct {
+		Account      string `json:"account"`
+		Known        bool   `json:"known"`
+		LimitReached bool   `json:"limit_reached"`
+		Plan         string `json:"plan"`
+		Windows      []struct {
+			UsedPercent float64 `json:"used_percent"`
+		} `json:"windows"`
+	} `json:"accounts"`
 }
 
 // Usage asks the proxy what the serving account has already spent.
@@ -95,6 +117,26 @@ func (c *Client) Usage(ctx context.Context) (Usage, error) {
 		if w.UsedPercent > u.UsedPercent {
 			u.UsedPercent = w.UsedPercent
 		}
+	}
+	for _, a := range payload.Accounts {
+		if a.Account == "" {
+			continue
+		}
+		one := Usage{
+			Known:        a.Known,
+			LimitReached: a.LimitReached,
+			Account:      a.Account,
+			Plan:         a.Plan,
+		}
+		for _, w := range a.Windows {
+			if w.UsedPercent > one.UsedPercent {
+				one.UsedPercent = w.UsedPercent
+			}
+		}
+		if u.Accounts == nil {
+			u.Accounts = map[string]Usage{}
+		}
+		u.Accounts[a.Account] = one
 	}
 	return u, nil
 }

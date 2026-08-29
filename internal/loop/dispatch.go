@@ -38,6 +38,13 @@ type Worker struct {
 	// rather than what the config says now, so a document rewritten since
 	// does not change what this reports about a pane already running.
 	Profile string `json:"profile,omitempty"`
+	// AskedProfile is the profile the routing asked for when a quota moved
+	// this spawn down a fallback chain. Omitted where nothing moved, which
+	// is every worker on a fleet whose profiles name no fallback: the two
+	// names answer different questions — what is running in this pane, and
+	// what the fleet meant to run — and printing them both for every worker
+	// would say the same thing twice.
+	AskedProfile string `json:"asked_profile,omitempty"`
 	// AgentStatus is herdr's own word for the worker, or empty when herdr
 	// no longer lists the pane at all.
 	AgentStatus string `json:"agent_status"`
@@ -229,21 +236,22 @@ func (l *Loop) Status(ctx context.Context) (Status, error) {
 		row := l.rows[b.TaskID]
 		status, alive := panes[b.Pane]
 		st.Workers = append(st.Workers, Worker{
-			TaskID:      b.TaskID,
-			Seq:         row.Seq,
-			Title:       row.Title,
-			Project:     row.Project,
-			Pane:        b.Pane,
-			Kind:        kindOf(b),
-			Profile:     b.Profile,
-			AgentStatus: status,
-			Branch:      b.Branch,
-			Tab:         b.Tab,
-			PaneAlive:   alive,
-			PromptedAt:  b.PromptedAt,
-			Prompts:     b.Prompts,
-			Notified:    b.Notified,
-			Deaths:      l.deathsLocked(b.TaskID),
+			TaskID:       b.TaskID,
+			Seq:          row.Seq,
+			Title:        row.Title,
+			Project:      row.Project,
+			Pane:         b.Pane,
+			Kind:         kindOf(b),
+			Profile:      b.Profile,
+			AskedProfile: b.AskedProfile,
+			AgentStatus:  status,
+			Branch:       b.Branch,
+			Tab:          b.Tab,
+			PaneAlive:    alive,
+			PromptedAt:   b.PromptedAt,
+			Prompts:      b.Prompts,
+			Notified:     b.Notified,
+			Deaths:       l.deathsLocked(b.TaskID),
 
 			AwaitingReview: awaitingReview(b, row.Status),
 		})

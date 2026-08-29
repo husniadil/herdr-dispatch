@@ -582,6 +582,7 @@ exists to prevent.
 | `args`     | Extra argv passed through to the worker.                                                                                     |
 | `account`  | A stored account of the proxy launcher this profile's workers run as. `codex` only; naming one on a `claude` profile is refused when the document is read. Optional; without it the launcher's own standing selection serves. |
 | `mcp_config` | The MCP document this profile's workers read their doors from, overriding `[worker] mcp_config` below. Optional. |
+| `fallback` | Another profile to launch through when THIS profile's spawn would be refused `AT_QUOTA`. The named profile must be defined, a chain must not come back to a profile it has already tried, and at most four profiles are followed; all three are refused when the document is read. Optional, and without it a spawn at quota is refused exactly as it always was. |
 
 Naming an `account` exports the launcher's own per-session tag —
 `ANTHROPIC_AUTH_TOKEN=proxenos-account:<name>` — into the worker's pane, after
@@ -786,10 +787,11 @@ A worker that dies on a quota error has already cost a pane, and with the
 verification lane on, a submission spends twice. So before a `codex` worker is
 brought up — by a tick or by `hdis dispatch` — this dispatcher asks the proxy
 what the account it routes through has already spent, and refuses rather than
-spending the pane:
+spending the pane. The account is the PROFILE's own where it names one with
+`account`, and the account the proxy serves where it names none:
 
-- `limit_reached` on the proxy's own rollup refuses, always. There is no
-  config for this one: the proxy has said the account cannot pay.
+- `limit_reached` on that account refuses, always. There is no config for this
+  one: the proxy has said the account cannot pay.
 - `max_used_percent` refuses at or past that share of the account's fullest
   window. **Unset — the default — is no threshold**, so an operator who never
   wrote the key still gets the `limit_reached` gate and never a percentage
@@ -823,6 +825,88 @@ Three things are deliberate about the shape of this gate:
   ask. Fail loud, idle safe: a proxy that is really down still fails the spawn
   at step zero, in the proxy's own words, and an unknown quota is not a reason
   to stop dispatching.
+
+##### Falling back
+
+A refusal is the honest answer when there is nowhere else to go. Where there
+is, a profile says so with `fallback`, and a spawn the quota gate would have
+refused launches through the named profile instead:
+
+```toml
+[profiles.routed]
+provider = "codex"
+account = "work-codex"
+fallback = "spare"
+
+[profiles.spare]
+provider = "codex"
+account = "spare-codex"
+fallback = "worker"
+
+[profiles.worker]
+provider = "claude"
+```
+
+The chain is walked at the spawn, by a tick and by `hdis dispatch` alike, and
+**each step is evaluated against its OWN account** — that is the whole point
+of one. `routed` is gated on `work-codex`, `spare` on `spare-codex`, and a
+`claude` profile spends no proxy quota at all and is therefore always
+eligible, which is what makes `worker` an end a chain can always reach. A
+profile naming no `account` is gated on the account the proxy serves, exactly
+as every profile was before this key existed. The figures come out of the same
+one `usage --json` call the gate already made, so a chain across three
+accounts still costs one process per tick.
+
+Three things are refused when the document is read rather than hours later on
+the first task a quota stops: a `fallback` naming a profile nobody defined, a
+chain that comes back to a profile it has already tried, and a chain naming
+more than four profiles. Four is deep enough for the shape this exists for —
+a pinned account, a spare account, and a `claude` profile at the end — with
+one step to spare.
+
+A spawn that moved says so in the daemon's log, where every other finding of
+this dispatcher's reaches the operator, and it names both profiles and the
+figures that moved it:
+
+```
+task 41: launched through spare because routed's account work-codex is at quota (at its limit)
+```
+
+It says nothing to the board. Notes are the board's own verbs and this binary
+writes none of them; the `worker.spawned` event on the trail carries the same
+two names under `asked_profile` and `quota`. The binding records both, so
+`hdis status` names the profile the pane is really running and the one the
+fleet asked for, and a restart still reports both.
+
+When every profile in the chain is at quota the refusal is still `AT_QUOTA`,
+and it names each one it tried and whose account stopped it:
+
+```
+$ hdis dispatch 41
+hdis: CONFLICT: AT_QUOTA: task 41 launches through the proxy and every profile
+it would launch through is at quota: routed's account work-codex is at quota
+(at its limit), and spare's account spare-codex is at quota (95% of its
+window, max_used_percent 90)
+```
+
+A fleet whose profiles name no `fallback` is unchanged in every one of these
+words: its chain is one profile long and it is refused in the sentence it
+always was.
+
+`hdis doctor` prints one `profiles` line per profile that names a fallback —
+none at all for a fleet naming none — with the chain, what each step's own
+quota says now, and which step a spawn would really launch through:
+
+```
+  profiles    routed fallback -> spare: routed (work-codex) AT QUOTA: the proxy reports work-codex at its limit -> spare (spare-codex) clear -> worker (spends no proxy quota, always eligible), launching spare because routed is at quota
+  profiles    routed fallback -> spare: routed (work-codex) clear -> spare (spare-codex) clear -> worker (spends no proxy quota, always eligible), launching routed
+```
+
+A chain is invisible otherwise: an operator whose fleet is quietly running
+everything through the second profile has no other way to see that the first
+one's account is spent. The JSON carries the same facts under `profiles`, a
+list either way, each entry holding `profile`, `fallback`, `launches`, and a
+`chain` of `{profile, gated, account, refusal}`.
 
 `hdis doctor` carries the same facts on a `quota` line, printed only where a
 profile launches through the proxy:

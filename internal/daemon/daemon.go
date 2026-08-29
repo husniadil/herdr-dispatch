@@ -450,6 +450,47 @@ type DoctorReport struct {
 	// Worker is what every worker is launched with whichever profile it
 	// came from: the MCP document that is the whole of its doors.
 	Worker WorkerHealth `json:"worker"`
+	// Profiles is every configured profile that names a fallback, with the
+	// chain it starts and what each step's quota says right now. A fleet
+	// whose profiles name none has nothing to report and gets an empty
+	// list; it is a list either way.
+	Profiles []ProfileHealth `json:"profiles"`
+}
+
+// ProfileHealth is one fallback chain as doctor reports it: the profile the
+// routing would ask for, the profiles a quota would move the spawn to, and
+// what stops or allows each of them now.
+//
+// It exists because a chain is invisible otherwise. An operator whose fleet
+// is quietly running everything through the second profile in a chain has no
+// other way to see that the first one's account is spent.
+type ProfileHealth struct {
+	// Profile is the head of the chain.
+	Profile string `json:"profile"`
+	// Fallback is the profile it falls back to, which is the second step of
+	// Chain. It is named on its own because it is what the document says,
+	// and the chain is what following it works out to.
+	Fallback string `json:"fallback"`
+	// Chain is every profile in order, the head included.
+	Chain []ProfileStep `json:"chain"`
+	// Launches is the profile a spawn asked for this one would launch
+	// through right now, empty when every step is at quota. It is the
+	// answer the chain exists to give.
+	Launches string `json:"launches,omitempty"`
+}
+
+// ProfileStep is one profile of a chain and the quota it would be gated on.
+type ProfileStep struct {
+	Profile string `json:"profile"`
+	// Gated is whether this step spends the proxy's quota at all. A claude
+	// profile does not, and is eligible whatever the proxy says.
+	Gated bool `json:"gated"`
+	// Account is whose quota gates it: the profile's own, or empty for the
+	// serving one.
+	Account string `json:"account,omitempty"`
+	// Refusal is why a spawn through this step would be refused now, in the
+	// words the dispatch verb would use. Empty means it would be allowed.
+	Refusal string `json:"refusal,omitempty"`
 }
 
 // WorkerHealth is the worker-side launch policy as doctor reports it: which
@@ -657,7 +698,11 @@ func (d *Daemon) doctor(ctx context.Context, req protocol.Request) (DoctorReport
 	rep.Worker = d.workerHealth()
 	rep.Events = d.eventsHealth()
 	rep.Herdr = d.herdrHealth(ctx)
-	rep.Proxy = d.proxyHealth(ctx)
+	var quota decide.Quota
+	rep.Proxy, quota = d.proxyHealth(ctx)
+	// Built from the quota the proxy line already read, so doctor asks the
+	// launcher what has been spent once and not once per chain.
+	rep.Profiles = d.profileHealth(quota)
 	board, err := d.Board.Doctor(ctx)
 	if err != nil {
 		rep.Board.Error = err.Error()
@@ -754,10 +799,11 @@ func (d *Daemon) herdrHealth(ctx context.Context) HerdrHealth {
 // proxyHealth asks the proxy whether it is up. doctor never fails, so a proxy
 // that is down or absent is the answer here rather than an error: it is
 // exactly the state an operator ran doctor to learn.
-func (d *Daemon) proxyHealth(ctx context.Context) ProxyHealth {
+func (d *Daemon) proxyHealth(ctx context.Context) (ProxyHealth, decide.Quota) {
 	out := ProxyHealth{Binary: config.DefaultProxy, Profiles: []string{}, MissingAccounts: []AccountFinding{}}
+	var quota decide.Quota
 	if d.Loop == nil {
-		return out
+		return out, quota
 	}
 	if d.Loop.Config.Proxy.Bin != "" {
 		out.Binary = d.Loop.Config.Proxy.Bin
@@ -769,13 +815,13 @@ func (d *Daemon) proxyHealth(ctx context.Context) ProxyHealth {
 	}
 	sort.Strings(out.Profiles)
 	if d.Loop.Spawn == nil || d.Loop.Spawn.Proxy == nil {
-		return out
+		return out, quota
 	}
 	st, err := d.Loop.Spawn.Proxy.Status(ctx)
 	if err != nil {
 		out.Installed = !errors.Is(err, proxy.ErrNotInstalled)
 		out.Error = err.Error()
-		return out
+		return out, quota
 	}
 	out.Installed, out.Reachable, out.Account = true, true, st.Account
 	d.checkProfileAccounts(ctx, &out)
@@ -783,6 +829,7 @@ func (d *Daemon) proxyHealth(ctx context.Context) ProxyHealth {
 	// spends no account here, and there is nothing to report.
 	if len(out.Profiles) > 0 {
 		q := d.Loop.Quota(ctx)
+		quota = q
 		out.Quota = QuotaHealth{
 			Known:          q.Known,
 			LimitReached:   q.LimitReached,
@@ -792,6 +839,42 @@ func (d *Daemon) proxyHealth(ctx context.Context) ProxyHealth {
 			Plan:           q.Plan,
 			Refusal:        d.Loop.QuotaRefusal(q),
 		}
+	}
+	return out, quota
+}
+
+// profileHealth is every fallback chain the config names, with what each step
+// costs against the quota that was just read. A fleet naming no fallback has
+// nothing here, and gets an empty list rather than an absent field.
+func (d *Daemon) profileHealth(q decide.Quota) []ProfileHealth {
+	out := []ProfileHealth{}
+	if d.Loop == nil {
+		return out
+	}
+	names := make([]string, 0, len(d.Loop.Config.Profiles))
+	for name := range d.Loop.Config.Profiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		p := d.Loop.Config.Profiles[name]
+		if p.Fallback == "" {
+			continue
+		}
+		health := ProfileHealth{Profile: name, Fallback: p.Fallback, Chain: []ProfileStep{}}
+		for _, step := range d.Loop.Config.FallbackChain(name) {
+			at := d.Loop.Config.Profiles[step]
+			gated := at.Provider == config.ProviderCodex
+			one := ProfileStep{Profile: step, Gated: gated, Account: at.Account}
+			if gated {
+				one.Refusal = d.Loop.QuotaRefusal(q.For(at.Account))
+			}
+			if health.Launches == "" && one.Refusal == "" {
+				health.Launches = step
+			}
+			health.Chain = append(health.Chain, one)
+		}
+		out = append(out, health)
 	}
 	return out
 }

@@ -1075,6 +1075,9 @@ func (l *Loop) snapshot(ctx context.Context) (decide.Snapshot, error) {
 	// account every codex worker routes through, so asking per ready row
 	// would spend a process per row for the same answer.
 	snap.Quota = l.quota(ctx)
+	// The profile table as facts, so the core can walk a fallback chain
+	// without reading a config of its own.
+	snap.Profiles = l.profileFacts()
 
 	l.mu.Lock()
 	l.rows = rows
@@ -1183,6 +1186,13 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 	if err != nil {
 		return err
 	}
+	// A spawn a quota moved down a fallback chain says so on the daemon's
+	// log, where every other finding of this dispatcher's reaches the
+	// operator. It says nothing to the board: notes are the board's own
+	// verbs, and this binary writes none of them.
+	if a.QuotaNote != "" {
+		l.logf("task %s: %s", row.ID, a.QuotaNote)
+	}
 	// The checkout comes first, and no checkout means no worker. A worker
 	// edits, stages and commits, so the project directory — the one the
 	// operator sits in and every other worker would otherwise hold — is the
@@ -1248,19 +1258,26 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 	// already be under way. The error still reaches the operator's log.
 	l.mu.Lock()
 	l.bindings = append(l.bindings, decide.Binding{
-		TaskID:     row.ID,
-		Pane:       pane,
-		Kind:       decide.KindWorker,
-		Profile:    name,
-		Worktree:   tree,
-		Tab:        l.Spawn.TabOf(pane),
-		Branch:     branch,
-		PromptedAt: l.now(),
-		Prompts:    1,
+		TaskID:  row.ID,
+		Pane:    pane,
+		Kind:    decide.KindWorker,
+		Profile: name,
+		// Empty unless a quota moved the spawn, so a worker that launched
+		// with the profile it was asked for records one name.
+		AskedProfile: a.AskedFor,
+		Worktree:     tree,
+		Tab:          l.Spawn.TabOf(pane),
+		Branch:       branch,
+		PromptedAt:   l.now(),
+		Prompts:      1,
 	})
-	ev := l.emitLocked(store.EntityWorker, KindSpawned, row.ID, row.Project, map[string]any{
+	detail := map[string]any{
 		"pane": pane, "branch": branch, "worktree": tree, "seq": row.Seq, "agent": profile.Agent, "profile": name,
-	})
+	}
+	if a.AskedFor != "" {
+		detail["asked_profile"], detail["quota"] = a.AskedFor, a.QuotaNote
+	}
+	ev := l.emitLocked(store.EntityWorker, KindSpawned, row.ID, row.Project, detail)
 	l.mu.Unlock()
 	l.fire(ev)
 	// The reservation is spent the moment the binding exists.

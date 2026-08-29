@@ -139,6 +139,14 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 		if line := accountsLane(rep.Proxy); line != "" {
 			fmt.Fprintf(out, "  accounts    %s\n", line)
 		}
+		// One line per profile that names a fallback, and none at all for a
+		// fleet whose profiles name none. A chain is invisible otherwise:
+		// an operator whose fleet is quietly running everything through the
+		// second profile in one has no other way to see the first one's
+		// account is spent.
+		for _, chain := range rep.Profiles {
+			fmt.Fprintf(out, "  profiles    %s\n", profilesLane(chain))
+		}
 		// The same rule, for the same reason: a fleet that has lost no
 		// worker has nothing here. When it has, this is the only line
 		// that says why a ready task is sitting still.
@@ -202,6 +210,13 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 				// reading a second worker on the same task is owed the
 				// first one's ending.
 				title += fmt.Sprintf("  (%d worker agent(s) died here before)", w.Deaths)
+			}
+			if w.AskedProfile != "" {
+				// Said on the row for the same reason: the profile column
+				// names what is really running in that pane, and an
+				// operator who configured the other one is owed the fact
+				// that a quota moved it.
+				title += fmt.Sprintf("  (asked for %s, which was at quota)", w.AskedProfile)
 			}
 			fmt.Fprintf(out, "#%-4d %-10s %-8s %-10s %-10s %-23s prompted %s x%d notified=%t  %s\n",
 				w.Seq, w.Pane, or(w.Tab, "-"), or(state, "unknown"), or(w.Profile, "-"), branch,
@@ -393,6 +408,45 @@ func accountsLane(p daemon.ProxyHealth) string {
 	}
 	return strings.Join(named, ", ") +
 		", which " + or(p.Binary, "proxenos") + " does not hold: its worker is refused at launch and again at the turn"
+}
+
+// profilesLane is one fallback chain as one line: what the document says,
+// what following it works out to, and which step a spawn asked for the head
+// would launch through right now.
+//
+// The chain's quota state is on it because the answer an operator wants is
+// not "there is a fallback" but "which profile is my fleet really running
+// on, and why". Where the proxy could not be asked, no step is refused and
+// the line reads as the document alone — an unread quota gates nothing.
+func profilesLane(h daemon.ProfileHealth) string {
+	steps := make([]string, 0, len(h.Chain))
+	for _, s := range h.Chain {
+		steps = append(steps, profileStep(s))
+	}
+	line := fmt.Sprintf("%s fallback -> %s: %s", h.Profile, h.Fallback, strings.Join(steps, " -> "))
+	switch {
+	case h.Launches == "":
+		return line + ", and no step of it can launch: a spawn asked for " +
+			h.Profile + " is refused AT_QUOTA naming every one"
+	case h.Launches == h.Profile:
+		return line + ", launching " + h.Launches
+	default:
+		return line + ", launching " + h.Launches + " because " + h.Profile + " is at quota"
+	}
+}
+
+// profileStep is one profile of a chain and what its own quota says. A
+// profile that spends no proxy quota says that rather than a figure, because
+// there is none to read and it is eligible whatever the proxy reports.
+func profileStep(s daemon.ProfileStep) string {
+	if !s.Gated {
+		return s.Profile + " (spends no proxy quota, always eligible)"
+	}
+	who := or(s.Account, "the account the proxy serves")
+	if s.Refusal != "" {
+		return fmt.Sprintf("%s (%s) AT QUOTA: %s", s.Profile, who, s.Refusal)
+	}
+	return fmt.Sprintf("%s (%s) clear", s.Profile, who)
 }
 
 // diedLane is the tasks nothing will dispatch again, as one line: the number

@@ -28,6 +28,33 @@ func (l *Loop) launchesThroughProxy(row htask.Task) bool {
 	return p.Provider == config.ProviderCodex
 }
 
+// profileFacts is the config's profile table as the core reads it: which
+// profiles spend the proxy's quota, which account each spends, and where a
+// spawn a quota refuses goes instead. It is resolved here because the core
+// reads no config, the same way Routes is.
+func (l *Loop) profileFacts() map[string]decide.ProfileFacts {
+	if len(l.Config.Profiles) == 0 {
+		return nil
+	}
+	out := make(map[string]decide.ProfileFacts, len(l.Config.Profiles))
+	for name, p := range l.Config.Profiles {
+		out[name] = decide.ProfileFacts{
+			Codex:    p.Provider == config.ProviderCodex,
+			Account:  p.Account,
+			Fallback: p.Fallback,
+		}
+	}
+	return out
+}
+
+// choose is the fallback chain for a row, walked against the quota as it
+// stands now: which profile the row's worker would launch through, and what
+// the chain had to pass to get there.
+func (l *Loop) choose(q decide.Quota, row htask.Task) decide.Choice {
+	asked := decide.RouteProfile(row.Priority, l.Config.ProfileNameFor(row.Project), l.Policy.Routes)
+	return decide.ChooseProfile(asked, l.launchesThroughProxy(row), l.profileFacts(), q, l.Policy)
+}
+
 // anyProfileLaunchesThroughProxy reports whether any configured profile is a
 // codex one. It is what keeps a claude-only fleet from shelling out to a
 // binary no worker it launches touches, once per tick, forever.
@@ -58,13 +85,29 @@ func (l *Loop) quota(ctx context.Context) decide.Quota {
 		l.logf("cannot ask the proxy what the account has spent, so no spawn is gated on quota this tick: %v", err)
 		return decide.Quota{}
 	}
-	return decide.Quota{
+	q := decide.Quota{
 		Known:        u.Known,
 		LimitReached: u.LimitReached,
 		UsedPercent:  u.UsedPercent,
 		Account:      u.Account,
 		Plan:         u.Plan,
 	}
+	// The per-account figures out of the same one call, for the profiles
+	// that name an account of their own. A chain whose steps sit on
+	// different accounts is still one process per tick.
+	if len(u.Accounts) > 0 {
+		q.Accounts = make(map[string]decide.Quota, len(u.Accounts))
+		for name, one := range u.Accounts {
+			q.Accounts[name] = decide.Quota{
+				Known:        one.Known,
+				LimitReached: one.LimitReached,
+				UsedPercent:  one.UsedPercent,
+				Account:      one.Account,
+				Plan:         one.Plan,
+			}
+		}
+	}
+	return q
 }
 
 // quotaRefusal is why a worker for this row must not be brought up now,
@@ -75,7 +118,10 @@ func (l *Loop) quotaRefusal(ctx context.Context, row htask.Task) string {
 	if !l.launchesThroughProxy(row) {
 		return ""
 	}
-	return decide.QuotaRefusal(l.quota(ctx), l.Policy)
+	// The whole chain, not the routed profile alone: a spawn the routed
+	// profile's account cannot pay for is not refused while a fallback
+	// still has room, and the tick that runs it would launch it anyway.
+	return l.choose(l.quota(ctx), row).Refusal()
 }
 
 // Quota is the proxy's word about the account, as doctor asks for it. It is

@@ -32,6 +32,32 @@ type Quota struct {
 	// Plan is the serving account's plan, carried for doctor to print. It
 	// gates nothing.
 	Plan string
+	// Accounts is the same facts for every account the proxy holds, keyed
+	// by stored name. A profile that names no account spends the serving
+	// one and is gated on the rollup above; a profile pinned with
+	// `account = "..."` spends that account, and its figures are in here.
+	//
+	// A name that is not in the map is a quota nothing could read, and an
+	// unread quota gates nothing — same as a rollup that came back
+	// unknown. doctor is where a name the proxy does not hold is reported.
+	Accounts map[string]Quota
+}
+
+// For is the quota the gate reads for a profile pinned to `account`: that
+// account's own figures, or the serving rollup where the profile names none.
+//
+// An account the proxy did not report answers an unknown quota, which gates
+// nothing. Refusing there would stop a fleet on a fact nobody read, and the
+// name is already a doctor finding under missing_accounts.
+func (q Quota) For(account string) Quota {
+	if account == "" {
+		return q
+	}
+	one, ok := q.Accounts[account]
+	if !ok {
+		return Quota{}
+	}
+	return one
 }
 
 // QuotaRefusal is why a codex spawn must not run against this quota now, or
@@ -63,4 +89,25 @@ func QuotaRefusal(q Quota, p Policy) string {
 	}
 	return fmt.Sprintf("the proxy reports %s at %s%% of its window, and max_used_percent is %d",
 		who, strconv.FormatFloat(q.UsedPercent, 'g', -1, 64), p.MaxUsedPercent)
+}
+
+// QuotaFigures is what a quota reads as in one parenthetical, for a sentence
+// that has already named the account: the proxy's own flag, or the share
+// spent against the threshold. Empty where there is nothing measured to say.
+//
+// It is deliberately not QuotaRefusal: that is a whole sentence naming the
+// account, and a note that has just named the account twice reads as two
+// findings rather than one.
+func QuotaFigures(q Quota, p Policy) string {
+	if !q.Known {
+		return "no quota could be read"
+	}
+	if q.LimitReached {
+		return "at its limit"
+	}
+	spent := strconv.FormatFloat(q.UsedPercent, 'g', -1, 64) + "% of its window"
+	if p.MaxUsedPercent > 0 {
+		spent += fmt.Sprintf(", max_used_percent %d", p.MaxUsedPercent)
+	}
+	return spent
 }

@@ -169,3 +169,35 @@ func TestUsageRefusesADocumentItCannotRead(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// The accounts array beside the rollup is decoded too, because a profile
+// pinned with `account = "..."` spends an account that is only in there. The
+// rollup stays the serving account's and is what a profile naming none is
+// gated on, so reading one has not changed what the other answers.
+func TestUsageAlsoReadsThePerAccountFiguresForAPinnedProfile(t *testing.T) {
+	f := testenv.New(t)
+	f.Bin(t, "proxenos", `cat <<'JSON'
+`+measuredRollup+`
+JSON`)
+
+	u, err := (&Client{}).Usage(context.Background())
+	if err != nil {
+		t.Fatalf("usage: %v", err)
+	}
+	one, ok := u.Accounts["claude"]
+	if !ok {
+		t.Fatalf("the accounts array was not read: %+v", u.Accounts)
+	}
+	if !one.Known || one.LimitReached || one.UsedPercent != 36.0 {
+		t.Fatalf("the claude account reads %+v, want known, paying, at 36%%", one)
+	}
+	// A metered key has no ceiling, and it stays that way here: an unknown
+	// quota gates nothing.
+	if metered := u.Accounts["openai-api"]; metered.Known {
+		t.Fatalf("a metered account came back known: %+v", metered)
+	}
+	// And the rollup is untouched by any of it.
+	if u.Account != "work-codex" || u.UsedPercent != 1.0 {
+		t.Fatalf("reading the accounts array moved the rollup: %+v", u)
+	}
+}

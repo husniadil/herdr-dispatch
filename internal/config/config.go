@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -60,7 +61,34 @@ type Profile struct {
 	// against, overriding the top-level Worker.MCPConfig. Empty takes that
 	// one, and an empty one takes the default file.
 	MCPConfig string `json:"mcp_config"`
+	// Fallback is the profile a worker is launched through instead when
+	// THIS profile's spawn would be refused AT_QUOTA. The named profile is
+	// evaluated against its OWN account, and so on down the chain, so a
+	// codex profile whose account is spent can hand its work to a second
+	// account or to a claude profile, which spends no proxy quota at all
+	// and is therefore always eligible.
+	//
+	// Empty is the behaviour every document written before this key had:
+	// the spawn is refused and the task waits.
+	//
+	// The name must be a defined profile, a chain must not cycle, and at
+	// most MaxFallbackDepth profiles are followed. All three are refused
+	// when the document is read rather than at the first spawn a quota
+	// stops, which is hours later and on a task whose slot is already
+	// spent.
+	Fallback string `json:"fallback"`
 }
+
+// MaxFallbackDepth is how many profiles one fallback chain may name, the
+// profile that starts it included. A document naming a longer one is refused
+// at parse.
+//
+// The bound is here because a chain is walked per spawn decision and every
+// codex step of it is a quota to evaluate: a chain nobody bounded is an
+// operator's typo turned into a fleet that spends its whole tick deciding.
+// Four is deep enough for the shape this exists for — a pinned account, a
+// spare account, and a claude profile at the end — with one step to spare.
+const MaxFallbackDepth = 4
 
 // Worker is what every worker gets, whichever profile it launched from.
 type Worker struct {
@@ -693,6 +721,16 @@ func Parse(b []byte) (Config, error) {
 	if _, ok := c.Profiles[c.Default]; !ok {
 		return Config{}, fmt.Errorf("hdis config: default profile %q is not defined", c.Default)
 	}
+	// A fallback naming a profile nobody defined, a chain that loops, and a
+	// chain longer than anyone meant to write are all refused HERE, for the
+	// reason a route naming an undefined profile is: the first spawn a
+	// quota stops arrives hours later, and by then the document that caused
+	// it has been unread all day.
+	for _, name := range sortedProfileNames(c.Profiles) {
+		if err := c.checkFallbackChain(name); err != nil {
+			return Config{}, err
+		}
+	}
 	if c.Layout.MinPaneColumns == 0 {
 		c.Layout.MinPaneColumns = MeasuredReadableColumns
 	}
@@ -814,6 +852,67 @@ func (c Config) ProfileNamed(name string) (Profile, error) {
 // override if it has one, the global default otherwise.
 func (c Config) ProfileFor(project string) (Profile, error) {
 	return c.ProfileNamed(c.ProfileNameFor(project))
+}
+
+// FallbackChain is the profiles a spawn asked for `name` may launch through,
+// in order and `name` first. A profile naming no fallback is a chain of one,
+// which is what every document written before the key had.
+//
+// It is bounded and cycle-safe rather than trusting: Parse refuses a document
+// whose chains are not, and this is also read by a daemon holding a config
+// some other path assembled.
+func (c Config) FallbackChain(name string) []string {
+	chain := []string{}
+	seen := map[string]bool{}
+	for at := name; at != ""; {
+		if seen[at] || len(chain) >= MaxFallbackDepth {
+			break
+		}
+		p, ok := c.Profiles[at]
+		if !ok {
+			break
+		}
+		seen[at] = true
+		chain = append(chain, at)
+		at = p.Fallback
+	}
+	return chain
+}
+
+// checkFallbackChain refuses the three ways a chain from `name` cannot be
+// followed: a step naming a profile nobody defined, a step already on the
+// chain, and a chain longer than MaxFallbackDepth.
+func (c Config) checkFallbackChain(name string) error {
+	seen := map[string]bool{name: true}
+	walked := []string{name}
+	for at := c.Profiles[name].Fallback; at != ""; at = c.Profiles[at].Fallback {
+		if _, ok := c.Profiles[at]; !ok {
+			return fmt.Errorf("hdis config: profile %q falls back to %q, which is not defined",
+				walked[len(walked)-1], at)
+		}
+		if seen[at] {
+			return fmt.Errorf("hdis config: the fallback chain %s returns to %q, and a chain that comes back to a profile it has already tried never ends",
+				strings.Join(append(walked, at), " -> "), at)
+		}
+		seen[at] = true
+		walked = append(walked, at)
+		if len(walked) > MaxFallbackDepth {
+			return fmt.Errorf("hdis config: the fallback chain %s names %d profiles, and at most %d are followed",
+				strings.Join(walked, " -> "), len(walked), MaxFallbackDepth)
+		}
+	}
+	return nil
+}
+
+// sortedProfileNames is the profile names in a fixed order, so a document
+// with two faults is refused with the same one every time it is read.
+func sortedProfileNames(profiles map[string]Profile) []string {
+	names := make([]string, 0, len(profiles))
+	for name := range profiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // AgentArgs renders the profile as the argv herdr forwards to the worker

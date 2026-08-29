@@ -114,6 +114,11 @@ type Binding struct {
 	// the field existed carries none, and reads as a worker whose profile
 	// this daemon cannot name.
 	Profile string
+	// AskedProfile is the profile the routing asked for when a quota moved
+	// the spawn down a fallback chain, and empty when nothing moved. Both
+	// names are kept because they answer different questions: what is
+	// running in this pane, and what the fleet meant to run.
+	AskedProfile string
 	// Verified says a self-review shot has been SENT for the submission the
 	// binding is currently holding. Sent, not received: §11.4 forbids reading
 	// a successful `agent prompt` as delivery, so this alone does not close
@@ -136,6 +141,29 @@ type Snapshot struct {
 	// Quota is the proxy launcher's word about the account a codex worker
 	// would spend. A zero Quota is an unknown one, which gates nothing.
 	Quota Quota
+	// Profiles is the config's profile table as facts: which profiles spend
+	// the proxy's quota, which account each spends, and where a spawn a
+	// quota refuses goes instead. It is resolved at the edge, like Routes,
+	// because the core reads no config.
+	//
+	// An empty table is a tick that knows of no fallback anywhere, and a
+	// spawn is then gated exactly as it was before chains existed: on
+	// Task.Codex and the serving account alone.
+	Profiles map[string]ProfileFacts
+}
+
+// ProfileFacts is one configured profile as the core reads it.
+type ProfileFacts struct {
+	// Codex is whether a worker launched from it routes through the proxy,
+	// which is what makes it gated on a quota at all. A claude profile
+	// spends no proxy quota and is always eligible.
+	Codex bool
+	// Account is the stored account its workers spend, empty for the
+	// serving one.
+	Account string
+	// Fallback is the profile a spawn this one cannot make launches
+	// through instead, empty where there is none.
+	Fallback string
 }
 
 // Policy is the knobs a decision depends on.
@@ -192,9 +220,19 @@ type Action struct {
 	Pane   string
 	Reason string
 	// Profile is the profile a Spawn launches its worker with, chosen here
-	// from the task's priority and the policy's routes. It is empty on every
-	// other kind: nothing else launches anything.
+	// from the task's priority and the policy's routes, and from the
+	// fallback chain where the routed one's account is at quota. It is
+	// empty on every other kind: nothing else launches anything.
 	Profile string
+	// AskedFor is the profile the routing chose before any quota moved the
+	// spawn down a fallback chain. It is empty where nothing moved, so a
+	// worker that launched with the profile it was asked for records one
+	// name and not two.
+	AskedFor string
+	// QuotaNote is why the spawn moved down the chain, in the words the
+	// operator reads on the daemon's log and on the trail. Empty where
+	// nothing moved.
+	QuotaNote string
 }
 
 // Decide walks the bindings first — endings free worker slots — and then
@@ -274,13 +312,17 @@ func Decide(s Snapshot, p Policy) []Action {
 		// The quota gate is the codex provider's alone, and it skips this
 		// task rather than ending the loop: a claude task behind a gated
 		// one spends nothing on the proxy and still gets its slot.
-		if s.Tasks[id].Codex && QuotaRefusal(s.Quota, p) != "" {
+		asked := RouteProfile(s.Tasks[id].Priority, s.Tasks[id].Profile, p.Routes)
+		choice := ChooseProfile(asked, s.Tasks[id].Codex, s.Profiles, s.Quota, p)
+		if !choice.Eligible {
 			continue
 		}
 		out = append(out, Action{
-			Kind:    Spawn,
-			TaskID:  id,
-			Profile: RouteProfile(s.Tasks[id].Priority, s.Tasks[id].Profile, p.Routes),
+			Kind:      Spawn,
+			TaskID:    id,
+			Profile:   choice.Profile,
+			AskedFor:  choice.FellBackFrom(),
+			QuotaNote: choice.Note(),
 		})
 		live++
 	}

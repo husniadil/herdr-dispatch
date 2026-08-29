@@ -140,6 +140,10 @@ type record struct {
 	// rewritten since does not change. Omitted for a binding written before
 	// routing existed, which names no profile this daemon can report.
 	Profile string `json:"profile,omitempty"`
+	// AskedProfile is the profile the routing asked for when a quota moved
+	// the spawn down a fallback chain. Omitted where nothing moved, which
+	// is every binding written before chains existed.
+	AskedProfile string `json:"asked_profile,omitempty"`
 	// Worktree is the checkout the pane works in. The binding is the only
 	// record of where it is, so a binding that comes back without it leaves
 	// a live worker's tree with nothing naming it: the retire cannot
@@ -183,17 +187,18 @@ func (b *Bindings) Load() (State, error) {
 			continue
 		}
 		out = append(out, decide.Binding{
-			TaskID:     r.TaskID,
-			Pane:       r.Pane,
-			PromptedAt: time.UnixMilli(r.PromptedAtMS).UTC(),
-			Prompts:    r.Prompts,
-			Notified:   r.Notified,
-			Kind:       r.Kind,
-			Verified:   r.Verified,
-			Profile:    r.Profile,
-			Worktree:   r.Worktree,
-			Tab:        r.Tab,
-			Branch:     r.Branch,
+			TaskID:       r.TaskID,
+			Pane:         r.Pane,
+			PromptedAt:   time.UnixMilli(r.PromptedAtMS).UTC(),
+			Prompts:      r.Prompts,
+			Notified:     r.Notified,
+			Kind:         r.Kind,
+			Verified:     r.Verified,
+			Profile:      r.Profile,
+			AskedProfile: r.AskedProfile,
+			Worktree:     r.Worktree,
+			Tab:          r.Tab,
+			Branch:       r.Branch,
 		})
 	}
 	held := make([]Reservation, 0, len(doc.Reservations))
@@ -223,11 +228,12 @@ func (b *Bindings) Save(state State) error {
 			Notified:     x.Notified,
 			// A worker's kind is left off: an absent kind reads as one,
 			// which is what every binding is.
-			Verified: x.Verified,
-			Profile:  x.Profile,
-			Worktree: x.Worktree,
-			Tab:      x.Tab,
-			Branch:   x.Branch,
+			Verified:     x.Verified,
+			Profile:      x.Profile,
+			AskedProfile: x.AskedProfile,
+			Worktree:     x.Worktree,
+			Tab:          x.Tab,
+			Branch:       x.Branch,
 		})
 	}
 	for _, x := range state.Reservations {

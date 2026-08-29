@@ -666,3 +666,97 @@ func TestDoctorPrintsOneParkedCountWhenBothAgree(t *testing.T) {
 		t.Errorf("the every-board figure is the same one and is printed twice: %q", out.String())
 	}
 }
+
+// profilesLinesOf returns the doctor lines that report a fallback chain.
+func profilesLinesOf(report string) []string {
+	var out []string
+	for _, line := range strings.Split(report, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "profiles") {
+			out = append(out, strings.TrimSpace(line))
+		}
+	}
+	return out
+}
+
+// The line an operator reads to learn their fleet is quietly running on the
+// second profile in a chain: the chain, each step's own quota, and which step
+// a spawn really launches through.
+func TestDoctorPrintsAFallbackChainAndWhichStepItLaunchesThrough(t *testing.T) {
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","board":{"reachable":true},
+"proxy":{"binary":"proxenos","profiles":["routed","spare"],"installed":true,"reachable":true,"account":"work-codex"},
+"profiles":[{"profile":"routed","fallback":"spare","launches":"spare","chain":[
+  {"profile":"routed","gated":true,"account":"work-codex","refusal":"the proxy reports work-codex at its limit"},
+  {"profile":"spare","gated":true,"account":"spare-codex"},
+  {"profile":"plain","gated":false}]}]}`)
+	var out strings.Builder
+	if err := Write("doctor", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	lines := profilesLinesOf(out.String())
+	if len(lines) != 1 {
+		t.Fatalf("doctor printed %d profiles lines: %q", len(lines), out.String())
+	}
+	for _, want := range []string{
+		"routed fallback -> spare",
+		"routed (work-codex) AT QUOTA: the proxy reports work-codex at its limit",
+		"spare (spare-codex) clear",
+		"plain (spends no proxy quota, always eligible)",
+		"launching spare because routed is at quota",
+	} {
+		if !strings.Contains(lines[0], want) {
+			t.Errorf("want %q in the profiles line %q", want, lines[0])
+		}
+	}
+}
+
+// A chain with nothing left says so, in the code a dispatch would refuse with.
+func TestDoctorPrintsAChainWithNoStepLeftToLaunchThrough(t *testing.T) {
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","board":{"reachable":true},
+"proxy":{"binary":"proxenos","profiles":["routed"],"installed":true,"reachable":true},
+"profiles":[{"profile":"routed","fallback":"spare","chain":[
+  {"profile":"routed","gated":true,"account":"work-codex","refusal":"the proxy reports work-codex at its limit"},
+  {"profile":"spare","gated":true,"account":"spare-codex","refusal":"the proxy reports spare-codex at its limit"}]}]}`)
+	var out strings.Builder
+	if err := Write("doctor", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	lines := profilesLinesOf(out.String())
+	if len(lines) != 1 {
+		t.Fatalf("doctor printed %d profiles lines: %q", len(lines), out.String())
+	}
+	for _, want := range []string{"no step of it can launch", "AT_QUOTA"} {
+		if !strings.Contains(lines[0], want) {
+			t.Errorf("want %q in the profiles line %q", want, lines[0])
+		}
+	}
+}
+
+// A fleet whose profiles name no fallback has no chain to report, and the
+// line is absent rather than printed blank.
+func TestDoctorPrintsNoProfilesLineForAFleetThatNamesNoFallback(t *testing.T) {
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","board":{"reachable":true},"proxy":{"binary":"proxenos","profiles":[]}}`)
+	var out strings.Builder
+	if err := Write("doctor", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if got := profilesLinesOf(out.String()); len(got) != 0 {
+		t.Fatalf("doctor printed %v for a fleet with no chain", got)
+	}
+}
+
+// The profile column names what is really running in the pane, so the profile
+// the operator configured for it is said on the row beside it.
+func TestStatusSaysWhenAWorkerRanUnderAProfileItWasNotAskedFor(t *testing.T) {
+	raw := json.RawMessage(`{"base_pane":"w1:p1","max_workers":2,"pending":[],"workers":[
+{"task":"01AAA","seq":7,"title":"do the thing","pane":"w1:p2","kind":"worker","profile":"plain",
+ "asked_profile":"routed","agent_status":"working","pane_alive":true,"prompted_at":"2026-08-29T00:00:00Z","prompts":1}]}`)
+	var out strings.Builder
+	if err := Write("status", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	for _, want := range []string{"plain", "asked for routed", "at quota"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("want %q in the status row %q", want, out.String())
+		}
+	}
+}

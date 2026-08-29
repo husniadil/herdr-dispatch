@@ -95,7 +95,8 @@ var All = []Verb{
 			"task was named; CONFLICT as NOT_READY when the board will not hand " +
 			"the task out, as AT_CAPACITY when the fleet is full, as " +
 			"AT_QUOTA when the proxy account the task's profile launches " +
-			"through has nothing left to spend, or as ALREADY_DISPATCHED " +
+			"through has nothing left to spend and neither does any profile " +
+			"it falls back to, or as ALREADY_DISPATCHED " +
 			"when this daemon is already driving it; " +
 			"UNSUPPORTED as NO_BASE_PANE when the daemon has no pane to split a " +
 			"worker off; NOT_FOUND when no board has the task; and UNAVAILABLE " +
