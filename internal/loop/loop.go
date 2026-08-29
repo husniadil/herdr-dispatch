@@ -45,6 +45,10 @@ type Trees interface {
 	Unmoved(ctx context.Context, project, branch string) (bool, error)
 	// Remove takes a checkout and git's record of it.
 	Remove(ctx context.Context, dir string) error
+	// Holder is the checkout that already has a branch checked out, empty
+	// when none does. It is git's own record rather than the text of a
+	// failed add, and a repository that cannot be asked is an error.
+	Holder(ctx context.Context, project, branch string) (string, error)
 	// Project is the repository a directory belongs to, with a worktree
 	// naming the repository it was cut from. It is how a restart learns
 	// which board a pane's task is filed on.
@@ -578,7 +582,14 @@ func (l *Loop) reconcile(ctx context.Context, p ourPane) (decide.Binding, htask.
 		// and gets re-prompted; a task in review is a worker that is idle
 		// because it is finished.
 		if row.Status == "doing" && !l.restoredWorkerIsLive(ctx, p.pane) {
-			l.retireRestored(ctx, p.pane, row)
+			// The binding is the record of where the checkout is; a binding
+			// written before the create carries none, and then the pane's
+			// own cwd is what names it.
+			tree := p.binding.Worktree
+			if tree == "" {
+				tree, _ = l.checkoutOf(p, row.Seq)
+			}
+			l.retireRestored(ctx, p.pane, row, tree)
 			return decide.Binding{}, htask.Task{}, false
 		}
 		b := *p.binding
@@ -1203,8 +1214,12 @@ func (l *Loop) apply(ctx context.Context, actions []decide.Action) {
 				"agent:%s, and §11.7 lets this daemon hand it back because herdr no longer lists "+
 				"that pane", a.TaskID, a.Pane, a.Pane)
 			l.Spawn.Discard(a.Pane)
-			l.drop(ctx, a.Pane)
+			// The checkout goes with the binding, and what became of it
+			// goes on the same event: one left behind holds the task's
+			// branch, and git refuses every later spawn for that task.
+			tree, rmErr := l.drop(ctx, a.Pane)
 			detail := map[string]any{"pane": a.Pane, "claim_held_by": "agent:" + a.Pane}
+			noteCheckout(detail, tree, rmErr)
 			l.sweepClaim(ctx, a.TaskID, a.Pane, detail)
 			l.emit(store.EntityWorker, KindGone, a.TaskID, l.projectOf(a.TaskID), detail)
 		case decide.GiveUp:
@@ -1218,6 +1233,87 @@ func (l *Loop) apply(ctx context.Context, actions []decide.Action) {
 			l.logf("%s task %s: %v", a.Kind, a.TaskID, err)
 		}
 	}
+}
+
+// clearBranchHolder makes sure nothing still holds the branch this task's
+// checkout is about to be cut on.
+//
+// git refuses a `worktree add` on a branch another worktree already has, and
+// a daemon that never clears one respawns into the same refusal forever. On
+// box-a on 2026-08-29 that was three refusals a minute for the rest of the
+// run, because a restart had retired a restored pane without taking its
+// checkout and nothing else ever would: the reap only runs inside Adopt.
+//
+// A holder under this daemon's own root that no binding names and no live
+// pane is working in is exactly what the reap removes, and it is removed here
+// on the same predicate. Anything else is a refusal that NAMES the checkout
+// and whoever holds it: git's own `already used by worktree at ...` says
+// which directory and nothing about whose it is, which is the only question
+// an operator has to answer. A herdr that cannot be asked is a refusal too —
+// removing a directory on no evidence is a live worker's tree deleted out
+// from under it.
+func (l *Loop) clearBranchHolder(ctx context.Context, row htask.Task) error {
+	branch := worktree.Branch(row.Seq)
+	dir, err := l.Worktrees.Holder(ctx, row.Project, branch)
+	if err != nil {
+		return err
+	}
+	if dir == "" {
+		return nil
+	}
+	root := l.Worktrees.RootDir()
+	if root == "" || filepath.Dir(dir) != root || !strings.HasPrefix(filepath.Base(dir), worktree.Prefix) {
+		return fmt.Errorf("branch %s is checked out in %s, which this daemon did not make and will not remove", branch, dir)
+	}
+	if pane := l.boundTo(dir); pane != "" {
+		return fmt.Errorf("branch %s is checked out in %s, which pane %s is bound to", branch, dir, pane)
+	}
+	pane, err := l.paneIn(ctx, dir)
+	if err != nil {
+		return fmt.Errorf("branch %s is checked out in %s, and herdr cannot say whether anything is working in it: %w", branch, dir, err)
+	}
+	if pane != "" {
+		return fmt.Errorf("branch %s is checked out in %s, where pane %s is working", branch, dir, pane)
+	}
+	l.logf("task %s: the checkout %s still holds branch %s, no binding names it and no pane is working in it; removing it before the spawn",
+		row.ID, dir, branch)
+	if err := l.Worktrees.Remove(ctx, dir); err != nil {
+		return fmt.Errorf("branch %s is checked out in %s, which could not be removed: %w", branch, dir, err)
+	}
+	return nil
+}
+
+// boundTo is the pane a binding names for a checkout, if a binding names it.
+func (l *Loop) boundTo(dir string) string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, b := range l.bindings {
+		if b.Worktree == dir {
+			return b.Pane
+		}
+	}
+	return ""
+}
+
+// paneIn is the live pane working in a directory or below it, if there is
+// one. Both of herdr's answers are read, for the reason the reap reads both:
+// `pane list` has the panes whose agent herdr has since dropped, and `agent
+// list` has the working directory of an agent it still holds.
+func (l *Loop) paneIn(ctx context.Context, dir string) (string, error) {
+	alive, err := l.Herdr.PaneList(ctx)
+	if err != nil {
+		return "", err
+	}
+	agents, err := l.Herdr.Agents(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, r := range append(append([]herdrclient.Agent(nil), alive...), agents...) {
+		if r.Cwd != "" && inhabited(dir, []string{r.Cwd}) {
+			return r.PaneID, nil
+		}
+	}
+	return "", nil
 }
 
 func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
@@ -1266,6 +1362,9 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 		return fmt.Errorf("branch %s was handed to a worker and never moved while the project moved past it: "+
 			"the work went somewhere other than its own checkout, and no second worker goes out until that is reconciled",
 			worktree.Branch(row.Seq))
+	}
+	if err := l.clearBranchHolder(ctx, row); err != nil {
+		return err
 	}
 	tree, branch, err := l.Worktrees.Worker(ctx, row.Project, row.Seq)
 	if err != nil {
@@ -1548,20 +1647,22 @@ func (l *Loop) notify(ctx context.Context, a decide.Action) error {
 // board's own, and a second writer racing them is the bug, not a safety net.
 func (l *Loop) retire(ctx context.Context, a decide.Action) error {
 	err := l.Spawn.Retire(ctx, a.Pane)
-	l.drop(ctx, a.Pane)
-	l.emit(store.EntityWorker, KindRetired, a.TaskID, l.projectOf(a.TaskID), map[string]any{
-		"pane": a.Pane, "reason": a.Reason, "action": string(a.Kind),
-	})
+	tree, rmErr := l.drop(ctx, a.Pane)
+	detail := map[string]any{"pane": a.Pane, "reason": a.Reason, "action": string(a.Kind)}
+	noteCheckout(detail, tree, rmErr)
+	l.emit(store.EntityWorker, KindRetired, a.TaskID, l.projectOf(a.TaskID), detail)
 	return err
 }
 
 // drop forgets one binding, by the pane it names, and takes the worktree the
-// binding owned with it. The pane is what a binding is unique by.
+// binding owned with it. The pane is what a binding is unique by. It answers
+// with the checkout it removed and what removing it cost, so the caller can
+// put the outcome on the event it is already filing for that pane.
 //
 // The binding is the only record of where a checkout is, so removing it here
 // is the one place that record is spent. It is written to
 // the store, so a restart inherits the removal rather than leaking it.
-func (l *Loop) drop(ctx context.Context, pane string) {
+func (l *Loop) drop(ctx context.Context, pane string) (string, error) {
 	l.mu.Lock()
 	var tree string
 	kept := l.bindings[:0]
@@ -1580,11 +1681,38 @@ func (l *Loop) drop(ctx context.Context, pane string) {
 	l.saveLocked()
 	l.mu.Unlock()
 
-	if tree != "" && l.Worktrees != nil {
-		if err := l.Worktrees.Remove(ctx, tree); err != nil {
-			l.logf("pane %s: %v", pane, err)
-		}
+	return l.removeCheckout(ctx, pane, tree)
+}
+
+// removeCheckout takes the checkout a pane is no longer in, and says what
+// became of it: the directory when it went, and the error when it did not.
+//
+// A checkout that cannot be removed is never fatal — the pane is gone either
+// way and the branch outlives the directory — but it is never silent either.
+// One left behind still holds the task's branch, and every later spawn for
+// that task is refused by git until somebody removes it.
+func (l *Loop) removeCheckout(ctx context.Context, pane, tree string) (string, error) {
+	if tree == "" || l.Worktrees == nil {
+		return "", nil
 	}
+	if err := l.Worktrees.Remove(ctx, tree); err != nil {
+		l.logf("pane %s: %v", pane, err)
+		return tree, err
+	}
+	return tree, nil
+}
+
+// noteCheckout puts what became of a dropped binding's checkout on the event
+// already being filed for that pane.
+func noteCheckout(detail map[string]any, tree string, err error) {
+	if tree == "" {
+		return
+	}
+	if err != nil {
+		detail["worktree_remove_error"] = err.Error()
+		return
+	}
+	detail["worktree_removed"] = tree
 }
 
 func (l *Loop) promptsFor(pane string) int {

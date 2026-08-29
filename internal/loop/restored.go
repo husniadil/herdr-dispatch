@@ -91,7 +91,17 @@ func samples(window, poll time.Duration) int {
 // The REASON is still written here, where this daemon is the only thing that
 // knows it — the board's own sweep can say a lease lapsed and nothing more —
 // and now the trail carries what the hand-back returned beside it.
-func (l *Loop) retireRestored(ctx context.Context, pane string, row htask.Task) {
+//
+// The CHECKOUT goes with the pane, and it has to go here rather than being
+// left to the reap. Adopt's reap reads which panes are alive BEFORE this
+// retire, so the tree this pane is still sitting in reads as inhabited and is
+// kept — and nothing reaps again until the next start. Left behind it holds
+// the task's branch, and git refuses every later `worktree add` for that
+// task. Measured on box-a on 2026-08-29, hdis 0.10.0, task #10: the retire
+// and the hand-back were both right, and then every respawn was refused with
+// `'hdis/task-10' is already used by worktree at ...`, three times a minute,
+// for as long as the daemon ran.
+func (l *Loop) retireRestored(ctx context.Context, pane string, row htask.Task, tree string) {
 	l.logf("task %s: pane %s came back from a restart and herdr called it idle for %s, "+
 		"so there is no worker in it — the pane is retired, and the claim it was holding is "+
 		"handed back to the board", row.ID, pane, RestoredWorkerConfirm)
@@ -101,6 +111,10 @@ func (l *Loop) retireRestored(ctx context.Context, pane string, row htask.Task) 
 		"reason": ReasonRestoredWithNoWorker,
 		"action": "adopt",
 	}
+	// After the retire, so the pane is no longer working in the directory
+	// being removed.
+	removed, rmErr := l.removeCheckout(ctx, pane, tree)
+	noteCheckout(detail, removed, rmErr)
 	// After the retire, never before it: §11.7 is a door for a pane herdr no
 	// longer lists, and the retire is what takes it off that list.
 	l.sweepClaim(ctx, row.ID, pane, detail)

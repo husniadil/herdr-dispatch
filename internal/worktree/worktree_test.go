@@ -447,3 +447,49 @@ func TestUnmovedFailsRatherThanAnsweringWhenGitCannotTellUs(t *testing.T) {
 		t.Fatalf("the failure does not name the branch it is about: %v", err)
 	}
 }
+
+// Holder is git's own record of which checkout has a branch, read from
+// `worktree list --porcelain` rather than from the text of a failed add.
+func TestHolderNamesTheCheckoutThatHasTheBranch(t *testing.T) {
+	src := repo(t)
+	// Resolved, because git records the real path of a checkout and macOS
+	// hands a temp directory back through a symlink.
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := &Manager{Root: root}
+	path, branch, err := m.Worker(context.Background(), src, 7)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := m.Holder(context.Background(), src, branch)
+	if err != nil {
+		t.Fatalf("holder: %v", err)
+	}
+	if got != path {
+		t.Fatalf("holder is %q, want %q", got, path)
+	}
+	// And a branch nothing has checked out is nobody's, not an error: that
+	// is every first spawn.
+	if got, err := m.Holder(context.Background(), src, Branch(8)); err != nil || got != "" {
+		t.Fatalf("an unheld branch answers %q, %v", got, err)
+	}
+	// Once the checkout is gone the branch is free again.
+	if err := m.Remove(context.Background(), path); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if got, err := m.Holder(context.Background(), src, branch); err != nil || got != "" {
+		t.Fatalf("after the checkout was removed the branch is held by %q, %v", got, err)
+	}
+}
+
+// A repository that cannot be asked is an error, never a quiet "nobody has
+// it": a false free answer sends a spawn straight into git's refusal.
+func TestHolderFailsRatherThanAnsweringFreeWhenGitCannotBeAsked(t *testing.T) {
+	m := &Manager{Root: t.TempDir()}
+	plain := t.TempDir()
+	if got, err := m.Holder(context.Background(), plain, Branch(7)); err == nil {
+		t.Fatalf("a directory that is not a repository answered %q", got)
+	}
+}

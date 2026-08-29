@@ -1906,7 +1906,19 @@ when the binding that owns it is dropped: a `git worktree` on a branch named
 for the task, `hdis/task-<seq>`, created at the project's current HEAD. A
 worker commits, so it needs somewhere its commits can live. Removing the
 directory later leaves the branch and every commit on it reachable from the
-project, which is what makes reaping a checkout safe.
+project, which is what makes reaping a checkout safe. Every drop of a binding
+takes the checkout with it there and then — a retire, a gone pane, a restart
+that retires a restored pane with no worker in it — because the restart reap
+runs only inside `Adopt` and reads which panes were alive before those
+retires: a checkout left behind keeps the task's branch checked out, and git
+refuses every later `worktree add` for that task. What became of it rides on
+the event already filed for that pane, as `worktree_removed` or
+`worktree_remove_error`. And a spawn asks `git worktree list --porcelain` who
+holds `hdis/task-<seq>` before cutting the checkout: an orphan under
+`<state_dir>/worktrees` that no binding names and no live pane is working in
+is removed and the spawn goes on, while a checkout a binding or a pane still
+holds refuses the spawn by name rather than as git's
+`already used by worktree at ...`.
 
 **hdis integrates nothing.** It creates a branch and it removes checkouts.
 Bringing the work home — fast-forward, merge, cherry-pick, push — and deleting

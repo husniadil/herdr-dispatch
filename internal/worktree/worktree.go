@@ -155,6 +155,46 @@ func (m *Manager) Unmoved(ctx context.Context, project, branch string) (bool, er
 	return m.Behind(ctx, root, branch)
 }
 
+// Holder is the checkout that currently has a branch checked out, or empty
+// when no checkout has it.
+//
+// git refuses a second `worktree add` on a branch some other worktree already
+// holds, and the refusal names the directory in its own prose. This asks git's
+// RECORD instead — `worktree list --porcelain`, in the project's repository —
+// because the error text is git's to reword and the record is the fact.
+//
+// A repository that cannot be asked is an error, never a quiet empty: an empty
+// answer means the branch is free, and a spawn that believes a false one walks
+// straight into the refusal this exists to avoid.
+func (m *Manager) Holder(ctx context.Context, project, branch string) (string, error) {
+	if branch == "" {
+		return "", nil
+	}
+	root, err := m.run(ctx, project, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", fmt.Errorf("nothing can say what holds %s: %w", branch, err)
+	}
+	out, err := m.run(ctx, root, "worktree", "list", "--porcelain")
+	if err != nil {
+		return "", fmt.Errorf("nothing can say what holds %s: %w", branch, err)
+	}
+	// The porcelain form is one paragraph per checkout: a `worktree <path>`
+	// line first, and a `branch <ref>` line for a checkout that is on one.
+	want := "refs/heads/" + branch
+	dir := ""
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if path, ok := strings.CutPrefix(line, "worktree "); ok {
+			dir = path
+			continue
+		}
+		if ref, ok := strings.CutPrefix(line, "branch "); ok && ref == want {
+			return dir, nil
+		}
+	}
+	return "", nil
+}
+
 // prepare finds the project's repository root and makes the empty directory
 // its checkout goes in.
 func (m *Manager) prepare(ctx context.Context, project, prefix string, seq int) (string, string, error) {

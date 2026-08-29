@@ -5,6 +5,37 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
+## Unreleased
+
+**Fixed: a retired pane's checkout is removed with it, so the task's branch is
+free for the next worker.** The reap that removes a checkout no binding names
+runs only inside `Adopt`, and it reads which panes are alive BEFORE the
+restart's own retires — so a pane retired for coming back from a restart with
+no worker in it was still "inhabiting" its checkout when the reap looked, the
+directory was kept, and nothing reaped again until the next start. The
+directory kept the task's branch checked out, and git refused every later
+`git worktree add` for that task with `'hdis/task-N' is already used by
+worktree at ...`. Measured on box-a on 2026-08-29 with hdis 0.10.0 on task
+\#10: three refusals a minute, for as long as the daemon ran. hdis now removes
+the checkout at the retire itself, and at the gone-pane unbind. **What a
+caller changes:** nothing — the event already filed for that pane,
+`dispatch.worker.retired` or `dispatch.worker.gone`, now carries
+`worktree_removed` with the directory, or `worktree_remove_error` with the
+reason it could not be removed. A checkout that cannot be removed is logged
+and never fatal.
+
+**Fixed: a spawn whose branch is already checked out somewhere says whose
+checkout it is, and clears an orphan.** Before cutting a worker's checkout,
+hdis reads `git worktree list --porcelain` in the project to see what holds
+`hdis/task-<seq>`. A holder under `<state_dir>/worktrees` carrying the `hdis-`
+prefix that no binding names and no live pane is working in is removed — the
+same predicate the restart reap uses — and the spawn goes on, with the removal
+logged. A holder a binding names, one a pane is working in, one outside this
+daemon's root, or a herdr that cannot be asked refuses the spawn instead, with
+a message naming the checkout and the pane. **What a caller changes:**
+nothing — the refusal reaches the operator's log where the previous raw git
+error did.
+
 ## 0.10.0 — 2026-08-29
 
 **Changed: the declared contract revision is now 0.11.0, up from 0.10.1.**
