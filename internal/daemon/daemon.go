@@ -513,6 +513,22 @@ type WorkerHealth struct {
 	// order. A profile is listed whether or not its path is there, because
 	// which profile a worker launched from decides which doors it got.
 	Profiles []ProfileMCPConfig `json:"profile_mcp_configs"`
+	// Env is the NAMES the fleet-wide `[worker] env` exports into every
+	// worker's pane, in name order. The values are the operator's own and
+	// are never reported: a gate command's argument or a token is theirs,
+	// and doctor is read out loud.
+	Env []string `json:"env"`
+	// ProfileEnv is every profile that names an `env` of its own, in name
+	// order, with the names it adds or overrides. It is the same reason the
+	// MCP documents are listed per profile: which profile a worker launched
+	// from decides what it got.
+	ProfileEnv []ProfileEnv `json:"profile_env"`
+}
+
+// ProfileEnv is one profile's own exported names, as doctor reports it.
+type ProfileEnv struct {
+	Profile string   `json:"profile"`
+	Env     []string `json:"env"`
 }
 
 // ProfileMCPConfig is one profile's own MCP document, as doctor reports it.
@@ -724,25 +740,42 @@ func (d *Daemon) doctor(ctx context.Context, req protocol.Request) (DoctorReport
 // of the filesystem here rather than remembered from a spawn: the operator
 // runs doctor to learn whether the next one would refuse.
 func (d *Daemon) workerHealth() WorkerHealth {
-	out := WorkerHealth{MCPConfig: config.WorkerMCPConfigPath(), Profiles: []ProfileMCPConfig{}}
+	out := WorkerHealth{
+		MCPConfig:  config.WorkerMCPConfigPath(),
+		Profiles:   []ProfileMCPConfig{},
+		Env:        []string{},
+		ProfileEnv: []ProfileEnv{},
+	}
 	if d.Loop == nil {
 		return out
 	}
+	out.Env = config.WorkerEnvKeys(d.Loop.Config.WorkerEnvFor(config.Profile{}))
 	if path := d.Loop.Config.Worker.MCPConfig; path != "" {
 		out.MCPConfig, out.MCPConfigured = path, true
 	}
 	out.MCPExists = exists(out.MCPConfig)
 	for name, p := range d.Loop.Config.Profiles {
-		if p.MCPConfig == "" {
-			continue
+		if p.MCPConfig != "" {
+			out.Profiles = append(out.Profiles, ProfileMCPConfig{
+				Profile:   name,
+				MCPConfig: p.MCPConfig,
+				Exists:    exists(p.MCPConfig),
+			})
 		}
-		out.Profiles = append(out.Profiles, ProfileMCPConfig{
-			Profile:   name,
-			MCPConfig: p.MCPConfig,
-			Exists:    exists(p.MCPConfig),
-		})
+		if len(p.Env) > 0 {
+			// The profile's own names, not the merged set: what the line
+			// is for is which profile adds what, and the fleet-wide half
+			// is already on its own line above.
+			keys := make([]string, 0, len(p.Env))
+			for key := range p.Env {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			out.ProfileEnv = append(out.ProfileEnv, ProfileEnv{Profile: name, Env: keys})
+		}
 	}
 	sort.Slice(out.Profiles, func(i, j int) bool { return out.Profiles[i].Profile < out.Profiles[j].Profile })
+	sort.Slice(out.ProfileEnv, func(i, j int) bool { return out.ProfileEnv[i].Profile < out.ProfileEnv[j].Profile })
 	return out
 }
 

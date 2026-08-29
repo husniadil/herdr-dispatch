@@ -153,3 +153,42 @@ func TestATableCannotAlsoBeAnArrayOfTables(t *testing.T) {
 		t.Fatal("a table was silently turned into a list")
 	}
 }
+
+// An inline table of quoted strings is in the subset, because a worker's
+// environment is the one setting shaped like a map of names to text and an
+// operator writes it on one line.
+func TestAnInlineTableOfStringsReadsBackAsATable(t *testing.T) {
+	doc, err := parseTOML(`env = { TASKS_GATE_COMMAND = "agamemnon gate check", A = "b, c" }`)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	env, ok := doc["env"].(map[string]any)
+	if !ok {
+		t.Fatalf("env: %#v", doc["env"])
+	}
+	if env["TASKS_GATE_COMMAND"] != "agamemnon gate check" || env["A"] != "b, c" {
+		t.Fatalf("env: %#v", env)
+	}
+}
+
+// And no further: everything an inline table can hold that this subset cannot
+// read is still refused by line, the way an integer one in `layout` is.
+func TestAnInlineTableOutsideTheSubsetIsRefusedByLine(t *testing.T) {
+	for name, src := range map[string]string{
+		"a value that is not a string": `env = { A = 1 }`,
+		"a nested table":               `env = { A = { B = "c" } }`,
+		"a pair that is not one":       `env = { A }`,
+		"a table over two lines":       "env = {\n  A = \"b\",\n}",
+		"a name set twice":             `env = { A = "b", A = "c" }`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := parseTOML(src)
+			if err == nil {
+				t.Fatalf("%s parsed without complaint", name)
+			}
+			if !strings.Contains(err.Error(), "line ") {
+				t.Errorf("the refusal does not name the line: %v", err)
+			}
+		})
+	}
+}

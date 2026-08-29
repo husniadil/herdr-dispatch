@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -2051,5 +2052,151 @@ func TestTheCodexArgvKeepsSettingsAheadOfTheDoors(t *testing.T) {
 	}
 	if got, want := args[5], "--agent"; got != want {
 		t.Fatalf("the profile's own argv must follow the doors: got %q, want %q", got, want)
+	}
+}
+
+// workerEnv is what the config resolved for a worker: the fleet's names and a
+// profile's own, already merged and in name order.
+func workerEnv(pairs ...string) []config.EnvVar {
+	env := make([]config.EnvVar, 0, len(pairs)/2)
+	for i := 0; i+1 < len(pairs); i += 2 {
+		env = append(env, config.EnvVar{Key: pairs[i], Value: pairs[i+1]})
+	}
+	return env
+}
+
+// paneEnv is every `--env` this spawn opened the pane with, in the order it
+// passed them.
+func paneEnv(t *testing.T, h *harness) []string {
+	t.Helper()
+	var out []string
+	for _, argv := range h.Argv(t) {
+		if len(argv) < 2 || argv[0] != "pane" && argv[0] != "tab" {
+			continue
+		}
+		if argv[1] != "split" && argv[1] != "create" {
+			continue
+		}
+		for i, a := range argv {
+			if a == "--env" && i+1 < len(argv) {
+				out = append(out, argv[i+1])
+			}
+		}
+	}
+	return out
+}
+
+// The operator's `[worker] env` rides the call that OPENS the pane, so the
+// names are in the pane before its shell is: a worker's own MCP doors read
+// their §9 policy gate out of their environment, and a door that came up
+// before the name arrived is an ungated door.
+func TestTheWorkerEnvRidesTheCallThatOpensThePane(t *testing.T) {
+	h := newHarness(t, []string{promptBox, goalActive}, startRegistered)
+
+	r := req(claudeProfile())
+	r.Env = workerEnv(
+		"AGAMEMNON_GATE_POLICY", "/Users/me/gate default.toml",
+		"TASKS_GATE_COMMAND", "agamemnon gate check",
+	)
+	if _, err := h.pipe.Run(context.Background(), r); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	want := []string{
+		DispatcherPaneVar + "=wM:p1",
+		ShortPromptCacheVar + "=1",
+		"AGAMEMNON_GATE_POLICY=/Users/me/gate default.toml",
+		"TASKS_GATE_COMMAND=agamemnon gate check",
+	}
+	if got := paneEnv(t, h); !reflect.DeepEqual(got, want) {
+		t.Fatalf("pane env: got %q, want %q", got, want)
+	}
+	// Nothing is typed for it: the shell that would have run an export is
+	// the one the pane already came up with.
+	if n := count(h.verbs(t), "pane run"); n != 0 {
+		t.Fatalf("the worker environment was typed into the pane %d times", n)
+	}
+}
+
+// A pane split into a tab this dispatcher already owns carries the same
+// names: the env travels on whichever call opens the pane.
+func TestASecondWorkerInTheSameTabCarriesTheSameWorkerEnv(t *testing.T) {
+	h := newHarness(t, []string{promptBox, goalActive}, startRegistered)
+	h.Write(t, "tablist.json", `{"id":"x","result":{"type":"tab_list","tabs":[`+
+		`{"tab_id":"wM:t9","workspace_id":"wM","label":"`+TabLabel(7)+`","pane_count":1}]}}`)
+
+	r := req(claudeProfile())
+	r.Env = workerEnv("TASKS_GATE_COMMAND", "agamemnon gate check")
+	if _, err := h.pipe.Run(context.Background(), r); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	split := false
+	for _, argv := range h.Argv(t) {
+		if len(argv) >= 2 && argv[0] == "pane" && argv[1] == "split" {
+			split = true
+		}
+	}
+	if !split {
+		t.Fatal("the worker did not go into the tab this dispatcher already owned")
+	}
+	if got, want := paneEnv(t, h), "TASKS_GATE_COMMAND=agamemnon gate check"; len(got) == 0 || got[len(got)-1] != want {
+		t.Fatalf("pane env: got %q, want it to end with %q", got, want)
+	}
+}
+
+// A document that named none leaves the pane carrying only what this
+// pipeline sets, and types nothing either.
+func TestAWorkerWithNoEnvCarriesOnlyWhatThePipelineSets(t *testing.T) {
+	h := newHarness(t, []string{promptBox, goalActive}, startRegistered)
+
+	if _, err := h.pipe.Run(context.Background(), req(claudeProfile())); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	want := []string{DispatcherPaneVar + "=wM:p1", ShortPromptCacheVar + "=1"}
+	if got := paneEnv(t, h); !reflect.DeepEqual(got, want) {
+		t.Fatalf("pane env: got %q, want %q", got, want)
+	}
+	if n := count(h.verbs(t), "pane run"); n != 0 {
+		t.Fatalf("nothing was configured and %d shell lines were typed", n)
+	}
+}
+
+// The codex path is untouched by any of it: the launcher's environment half
+// is the one thing typed into the pane, and the operator's names are already
+// in the pane it is typed into.
+func TestTheCodexEnvironmentLineIsUnchangedByTheWorkerEnv(t *testing.T) {
+	h := newHarness(t, []string{goalActive}, startRegistered)
+	h.Bin(t, "proxenos", `echo '{}'`)
+
+	r := req(codexProfile())
+	r.Env = workerEnv("TASKS_GATE_COMMAND", "agamemnon gate check")
+	if _, err := h.pipe.Run(context.Background(), r); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	var runs []string
+	for _, argv := range h.Argv(t) {
+		if len(argv) >= 4 && argv[0] == "pane" && argv[1] == "run" {
+			runs = append(runs, argv[3])
+		}
+	}
+	if len(runs) != 1 || runs[0] != `eval "$(proxenos env)"` {
+		t.Fatalf("codex environment: got %q, want exactly the launcher's own line", runs)
+	}
+	if got, want := paneEnv(t, h), "TASKS_GATE_COMMAND=agamemnon gate check"; len(got) == 0 || got[len(got)-1] != want {
+		t.Fatalf("pane env: got %q, want it to end with %q", got, want)
+	}
+}
+
+// The names this pipeline and the launcher set themselves are the names a
+// document may not set, and the list lives in config while the constants live
+// here. A rename that only moved one of them would let a document overwrite
+// the worker's report address or the launcher's routing.
+func TestEveryNameTheSpawnSetsIsReservedFromTheWorkerEnv(t *testing.T) {
+	for _, name := range []string{DispatcherPaneVar, ShortPromptCacheVar, proxy.AccountEnvVar} {
+		if !config.WorkerEnvReserved(name) {
+			t.Errorf("%s is set on every worker pane and a document may still write it", name)
+		}
 	}
 }

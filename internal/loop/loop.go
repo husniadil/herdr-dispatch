@@ -1234,6 +1234,7 @@ func (l *Loop) spawn(ctx context.Context, a decide.Action) error {
 		Cwd:        tree,
 		Profile:    profile,
 		MCPConfig:  l.Config.MCPConfigFor(profile),
+		Env:        l.Config.WorkerEnvFor(profile),
 		Goal:       spawn.PointerGoal(row.Seq),
 	})
 	if pane == "" {

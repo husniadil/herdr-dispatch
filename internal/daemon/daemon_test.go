@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -894,6 +895,47 @@ mcp_config = "` + missing + `"
 	got := rep.Worker.Profiles[0]
 	if got.Profile != "routed" || got.MCPConfig != missing || got.Exists {
 		t.Fatalf("the overriding profile is reported as %+v", got)
+	}
+}
+
+// The names a worker's pane is given, fleet-wide and per profile, and never
+// the values: what an operator exports there is theirs, and doctor is read out
+// loud.
+func TestDoctorReportsTheWorkerEnvKeysAndNotTheValues(t *testing.T) {
+	d, _ := newDaemon(t)
+	cfg, err := config.Parse([]byte(`default = "w"
+[worker]
+env = { TASKS_GATE_COMMAND = "agamemnon gate check" }
+[profiles.w]
+provider = "claude"
+[profiles.pinned]
+provider = "claude"
+env = { MAIL_GATE_COMMAND = "agamemnon gate check" }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Loop.Config = cfg
+
+	rep := doctorOf(t, d)
+	if got, want := rep.Worker.Env, []string{"TASKS_GATE_COMMAND"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("fleet env: got %v, want %v", got, want)
+	}
+	if len(rep.Worker.ProfileEnv) != 1 {
+		t.Fatalf("doctor reports %d profiles with an env of their own, want 1: %+v", len(rep.Worker.ProfileEnv), rep.Worker.ProfileEnv)
+	}
+	got := rep.Worker.ProfileEnv[0]
+	if got.Profile != "pinned" || !reflect.DeepEqual(got.Env, []string{"MAIL_GATE_COMMAND"}) {
+		t.Fatalf("the profile's own env is reported as %+v", got)
+	}
+	// The whole report, not only the two lists: a value that reached any
+	// field of it is a value doctor would print.
+	raw, err := json.Marshal(rep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "agamemnon gate check") {
+		t.Fatalf("doctor carries the value of an exported name: %s", raw)
 	}
 }
 

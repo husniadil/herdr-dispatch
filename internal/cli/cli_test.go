@@ -760,3 +760,52 @@ func TestStatusSaysWhenAWorkerRanUnderAProfileItWasNotAskedFor(t *testing.T) {
 		}
 	}
 }
+
+// workerEnvLineOf returns the one line of a doctor report that names what a
+// worker's pane carries.
+func workerEnvLineOf(t *testing.T, report string) string {
+	t.Helper()
+	for _, line := range strings.Split(report, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "worker env") {
+			return strings.TrimSpace(line)
+		}
+	}
+	t.Fatalf("doctor printed no worker env line: %q", report)
+	return ""
+}
+
+// The names a worker's pane carries, fleet-wide and per profile — and never a
+// value. What an operator exports into a worker is theirs, and a gate command
+// or a token printed by doctor is a secret read out loud.
+func TestDoctorPrintsTheWorkerEnvKeysAndNeverTheirValues(t *testing.T) {
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","worker":{"mcp_config":"/s/worker.mcp.json","mcp_config_exists":true,"env":["AGAMEMNON_GATE_POLICY","TASKS_GATE_COMMAND"],"profile_env":[{"profile":"pinned","env":["MAIL_GATE_COMMAND"]}]},"board":{"reachable":true}}`)
+	var out strings.Builder
+	if err := Write("doctor", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	line := workerEnvLineOf(t, out.String())
+	for _, want := range []string{"AGAMEMNON_GATE_POLICY", "TASKS_GATE_COMMAND", "profile pinned", "MAIL_GATE_COMMAND"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("want %q in the worker env line %q", want, line)
+		}
+	}
+	// The report carries no value because the daemon never sends one, and
+	// the line is keys joined by spaces: an '=' in it would be a value.
+	if strings.Contains(line, "=") {
+		t.Errorf("the worker env line looks like it carries a value: %q", line)
+	}
+}
+
+// A fleet that exports nothing says so: on a laptop that is the finding
+// itself, because a worker's own doors read their policy gate out of an
+// environment nothing filled in.
+func TestDoctorSaysWhenAWorkerCarriesNothingOfTheOperatorsOwn(t *testing.T) {
+	raw := json.RawMessage(`{"version":"0.1.0","socket":"/s/dispatch.sock","worker":{"mcp_config":"/s/worker.mcp.json","mcp_config_exists":true,"env":[],"profile_env":[]},"board":{"reachable":true}}`)
+	var out strings.Builder
+	if err := Write("doctor", raw, false, &out); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if line := workerEnvLineOf(t, out.String()); !strings.Contains(line, "none") {
+		t.Errorf("want none in the worker env line %q", line)
+	}
+}

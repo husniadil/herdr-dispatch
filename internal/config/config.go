@@ -77,6 +77,11 @@ type Profile struct {
 	// stops, which is hours later and on a task whose slot is already
 	// spent.
 	Fallback string `json:"fallback"`
+	// Env is what THIS profile's workers get exported into their pane on
+	// top of the fleet-wide `[worker] env`, and a key written in both is
+	// this one's. Every rule the fleet-wide table is read under holds here
+	// too; see Worker.Env.
+	Env map[string]string `json:"env"`
 }
 
 // MaxFallbackDepth is how many profiles one fallback chain may name, the
@@ -101,6 +106,147 @@ type Worker struct {
 	// the hub connector there would hand every worker a pane with no local
 	// doors at all.
 	MCPConfig string `json:"mcp_config"`
+	// Env is what every worker's pane is opened with, whichever profile
+	// the worker launched from, and a profile's own `env` is merged over
+	// it per key. It rides the `herdr pane split` / `herdr tab create`
+	// call itself, beside the two names the spawn pipeline already sets,
+	// so it is in the pane before the pane's shell is: a worker's doors
+	// are started by that shell, and a door that came up before the name
+	// arrived is an ungated door.
+	//
+	// It exists because a worker's own MCP doors read their §9 policy gate
+	// out of THEIR OWN environment — `<NAME>_GATE_COMMAND`, which is each
+	// plugin's rule and not this one's. On a fleet box the container
+	// entrypoint exports those into the whole process tree and every
+	// worker's doors are gated; on a laptop nothing does, because a worker
+	// pane inherits the Herdr server's environment, which is the
+	// OPERATOR's. Without this table a laptop's hdis-spawned workers run
+	// ungated doors beside gateway-spawned ones that are gated, and hdis
+	// had no way to put a name into a worker's pane but the account tag it
+	// already exports.
+	//
+	// The values are the operator's own: this dispatcher reads none of
+	// them and a token written here is their choice, which is why `hdis
+	// doctor` prints the KEYS and never a value.
+	//
+	// A key must match ^[A-Z_][A-Z0-9_]*$, a value is one line — herdr
+	// refuses a control character in an argument, and `--env` is one — and
+	// ReservedWorkerEnv is refused outright. All three when the document is
+	// read, because the alternative is a spawn refused hours later in a
+	// pane nobody is watching, or a document quietly overwriting the
+	// routing this dispatcher's own spawn depends on.
+	Env map[string]string `json:"env"`
+}
+
+// ReservedWorkerEnv are the names a `[worker] env` or a profile's `env` may
+// not set: the ones this dispatcher and the launcher it runs workers through
+// set themselves.
+//
+// Overwriting any of them is a worker that reports somewhere else, claims as
+// somebody else, or routes through a model nobody chose — a document quietly
+// changing the launcher's own wiring rather than adding to the worker's
+// environment, which is what this table is for. So they are refused when the
+// document is read.
+//
+// The four HERDR_ names are the pane a worker IS, which is what its own doors
+// derive their principal from (contract §3.1); the two HDIS_/FORCE_ names are
+// what the spawn pipeline already passes on the same call —
+// spawn.DispatcherPaneVar
+// and spawn.ShortPromptCacheVar, held to these spellings by a test in that
+// package, which is where the constants live. The rest is the routing half of
+// a codex spawn: proxy.AccountEnvVar, and the names the launcher's own
+// `settings` document carries, measured from a live `proxenos settings` in
+// spawn's realProxySettings.
+var ReservedWorkerEnv = []string{
+	"ANTHROPIC_AUTH_TOKEN",
+	"ANTHROPIC_BASE_URL",
+	"ANTHROPIC_DEFAULT_FABLE_MODEL",
+	"ANTHROPIC_DEFAULT_HAIKU_MODEL",
+	"ANTHROPIC_DEFAULT_OPUS_MODEL",
+	"ANTHROPIC_DEFAULT_SONNET_MODEL",
+	"CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+	"CLAUDE_CODE_DISABLE_1M_CONTEXT",
+	"CLAUDE_CODE_MAX_CONTEXT_TOKENS",
+	"FORCE_PROMPT_CACHING_5M",
+	"HDIS_DISPATCHER_PANE",
+	"HERDR_PANE_ID",
+	"HERDR_PLUGIN_CONTEXT_JSON",
+	"HERDR_TAB_ID",
+	"HERDR_WORKSPACE_ID",
+}
+
+// WorkerEnvReserved reports whether a name is one this dispatcher sets itself.
+func WorkerEnvReserved(key string) bool {
+	for _, name := range ReservedWorkerEnv {
+		if key == name {
+			return true
+		}
+	}
+	return false
+}
+
+// WorkerEnvKeyOK reports whether a name may be exported into a worker's pane:
+// ^[A-Z_][A-Z0-9_]*$, and nothing else.
+//
+// It is narrow on purpose. The name travels as the left half of one
+// `herdr ... --env NAME=value` argument, so anything an environment does not
+// hold as a name is a pane opened with something nobody can read back. The
+// lowercase half of the environment is a shell's own, and a dispatcher has no
+// business writing there.
+func WorkerEnvKeyOK(key string) bool {
+	if key == "" {
+		return false
+	}
+	for i, r := range key {
+		switch {
+		case r >= 'A' && r <= 'Z', r == '_':
+		case i > 0 && r >= '0' && r <= '9':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// EnvVar is one name and value exported into a worker's pane.
+type EnvVar struct {
+	Key   string
+	Value string
+}
+
+// WorkerEnvFor is what a worker of this profile gets in its pane: the
+// fleet-wide table with the profile's own merged OVER it, in name order.
+//
+// Name order rather than document order, because a map has none and the
+// `--env` arguments a spawn passes should be the same twice over.
+func (c Config) WorkerEnvFor(p Profile) []EnvVar {
+	merged := make(map[string]string, len(c.Worker.Env)+len(p.Env))
+	for k, v := range c.Worker.Env {
+		merged[k] = v
+	}
+	for k, v := range p.Env {
+		merged[k] = v
+	}
+	keys := make([]string, 0, len(merged))
+	for k := range merged {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]EnvVar, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, EnvVar{Key: k, Value: merged[k]})
+	}
+	return out
+}
+
+// WorkerEnvKeys is the names of a resolved environment, which is what doctor
+// reports: the values are the operator's and are never printed.
+func WorkerEnvKeys(env []EnvVar) []string {
+	keys := make([]string, 0, len(env))
+	for _, v := range env {
+		keys = append(keys, v.Key)
+	}
+	return keys
 }
 
 // AccountNameOK reports whether an account name may be exported bare onto a
@@ -633,14 +779,20 @@ func Parse(b []byte) (Config, error) {
 		if err := checkMCPConfig(worker, "worker"); err != nil {
 			return Config{}, err
 		}
+		if err := checkWorkerEnv(worker, "[worker] env"); err != nil {
+			return Config{}, err
+		}
 	}
 	if profiles, ok := doc["profiles"].(map[string]any); ok {
-		for name, raw := range profiles {
-			p, ok := raw.(map[string]any)
+		for _, name := range sortedNames(profiles) {
+			p, ok := profiles[name].(map[string]any)
 			if !ok {
 				continue
 			}
 			if err := checkMCPConfig(p, "profile "+name); err != nil {
+				return Config{}, err
+			}
+			if err := checkWorkerEnv(p, "profile "+name+" env"); err != nil {
 				return Config{}, err
 			}
 		}
@@ -802,6 +954,52 @@ func checkMCPConfig(table map[string]any, where string) error {
 		return fmt.Errorf("hdis config: %s names an empty mcp_config, which is a document no worker can read; remove the key to take the default doors this dispatcher writes at %s", where, WorkerMCPFile)
 	}
 	return nil
+}
+
+// checkWorkerEnv refuses an `env` table this dispatcher could not export as
+// written, naming where it was written and which key it was.
+//
+// It reads the DOCUMENT rather than the decoded struct for the reason the
+// mcp_config check does: a value that is not a string decodes to an error
+// naming a Go type, and a key nobody may set decodes to a perfectly ordinary
+// map entry. Both are the operator's document, and both are named here in the
+// operator's own words.
+func checkWorkerEnv(table map[string]any, where string) error {
+	raw, named := table["env"]
+	if !named {
+		return nil
+	}
+	env, ok := raw.(map[string]any)
+	if !ok {
+		return fmt.Errorf("hdis config: %s is not a table of names to values; write it as `env = { NAME = \"value\" }` or under an `[...env]` header", where)
+	}
+	for _, key := range sortedNames(env) {
+		if !WorkerEnvKeyOK(key) {
+			return fmt.Errorf("hdis config: %s names %q, and an exported name may hold only capitals, digits and '_' and may not start with a digit; it is the name half of the environment the worker's pane is opened with", where, key)
+		}
+		if WorkerEnvReserved(key) {
+			return fmt.Errorf("hdis config: %s sets %q, which this dispatcher sets itself: it is the worker's own pane, its report address or the launcher's routing, and a document that overwrote it would send the worker somewhere nobody wrote", where, key)
+		}
+		value, ok := env[key].(string)
+		if !ok {
+			return fmt.Errorf("hdis config: %s gives %q a value that is not a quoted string; an environment carries text, so write the number or the flag as one", where, key)
+		}
+		if strings.ContainsAny(value, "\n\r") {
+			return fmt.Errorf("hdis config: %s gives %q a value spanning more than one line, and herdr refuses a control character in the argument the pane is opened with; keep it to one line", where, key)
+		}
+	}
+	return nil
+}
+
+// sortedNames is the keys of a document table in name order, so a refusal
+// names the same key every time a document is read.
+func sortedNames(table map[string]any) []string {
+	names := make([]string, 0, len(table))
+	for name := range table {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // MCPConfigFor is the MCP document a profile's workers are launched against:

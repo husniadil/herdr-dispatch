@@ -774,3 +774,138 @@ provider = "codex"
 		t.Fatalf("account: got %q, want empty", p.Account)
 	}
 }
+
+// The fleet-wide table reaches every worker, and a profile's own is merged
+// OVER it per key: an operator pinning one profile to another gate policy
+// keeps the rest of the fleet's names.
+func TestAProfileEnvIsMergedOverTheFleetEnv(t *testing.T) {
+	c, err := Parse([]byte(`default = "worker"
+
+[worker]
+env = { TASKS_GATE_COMMAND = "agamemnon gate check", AGAMEMNON_GATE_POLICY = "/state/gate.default.toml" }
+
+[profiles.worker]
+provider = "claude"
+
+[profiles.pinned]
+provider = "claude"
+env = { AGAMEMNON_GATE_POLICY = "/state/gate.pinned.toml", MAIL_GATE_COMMAND = "agamemnon gate check" }
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	plain, err := c.ProfileNamed("worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []EnvVar{
+		{Key: "AGAMEMNON_GATE_POLICY", Value: "/state/gate.default.toml"},
+		{Key: "TASKS_GATE_COMMAND", Value: "agamemnon gate check"},
+	}
+	if got := c.WorkerEnvFor(plain); !reflect.DeepEqual(got, want) {
+		t.Fatalf("fleet env: got %+v, want %+v", got, want)
+	}
+
+	pinned, err := c.ProfileNamed("pinned")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = []EnvVar{
+		{Key: "AGAMEMNON_GATE_POLICY", Value: "/state/gate.pinned.toml"},
+		{Key: "MAIL_GATE_COMMAND", Value: "agamemnon gate check"},
+		{Key: "TASKS_GATE_COMMAND", Value: "agamemnon gate check"},
+	}
+	if got := c.WorkerEnvFor(pinned); !reflect.DeepEqual(got, want) {
+		t.Fatalf("profile env: got %+v, want %+v", got, want)
+	}
+	// Keys only is what doctor prints, and the values never leave here.
+	if got, want := WorkerEnvKeys(c.WorkerEnvFor(pinned)),
+		[]string{"AGAMEMNON_GATE_POLICY", "MAIL_GATE_COMMAND", "TASKS_GATE_COMMAND"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("keys: got %v, want %v", got, want)
+	}
+}
+
+// The same table under a header, because an operator with more than two names
+// writes it that way and both shapes are the same document.
+func TestAWorkerEnvReadsTheSameUnderAHeader(t *testing.T) {
+	c, err := Parse([]byte(`default = "worker"
+
+[profiles.worker]
+provider = "claude"
+
+[worker.env]
+TASKS_GATE_COMMAND = "agamemnon gate check"
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got, want := c.Worker.Env["TASKS_GATE_COMMAND"], "agamemnon gate check"; got != want {
+		t.Fatalf("env: got %q, want %q", got, want)
+	}
+}
+
+// Everything this dispatcher could not export as written is refused where the
+// document is read, naming the key: the alternative is a worker launched with
+// something nobody wrote, hours later and in a pane nobody is watching.
+func TestAWorkerEnvThisDispatcherCouldNotExportIsRefused(t *testing.T) {
+	for name, env := range map[string]string{
+		"a lowercase name":              "[worker]\nenv = { tasks_gate_command = \"x\" }",
+		"a name starting with a digit":  "[worker]\nenv = { 2FA = \"x\" }",
+		"a name a shell would not take": "[worker]\nenv = { \"TASKS-GATE\" = \"x\" }",
+		// The two a header carries that an inline table refuses one line
+		// earlier: a whole number is a value the environment has no way to
+		// hold, and an escaped newline is a second line on a shell line.
+		"a value that is not text":        "[worker.env]\nTASKS_GATE_TIMEOUT = 30",
+		"a value over more than one line": "[worker.env]\nTASKS_GATE_COMMAND = \"agamemnon\\ngate\"",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := Parse([]byte(`default = "worker"
+
+[profiles.worker]
+provider = "claude"
+
+` + env + `
+`))
+			if err == nil {
+				t.Fatalf("%s was accepted", name)
+			}
+			if !strings.Contains(err.Error(), "[worker] env") {
+				t.Fatalf("the refusal does not name where it was written: %v", err)
+			}
+		})
+	}
+}
+
+// A name this dispatcher sets itself is refused wherever it is written: a
+// document that overwrote one would send a worker's report somewhere else or
+// route it through a model nobody chose.
+func TestAWorkerEnvMayNotSetANameTheDispatcherSets(t *testing.T) {
+	for _, name := range ReservedWorkerEnv {
+		t.Run(name, func(t *testing.T) {
+			_, err := Parse([]byte(`default = "worker"
+
+[worker]
+env = { ` + name + ` = "mine" }
+
+[profiles.worker]
+provider = "claude"
+`))
+			if err == nil {
+				t.Fatalf("%s was accepted fleet-wide", name)
+			}
+			_, err = Parse([]byte(`default = "worker"
+
+[profiles.worker]
+provider = "claude"
+env = { ` + name + ` = "mine" }
+`))
+			if err == nil {
+				t.Fatalf("%s was accepted on a profile", name)
+			}
+			if !strings.Contains(err.Error(), "profile worker env") {
+				t.Fatalf("the refusal does not name where it was written: %v", err)
+			}
+		})
+	}
+}

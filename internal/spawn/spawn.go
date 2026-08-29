@@ -522,6 +522,13 @@ type Request struct {
 	// nothing configured, and then the default file this pipeline writes
 	// once is used instead.
 	MCPConfig string
+	// Env is what the operator's document asks this worker's pane to carry,
+	// as the config resolved it: the fleet-wide `[worker] env` with the
+	// profile's own merged over it, in name order. It travels on the call
+	// that OPENS the pane, beside this pipeline's own two names, so it is
+	// there before the pane's shell is. Empty is a document that named
+	// none, and then the pane carries only what this pipeline sets.
+	Env []config.EnvVar
 	// Project is the task's project directory, as the board records it. It
 	// is what a live pane's cwd is measured against to find the desk that
 	// owns the work; empty means no desk can be found that way. It is NOT
@@ -683,8 +690,8 @@ func (p *Pipeline) Run(ctx context.Context, req Request) (string, error) {
 // as four equal rectangles rather than a column beside a stack.
 //
 // The env travels on whichever call opens the pane, so a worker carries its
-// report address and its cache TTL whether it was the first in a tab or the
-// fifth.
+// report address, its cache TTL and whatever the operator's `[worker] env`
+// named whether it was the first in a tab or the fifth.
 func (p *Pipeline) place(ctx context.Context, req Request) (string, error) {
 	// One read of the pane list, one desk, and both answers taken from it.
 	panes, err := p.Herdr.PaneList(ctx)
@@ -698,6 +705,15 @@ func (p *Pipeline) place(ctx context.Context, req Request) (string, error) {
 	env := []string{
 		DispatcherPaneVar + "=" + desk,
 		ShortPromptCacheVar + "=1",
+	}
+	// The operator's own names ride the same call, so they are in the pane
+	// before its shell starts: a worker's own MCP doors read their policy
+	// gate out of their environment, and a door started before the name
+	// arrived is an ungated door. They are added AFTER this dispatcher's
+	// two, and config.ReservedWorkerEnv is what keeps a document from
+	// naming either of them.
+	for _, v := range req.Env {
+		env = append(env, v.Key+"="+v.Value)
 	}
 	ws := workspaceOf(panes, desk, req.BasePane)
 

@@ -5,6 +5,30 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
+## Unreleased
+
+**Added: `[worker] env`, exported into every worker's pane.** A worker's own
+MCP doors read their §9 policy gate out of THEIR OWN environment —
+`<NAME>_GATE_COMMAND`, which is each plugin's rule and not this one's — and on
+a laptop nothing put it there: a worker pane inherits the Herdr server's
+environment, which is the operator's, so hdis-spawned workers ran ungated doors
+beside gateway-spawned doors on the same machine that were gated. `[worker]
+env = { NAME = "value" }` is now passed on the call that opens a worker's pane,
+beside the `HDIS_DISPATCHER_PANE` and `FORCE_PROMPT_CACHING_5M` that call
+already carried, so the names are there before the pane's shell is; a profile's
+own `env` is merged over it per key. A name must match `^[A-Z_][A-Z0-9_]*$`, a
+value is one line, and the names this dispatcher and its launcher set
+themselves — `HERDR_PANE_ID`, `HDIS_DISPATCHER_PANE`, `ANTHROPIC_AUTH_TOKEN`
+and the rest of the routing — are refused when the document is read. The values are the operator's own: `hdis` reads none of them,
+and `hdis doctor` prints a `worker env` line of KEYS and never a value, with
+`worker.env` and `worker.profile_env` carrying the same in the JSON. A document
+that names none is unchanged in every word: the pane is opened with exactly
+what it always was.
+
+**Changed: the config reader accepts an inline table of quoted strings.** It
+is how `env` is written on one line. Every other inline table is refused by
+line number exactly as before, the value that is not a quoted string included.
+
 ## 0.9.0 — 2026-08-29
 
 **Added: a profile falls back to another when its account is at quota, with

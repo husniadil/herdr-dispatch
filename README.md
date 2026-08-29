@@ -568,10 +568,12 @@ The reader is a hand-written subset of TOML rather than a dependency: top-level
 strings, whole numbers, `true`/`false`, or one-line arrays of quoted strings.
 `[[route]]` repeats a table into a list, which is how the routing table below
 is written. A project path is a key, so it is quoted. Anything outside that
-subset — an inline table, a multi-line array, an unquoted string, a key set
-twice — is refused by line number rather than ignored, because a setting an
-operator wrote and this binary silently dropped is the failure a config parser
-exists to prevent.
+subset — a multi-line array, an inline table holding anything but quoted
+strings, an unquoted string, a key set twice — is refused by line number rather
+than ignored, because a setting an operator wrote and this binary silently
+dropped is the failure a config parser exists to prevent. An inline table of
+quoted strings on one line IS in the subset, because `env` below is the one
+setting shaped like a map of names to text.
 
 | Field      | Meaning                                                                                                                    |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------- |
@@ -663,6 +665,54 @@ path is there, because which profile a worker launched from decides which
 doors it got. The JSON shape carries the same facts under `worker`:
 `mcp_config`, `mcp_config_configured`, `mcp_config_exists`, and
 `profile_mcp_configs`.
+
+### The environment a worker gets
+
+```toml
+[worker]
+env = { TASKS_GATE_COMMAND = "agamemnon gate check", MAIL_GATE_COMMAND = "agamemnon gate check", SCHED_GATE_COMMAND = "agamemnon gate check", AGAMEMNON_GATE_POLICY = "/Users/me/.local/state/agamemnon-box/gate.default.toml", AGAMEMNON_GATE_OVERRIDE = "/Users/me/.local/state/agamemnon-box/gate.toml" }
+```
+
+`[worker] env` is what every worker's pane is opened with, and a profile's own
+`env` is merged over it per key, so pinning one profile to another policy keeps
+the rest of the fleet's names. Written under a header — `[worker.env]`,
+`[profiles.routed.env]` — it reads exactly the same.
+
+Nothing is typed for it. The names ride the `herdr pane split` / `herdr tab
+create` call itself, as `--env NAME=value` beside the `HDIS_DISPATCHER_PANE`
+and `FORCE_PROMPT_CACHING_5M` that call already carries, so they are in the
+pane BEFORE its shell starts — which matters, because a worker's doors are
+started by that shell and a door that came up before the name arrived is an
+ungated door.
+
+It exists for the gate. A worker's MCP doors are stdio children of its own
+client, and each of them reads its §9 policy gate out of ITS OWN environment,
+from `<NAME>_GATE_COMMAND` — the plugins' rule, not this one's. On a fleet box
+the container entrypoint exports those into the whole process tree and every
+worker's doors are gated. On a laptop nothing does: a worker pane inherits the
+Herdr server's environment, which is the operator's, so hdis-spawned workers
+ran ungated doors beside gateway-spawned doors on the same machine that were
+gated. This table is how a laptop closes that gap.
+
+The values are the operator's own. `hdis` reads none of them, and a token
+written here is their choice — which is why `hdis doctor` prints the KEYS and
+never a value:
+
+```text
+  worker env  AGAMEMNON_GATE_POLICY MAIL_GATE_COMMAND SCHED_GATE_COMMAND TASKS_GATE_COMMAND; profile routed adds MAIL_GATE_COMMAND
+  worker env  none: a worker's pane carries only what this dispatcher sets
+```
+
+A name must match `^[A-Z_][A-Z0-9_]*$`, because that is what an environment
+holds as a name, and a value is one line, because herdr refuses a control
+character in an argument and `--env` is one. The names this dispatcher
+and the launcher set themselves are refused outright — `HERDR_PANE_ID`,
+`HERDR_TAB_ID`, `HERDR_WORKSPACE_ID`, `HERDR_PLUGIN_CONTEXT_JSON`,
+`HDIS_DISPATCHER_PANE`, `FORCE_PROMPT_CACHING_5M`, `ANTHROPIC_AUTH_TOKEN` and
+the rest of the routing `proxenos env` supplies — because a document that
+overwrote one would send a worker's report somewhere nobody wrote. All of it is
+refused when the document is read. The JSON shape carries the same facts under
+`worker`: `env`, and `profile_env` as `{profile, env}`.
 
 ### Routing a task to a profile by its priority
 
@@ -977,8 +1027,10 @@ whole of it.
    later as a startup timeout with the cause hidden in a pane.
 2. `herdr tab create` in the filer's workspace, in the task's own checkout,
    with `--label "hdis task <n>"`, `--env HDIS_DISPATCHER_PANE=<the report
-   address>` and `--env FORCE_PROMPT_CACHING_5M=1` — see
+   address>`, `--env FORCE_PROMPT_CACHING_5M=1` and one `--env` for every name
+   `[worker] env` and the profile's own `env` resolved to — see
    [Where a worker comes up](#where-a-worker-comes-up),
+   [The environment a worker gets](#the-environment-a-worker-gets),
    [The dispatcher's address](#the-dispatchers-address) and
    [The worker's prompt cache](#the-workers-prompt-cache).
 3. For a `codex` profile, the routing arrives in two halves. The settings

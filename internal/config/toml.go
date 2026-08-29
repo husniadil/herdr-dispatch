@@ -8,16 +8,18 @@ import (
 
 // parseTOML reads the subset of TOML this config needs: `key = value` lines
 // at the top level and under `[table]` / `[table.sub]` headers, where a value
-// is a quoted string, an integer, a boolean, or an array of quoted strings on
-// one line. It answers a nested map, which is then rendered as JSON and
+// is a quoted string, an integer, a boolean, an array of quoted strings on
+// one line, or an inline table of quoted strings on one line. It answers a
+// nested map, which is then rendered as JSON and
 // decoded through the same struct tags the document has always used — so
 // every default, every refusal and every field name is the one the config
 // already had, and only the surface syntax moved.
 //
 // Hand-written, because the dependency budget is one library and it is the
 // MCP go-sdk. What is NOT accepted is refused by line number rather than
-// ignored: inline tables, multi-line arrays, a bare value this parser cannot
-// type. A setting an operator wrote and this binary silently dropped is the
+// ignored: multi-line arrays and inline tables, an inline table holding
+// anything but quoted strings, a bare value this parser cannot type. A
+// setting an operator wrote and this binary silently dropped is the
 // failure mode a config parser exists to prevent, and it is the one a
 // permissive parser produces.
 func parseTOML(src string) (map[string]any, error) {
@@ -172,13 +174,59 @@ func parseValue(s string) (any, error) {
 	case strings.HasPrefix(s, "["):
 		return parseList(s)
 	case strings.HasPrefix(s, "{"):
-		return nil, fmt.Errorf("inline tables are not supported in this config: %s", s)
+		return parseInlineTable(s)
 	}
 	n, err := strconv.Atoi(s)
 	if err != nil {
 		return nil, fmt.Errorf("%s is not a quoted string, a whole number, true or false", s)
 	}
 	return n, nil
+}
+
+// parseInlineTable reads `{ KEY = "value", ... }` on ONE line, where every
+// value is a quoted string.
+//
+// It is the narrowest inline table that carries a worker's environment, which
+// is the only setting here shaped like a map of names to strings: written as
+// `[worker.env]` it would be a header an operator has to place after every
+// other key of its table, and a `[profiles.x.env]` under it again.
+//
+// Everything else an inline table can hold is still refused by line, the way
+// the rest of this parser refuses: a value that is not a quoted string, a
+// nested table, a table that does not close on its line. So `layout = {
+// min_pane_columns = 40 }` is the error it always was.
+func parseInlineTable(s string) (map[string]any, error) {
+	if !strings.HasSuffix(s, "}") {
+		return nil, fmt.Errorf("an inline table must open and close on one line: %s", s)
+	}
+	out := map[string]any{}
+	inner := strings.TrimSpace(s[1 : len(s)-1])
+	if inner == "" {
+		return out, nil
+	}
+	for _, pair := range splitTopLevel(inner, ',') {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		rawKey, rawValue, ok := strings.Cut(pair, "=")
+		if !ok {
+			return nil, fmt.Errorf("an inline table holds `key = \"value\"` pairs, and %q is not one", pair)
+		}
+		name, err := bareKey(strings.TrimSpace(rawKey))
+		if err != nil {
+			return nil, err
+		}
+		value, err := strconv.Unquote(strings.TrimSpace(rawValue))
+		if err != nil {
+			return nil, fmt.Errorf("an inline table's values must be quoted strings: %s", strings.TrimSpace(rawValue))
+		}
+		if _, dup := out[name]; dup {
+			return nil, fmt.Errorf("%q is set twice in one inline table, and which one wins is not something a config should leave to the reader", name)
+		}
+		out[name] = value
+	}
+	return out, nil
 }
 
 func parseList(s string) ([]any, error) {

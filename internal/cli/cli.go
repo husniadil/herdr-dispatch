@@ -160,6 +160,11 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 		// path that is not there refuses the spawn, which is what makes it
 		// a doctor line rather than a config echo.
 		fmt.Fprintf(out, "  worker      %s\n", workerLane(rep.Worker))
+		// The names a worker's pane carries beyond what this dispatcher
+		// sets, and never their values: what an operator exports there is
+		// theirs, and a gate command or a token read out loud is a doctor
+		// line that costs something.
+		fmt.Fprintf(out, "  worker env  %s\n", workerEnvLane(rep.Worker))
 		if rep.Board.Error != "" {
 			fmt.Fprintf(out, "  board       unreachable: %s\n", rep.Board.Error)
 			return nil
@@ -321,6 +326,26 @@ func workerLane(w daemon.WorkerHealth) string {
 			state = "MISSING"
 		}
 		line += fmt.Sprintf("; profile %s reads %s, %s", p.Profile, p.MCPConfig, state)
+	}
+	return line
+}
+
+// workerEnvLane is what a worker's pane is given beyond what this dispatcher
+// sets: the fleet-wide names first, then every profile that adds names of its
+// own. KEYS only — the values are the operator's, and a gate command or a
+// token belongs in their document rather than on a line doctor prints.
+//
+// A fleet that exports nothing says so rather than printing a blank: on a
+// laptop, nothing exported is exactly the finding — a worker's own doors read
+// their policy gate from their environment, and an empty one is an ungated
+// door.
+func workerEnvLane(w daemon.WorkerHealth) string {
+	line := "none: a worker's pane carries only what this dispatcher sets"
+	if len(w.Env) > 0 {
+		line = strings.Join(w.Env, " ")
+	}
+	for _, p := range w.ProfileEnv {
+		line += fmt.Sprintf("; profile %s adds %s", p.Profile, strings.Join(p.Env, " "))
 	}
 	return line
 }
