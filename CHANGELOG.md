@@ -5,7 +5,7 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
-## Unreleased
+## 0.10.1 — 2026-08-29
 
 **Fixed: a retired pane's checkout is removed with it, so the task's branch is
 free for the next worker.** The reap that removes a checkout no binding names
