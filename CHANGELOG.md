@@ -5,6 +5,63 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
+## Unreleased
+
+**Changed: the declared contract revision is now 0.11.0, up from 0.10.1.**
+`docs/contract.md` is re-vendored at 0.11.0, which adds §11.7 and moves nothing
+else: a plugin with leases must let a `plugin` principal release the leases of
+a pane Herdr's own pane list no longer names, and must refuse one it still
+names. hdis holds no leases, so the MUST binds htask; hdis is the caller.
+**What a caller changes:** nothing — `hdis doctor` reports `contract`
+`0.11.0` where it reported `0.10.1`, and every verb, shape and code is
+unchanged.
+
+**Added: a worker's pane that is gone has its claim handed back instead of
+waiting out the lease.** A pane dies with the machine it ran on and cannot
+sweep itself, so the task it had claimed sat in `doing` under a principal that
+no longer existed until htask's 900s lease lapsed — and, on a restart, until a
+person closed the pane by hand. Where the board supports it (herdr-tasks
+0.10.0 and later), hdis now calls `htask sweep --pane <pane> --json --as
+plugin:hdis@<base pane>` right after it drops a gone pane's binding, and again
+after it retires a restored pane with no worker in it — in that order, because
+the board asks Herdr and grants the release only for a pane Herdr no longer
+lists. The outcome rides on the event already filed for that pane,
+`dispatch.worker.gone` or `dispatch.worker.retired`: `released` names the task
+ids that came back, `sweep_refused` carries the board's code, and
+`sweep_retry` says the claim is still owed. FORBIDDEN means the pane is alive
+after all and is never retried; UNAVAILABLE and TIMEOUT are asked again on the
+next tick; UNSUPPORTED is a Herdr too old to list panes, said once, with the
+board's lease as the fallback. **What a caller changes:** a reader of those two
+events sees three new optional detail keys; a board older than 0.10.0 refuses
+the call and the behaviour is what it was.
+
+**Changed: the self-review shot is decided on the submission's evidence
+rather than sent for every submission.** A task whose deliverable was one
+untracked text file earned two shots and mailed the operator two "Mutations
+run: 0" reports inside four minutes: the mutation pass had nothing to bite on
+and said so at length. With `[verify]` on, the shot is now sent only where
+there is work in it — the diff of the worker's branch against the commit it
+was cut from holds a file in a programming language, or the board row's report
+names a test. When neither is true nothing is prompted and a new event,
+`dispatch.worker.shot_skipped`, carries the pane and the reason `no code to
+mutate`, so the trail says why the shot did not fire. Every uncertainty keeps
+the shot: a binding with no checkout, a row that could not be read, a git that
+would not answer. **What a caller changes:** a reader counting
+`dispatch.worker.prompted` events to tell whether a submission was verified
+now reads `dispatch.worker.shot_skipped` beside it; the binding document
+carries one more optional field, `shot_skipped`, which an older `hdis` ignores.
+
+**Fixed: `make release-check` no longer leaves a real `htask` daemon running.**
+The layer-3 suite starts real `hdis` and `htask` daemons for its own temporary
+board, and its cleanup sent both a `stop` without ever checking that either
+ended — two `htask daemon` processes were found on the operator's laptop
+fifteen minutes after a run, holding state under a temp directory that no
+longer existed. The cleanup now strips the Herdr pane context from the
+environment it stops with (`htask stop` refuses a call from a pane), waits for
+every process started from the suite's own temp root to be gone, and kills
+what survives and FAILS the test naming the pids, so a leak can never be
+silent.
+
 ## 0.9.2 — 2026-08-29
 
 **Added: every worker is launched against `permissions.deny` rules that stop

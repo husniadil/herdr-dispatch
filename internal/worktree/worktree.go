@@ -235,3 +235,45 @@ func (m *Manager) Project(ctx context.Context, dir string) (string, error) {
 	}
 	return root, nil
 }
+
+// Changed is the tracked paths a task's work has touched: the branch's
+// checkout compared with the commit that branch was cut from, committed and
+// uncommitted alike.
+//
+// The base is the merge base of the project's HEAD and the branch rather than
+// the project's HEAD itself, because the project moves under a worker: a
+// checkout cut yesterday and a project that has taken three commits since
+// would otherwise report every one of them as this task's work.
+//
+// Untracked files are not in it, and that is git's own line rather than a
+// choice made here: `git diff` compares what git knows about. A caller reading
+// "no tracked change" as "no code" is reading exactly what it says.
+//
+// It fails rather than answering empty whenever git cannot answer — a checkout
+// that is gone, a branch the repository does not have, a directory that is not
+// a repository at all. An empty answer is a fact about the work, and inventing
+// one from a failure would put a decision on evidence nobody read.
+func (m *Manager) Changed(ctx context.Context, project, dir, branch string) ([]string, error) {
+	if dir == "" || branch == "" {
+		return nil, fmt.Errorf("no diff for %q on %q: the binding carries no checkout", dir, branch)
+	}
+	root, err := m.run(ctx, project, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return nil, fmt.Errorf("no diff for %s: %w", branch, err)
+	}
+	base, err := m.run(ctx, root, "merge-base", "HEAD", branch)
+	if err != nil {
+		return nil, fmt.Errorf("no diff for %s: %w", branch, err)
+	}
+	out, err := m.run(ctx, dir, "diff", "--name-only", base)
+	if err != nil {
+		return nil, fmt.Errorf("no diff for %s: %w", branch, err)
+	}
+	var paths []string
+	for _, line := range strings.Split(out, "\n") {
+		if p := strings.TrimSpace(line); p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths, nil
+}

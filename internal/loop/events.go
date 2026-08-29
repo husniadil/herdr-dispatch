@@ -27,6 +27,12 @@ const (
 	// KindPromptRefused is a prompt this binary would not deliver, which is
 	// the §5.9 render-time clamp refusing a condition that does not fit.
 	KindPromptRefused = "prompt_refused"
+	// KindShotSkipped is a self-review shot this binary decided not to send,
+	// with the reason it decided on. It is its own kind rather than a
+	// `prompted` event carrying a note, because nothing was prompted: a trail
+	// that said "prompted" for a prompt that never left would be the one
+	// silence this lane exists to remove.
+	KindShotSkipped = "shot_skipped"
 	// KindReviewAnnounced is the operator being told a submission is
 	// waiting, which is where this dispatcher stops.
 	KindReviewAnnounced = "review_announced"

@@ -30,8 +30,9 @@ const (
 	// MaxPrompts times and never claimed. The pane is retired with it.
 	GiveUp Kind = "giveup"
 	// Rearm clears the announcement and the verification on a worker's
-	// binding, because its task came back out of review. If it is submitted
-	// again, both are due again.
+	// binding — including a shot the evidence skipped — because its task came
+	// back out of review. If it is submitted again, all of it is due again,
+	// and the next submission is judged on its own evidence.
 	Rearm Kind = "rearm"
 )
 
@@ -125,6 +126,12 @@ type Binding struct {
 	// the shot — see selfReviewDue. Rearm clears it when the task leaves
 	// review.
 	Verified bool
+	// ShotSkipped says the self-review shot was NOT sent for the submission
+	// the binding is holding, because the evidence said the mutation pass had
+	// nothing to bite on — see NothingToMutate. The evidence is read at the
+	// edge and this is what stops the core asking for the shot again;
+	// Rearm clears it with the submission it was about.
+	ShotSkipped bool
 }
 
 // Snapshot is everything a tick may know. Agents maps pane id to Herdr's
@@ -276,7 +283,7 @@ func Decide(s Snapshot, p Policy) []Action {
 		// Out of review with an announcement or a verification still on the
 		// binding: the submission those belonged to is gone, and a new one
 		// earns both again.
-		if known && (b.Notified || b.Verified) {
+		if known && (b.Notified || b.Verified || b.ShotSkipped) {
 			out = append(out, Action{Kind: Rearm, TaskID: b.TaskID, Pane: b.Pane})
 		}
 		if known && t.Status == "todo" {
@@ -376,6 +383,12 @@ func shareOut(readyIDs []string, tasks map[string]Task) []string {
 // the same reason: a pane idle for reasons of its own must not be prompted
 // forever, and a worker mid-turn must not be interrupted by a second copy.
 func selfReviewDue(b Binding, status string, now time.Time, p Policy) bool {
+	// The evidence already answered for this submission: there was no code to
+	// mutate and no test named, and asking again reads the same diff to the
+	// same answer.
+	if b.ShotSkipped {
+		return false
+	}
 	if !b.Verified {
 		return true
 	}

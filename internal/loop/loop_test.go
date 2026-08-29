@@ -77,6 +77,16 @@ case "$1" in
   esac ;;
 "goal") cat "$HDIS_FAKE_DIR/goal.txt" ;;
 "release") echo '{"released":true}' ;;
+"sweep")
+  printf '%s' "${HERDR_PANE_ID-unset}" > "$HDIS_FAKE_DIR/sweep.env"
+  n=$(cat "$HDIS_FAKE_DIR/sweepn" 2>/dev/null || echo 0)
+  n=$((n+1)); printf %s "$n" > "$HDIS_FAKE_DIR/sweepn"
+  if [ -f "$HDIS_FAKE_DIR/sweeprefusal" ]; then
+    if [ ! -f "$HDIS_FAKE_DIR/sweepuntil" ] || [ "$n" -le "$(cat "$HDIS_FAKE_DIR/sweepuntil")" ]; then
+      cat "$HDIS_FAKE_DIR/sweeprefusal"; exit 4
+    fi
+  fi
+  cat "$HDIS_FAKE_DIR/sweep.json" 2>/dev/null || echo '{"released":[],"count":0}' ;;
 "events") cat "$HDIS_FAKE_DIR/events.json" 2>/dev/null || echo '{"events":[],"count":0}' ;;
 "doctor "*|"doctor") cat "$HDIS_FAKE_DIR/doctor.json" ;;
 *) echo "htask: this fake board does not serve '$1' (task verbs are top-level: 'get', not 'task get')" >&2; exit 1 ;;
@@ -333,9 +343,12 @@ func TestAnUnclaimedWorkerIsNudgedAfterTheClaimTimeout(t *testing.T) {
 	}
 }
 
-// A pane that is gone drops its binding and nothing else. Releasing the
-// lease is the board's own sweep, and a second writer racing it is the bug.
-func TestAGonePaneOnlyDropsItsBinding(t *testing.T) {
+// A pane that is gone drops its binding, hands its claim back through §11.7's
+// one door — a `sweep --pane` for THAT pane, which the board grants only
+// because herdr no longer lists it — and does nothing else. It never releases
+// a task by id, and it closes no pane: the pane it was about is already gone,
+// and the lease timer stays the board's own.
+func TestAGonePaneDropsItsBindingAndSweepsNothingElse(t *testing.T) {
 	l, f := newLoop(t)
 	if err := l.Tick(context.Background()); err != nil {
 		t.Fatalf("first tick: %v", err)
@@ -348,10 +361,19 @@ func TestAGonePaneOnlyDropsItsBinding(t *testing.T) {
 	if len(l.bindings) != 0 {
 		t.Fatalf("bindings: %+v", l.bindings)
 	}
-	for _, verb := range []string{"release", "sweep", "pane close"} {
+	for _, verb := range []string{"release", "pane close"} {
 		if got := calls(t, f, verb); len(got) != 0 {
 			t.Fatalf("a gone pane triggered %q: %v", verb, got)
 		}
+	}
+	swept := calls(t, f, "sweep")
+	if len(swept) != 1 {
+		t.Fatalf("a gone pane swept %d times: %v", len(swept), swept)
+	}
+	// --pane, never a bare sweep: a bare one is every stale lease on the
+	// board, which is the board's own timer and not this daemon's business.
+	if !strings.Contains(swept[0], "--pane wM:p9") {
+		t.Fatalf("the sweep is not scoped to the gone pane: %q", swept[0])
 	}
 }
 

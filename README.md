@@ -52,7 +52,7 @@ copy is a second version of the truth from the next commit onwards. The MCP
 door carries the same facts in its instructions, but only for a client that
 has the door wired in; the skill is what a harness without it ever reads.
 
-This plugin satisfies **version 0.10.1** of the Herdr plugin contract, swept
+This plugin satisfies **version 0.11.0** of the Herdr plugin contract, swept
 section by section in [`docs/contract-notes.md`](docs/contract-notes.md).
 `hdis doctor` says so in both its shapes, as its own top-level `contract`
 field, distinct from the `board.contract` it relays from `htask`.
@@ -404,6 +404,7 @@ The names are `dispatch.<entity>.<kind>`:
 | `dispatch.worker.adopted`            | A restart took a live worker back                         |
 | `dispatch.worker.prompted`           | A nudge or a self-review shot was delivered               |
 | `dispatch.worker.prompt_refused`     | A condition did not fit its budget, so nothing was sent   |
+| `dispatch.worker.shot_skipped`       | A self-review shot the evidence said had no work, with why |
 | `dispatch.worker.retired`            | This dispatcher closed a worker's pane                    |
 | `dispatch.worker.gone`               | A worker's pane disappeared and its binding was dropped   |
 | `dispatch.worker.died`               | A worker's agent died while its pane stayed alive         |
@@ -787,7 +788,8 @@ hook, `[layout]` carries `min_pane_columns` and `max_panes_per_tab`, and
 
 The lane is off unless the document turns it on. On, every task a worker of
 this daemon's submits earns one self-review shot in that worker's OWN pane —
-one shot the worker RECEIVES, which is not the same as one call made:
+one shot the worker RECEIVES, which is not the same as one call made, and one
+the submission's own evidence says there is work in:
 
 ```toml
 [verify]
@@ -1622,15 +1624,18 @@ The answers, all of them consequences of the one question:
   work, and closing a pane on any of them takes a live worker's task away
   mid-flight.
 
-  Retiring the pane is the whole of the hand-back this daemon can make. The
-  claimant is that pane's own `agent:<pane>` principal, and htask refuses this
-  daemon both ways past it — measured against htask 0.9.1 (contract 0.10.1) on
-  2026-08-29, `htask release <id> --as plugin:hdis@…` answers `FORBIDDEN: only
-  the holder may release it` and `htask sweep --pane <pane> --as plugin:hdis@…`
-  answers `FORBIDDEN: that pane or the operator releases them`. So the pane is
-  closed, which is what a pane-gone sweep or the lease timer then acts on, and
-  the REASON is written to this daemon's trail, where it is the only thing that
-  knows it: the board's own sweep can say a lease lapsed and nothing more.
+  Retiring the pane comes first, and the hand-back follows it. The claimant is
+  that pane's own `agent:<pane>` principal, and htask 0.9.1 (contract 0.10.1)
+  refused this daemon both ways past it — measured on 2026-08-29, `htask
+  release <id> --as plugin:hdis@…` answers `FORBIDDEN: only the holder may
+  release it` and `htask sweep --pane <pane> --as plugin:hdis@…` answered
+  `FORBIDDEN: that pane or the operator releases them`. Contract 0.11.0's
+  §11.7 opens the second one for a pane HERDR NO LONGER LISTS, and closing the
+  pane is exactly what takes it off that list — so the order is not incidental:
+  sent the other way round the board would ask Herdr, see a live pane and
+  refuse. The REASON is still written to this daemon's trail, where it is the
+  only thing that knows it, and `released` on the same event names what came
+  back.
 - The row is done or cancelled: the pane is retired. Nothing else will ever
   close a pane this daemon opened for work that is over.
 - The row is claimed by a pane that is not this one: the pane is let go
@@ -1642,11 +1647,10 @@ The answers, all of them consequences of the one question:
   whose checkout names no repository, since nothing can then say which board
   its number belongs to.
 - A binding whose pane Herdr no longer lists names nothing to reconcile, and
-  is dropped with a line in the log. The claim that pane left on the board is
-  not this daemon's to release either, for the same reason and with the same
-  two refusals behind it, so the log and the trail name who still holds it
-  rather than leaving a task sitting in `doing` behind a pane that no longer
-  exists with nothing anywhere explaining it.
+  is dropped with a line in the log. The claim that pane left is handed back
+  through the same §11.7 door, and the log and the trail still name who was
+  holding it, because a hand-back the board refuses leaves the operator with
+  exactly the question that name answers.
 - If **Herdr** cannot be reached at all, nothing is adopted, the failure is
   loud, and the store is left where it is for the next start. Adopting on that
   guess is how a live worker's task ends up in a second pane, which is the
@@ -1674,8 +1678,9 @@ principal is left for that daemon rather than acted on. Anything outside `<state
 only entries carrying the `hdis-` prefix hdis names its own with,
 `hdis-work-` for a worker's checkout.
 Lease release stays htask's own — a single stale hold this daemon itself is
-named on is handed back, and the pane-gone sweep and the lease timer are never
-reimplemented here.
+named on is handed back, a pane Herdr no longer lists is swept by ASKING the
+board for that one pane (§11.7), and the sweep's own rules and the lease timer
+are never reimplemented here.
 
 `hdis doctor` reports the file and how many bindings came back at the last
 start.
@@ -1757,8 +1762,10 @@ counted, so a fleet losing no workers pays no board call for the rule.
 policy between them. Both are driven by shelling out to their CLIs — never by
 opening their sockets — and neither is second-guessed. Herdr's `agent_status`
 is the only truth about a worker this repo accepts, and lease release is
-htask's own: pane-gone sweeps and the lease timer belong to the board, and a
-second writer racing them is the bug, not a safety net.
+htask's own: this daemon ASKS the board to sweep one named pane Herdr no longer
+lists (§11.7) and releases no lease itself, so the sweep's rules and the lease
+timer stay the board's, and a second writer racing them is still the bug, not a
+safety net.
 
 The dispatcher stops at review. It never runs `task approve`, `task reject`,
 or any note verb.
@@ -1776,6 +1783,30 @@ still calls that worker idle, bounded by the same `max_prompts` and claim
 timeout the unclaimed nudge uses. A worker that got the condition is working
 and never meets a second copy; one whose prompt reached nothing is asked again
 instead of losing its only check in silence with the board still green.
+
+**A shot is sent where there is something for it to bite on.** The mutation
+pass is the whole mechanical half of the condition, and a submission whose
+deliverable is one untracked text file gives it nothing: measured on
+2026-08-29, such a task earned two shots and mailed the operator two reports
+of "Mutations run: 0" inside four minutes. So the shot is decided on the
+submission's own evidence, read from what the tick already holds — the
+worker's checkout and branch, and the board row already fetched for it, with
+no Herdr call added for it. When the diff against the commit the branch was
+cut from holds no code — only paths with no programming-language extension, or
+no tracked change at all — AND the report names no test, the shot is not sent
+and `dispatch.worker.shot_skipped` says so with the reason `no code to
+mutate`. The trail is the point: a shot that silently never happened is
+indistinguishable from a lane that is off.
+
+Either half keeps it. Code in the diff is somewhere a compiling mutation can
+land whatever the report says; a report naming a test is something to run
+whatever the diff holds, because a documentation task can still name the gate
+it ran. And every uncertainty keeps it too — a binding with no checkout, a row
+this tick could not read, a git that would not answer — because a shot nobody
+needed costs one prompt and a shot that was needed and never fired costs the
+round this lane exists to save. The skip is remembered on the binding and
+cleared by `Rearm` with the submission it was about, so one submission is
+judged once and the next is judged on its own evidence.
 
 The shot lands on a warm prefix. Task 33 put every worker on
 `FORCE_PROMPT_CACHING_5M=1`, so a worker's cache TTL is five minutes, and the

@@ -11,4 +11,4 @@ const Version = "0.9.2"
 // Contract is the version of the Herdr plugin contract this binary satisfies.
 // It is this plugin's own conformance, and not the board's: doctor relays
 // htask's contract beside it, and the two move independently.
-const Contract = "0.10.1"
+const Contract = "0.11.0"

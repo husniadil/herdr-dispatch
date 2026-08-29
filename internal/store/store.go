@@ -136,6 +136,11 @@ type record struct {
 	// Verified says the submission this binding is holding has had its
 	// self-review shot.
 	Verified bool `json:"verified,omitempty"`
+	// ShotSkipped says the submission this binding is holding earned no
+	// self-review shot, because the evidence said there was nothing to
+	// mutate. A restart that forgot it would read the same diff to the same
+	// answer and file the same event again.
+	ShotSkipped bool `json:"shot_skipped,omitempty"`
 	// Profile is the profile the worker was LAUNCHED with, which a document
 	// rewritten since does not change. Omitted for a binding written before
 	// routing existed, which names no profile this daemon can report.
@@ -194,6 +199,7 @@ func (b *Bindings) Load() (State, error) {
 			Notified:     r.Notified,
 			Kind:         r.Kind,
 			Verified:     r.Verified,
+			ShotSkipped:  r.ShotSkipped,
 			Profile:      r.Profile,
 			AskedProfile: r.AskedProfile,
 			Worktree:     r.Worktree,
@@ -229,6 +235,7 @@ func (b *Bindings) Save(state State) error {
 			// A worker's kind is left off: an absent kind reads as one,
 			// which is what every binding is.
 			Verified:     x.Verified,
+			ShotSkipped:  x.ShotSkipped,
 			Profile:      x.Profile,
 			AskedProfile: x.AskedProfile,
 			Worktree:     x.Worktree,

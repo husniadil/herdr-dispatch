@@ -20,11 +20,15 @@ package e2e
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // fakeHerdr answers the calls a dispatch makes before it needs a real
@@ -83,7 +87,14 @@ func setup(t *testing.T) *world {
 	write(t, filepath.Join(config, "dispatch.toml"),
 		"pane = \"wM:p1\"\ndefault = \"worker\"\n\n[profiles.worker]\nprovider = \"claude\"\n", 0o600)
 
-	w.env = append(os.Environ(),
+	// The ambient environment comes with this suite EXCEPT the Herdr context,
+	// which is stripped rather than blanked: every process here — the doors,
+	// the daemons they start, and the stops that end them — must derive its
+	// pane from nothing at all. `htask stop` REFUSES a call from a pane, on
+	// the ground that one daemon serves every pane of a user and ending it
+	// takes the board away from panes that never asked; a suite run inside a
+	// Herdr pane that let its pane id through could not stop what it started.
+	w.env = append(withoutHerdrContext(os.Environ()),
 		"PATH="+bin+string(os.PathListSeparator)+filepath.Dir(w.htask)+string(os.PathListSeparator)+"/usr/bin:/bin",
 		"HOME="+home,
 		"XDG_CONFIG_HOME="+filepath.Join(home, ".config"),
@@ -94,10 +105,6 @@ func setup(t *testing.T) *world {
 		"TASKS_STATE_DIR="+filepath.Join(root, "board-state"),
 		"TASKS_CONFIG_DIR="+filepath.Join(root, "board-config"),
 		"HERDR_BIN_PATH="+filepath.Join(bin, "herdr"),
-		// A door derives its pane from its own environment. The shell that
-		// ran the test must not lend it one.
-		"HERDR_PANE_ID=", "HERDR_TAB_ID=", "HERDR_WORKSPACE_ID=",
-		"HERDR_PLUGIN_CONTEXT_JSON=",
 	)
 
 	// The board is scoped to a git root, so the task needs a repository to be
@@ -108,25 +115,107 @@ func setup(t *testing.T) *world {
 	}
 	w.run(t, w.project, "git", "init", "-q", w.project)
 
-	t.Cleanup(func() {
-		// Both daemons were started by a door and outlive the call. Stop
-		// them before the temp root goes, or they write into a directory
-		// that no longer exists and the machine keeps them.
-		//
-		// Each stop carries w.env, and that is not tidiness. `hdis stop`
-		// and `htask stop` find their daemon through the state dir in the
-		// environment, so a stop run with the ambient one reaches for the
-		// OPERATOR's socket — it would leave this suite's daemons running
-		// and try to end the operator's, which is the one thing §12.3
-		// forbids absolutely. Measured: without the environment, four of
-		// these daemons were left behind by four runs.
-		for _, bin := range []string{w.hdis, w.htask} {
-			stop := exec.Command(bin, "stop")
-			stop.Env, stop.Dir = w.env, w.project
-			stop.Run()
-		}
-	})
+	t.Cleanup(func() { w.stop(t) })
 	return w
+}
+
+// stop ends both daemons this suite started and PROVES they are gone.
+//
+// Both were started by a door and outlive the call that started them. Stopping
+// them is not tidiness: they hold a socket and a state directory under the
+// temp root, and a daemon left behind writes into a directory that no longer
+// exists, on a machine that keeps it forever with ppid 1. Two of them were
+// found on the operator's laptop fifteen minutes after a `make release-check`.
+//
+// Each stop carries w.env, and that is not tidiness either. `hdis stop` and
+// `htask stop` find their daemon through the state dir in the environment, so
+// a stop run with the ambient one reaches for the OPERATOR's socket — it would
+// leave this suite's daemons running and try to end the operator's, which is
+// the one thing §12.3 forbids absolutely. Measured: without the environment,
+// four of these daemons were left behind by four runs.
+//
+// And a stop that was sent is not a daemon that ended, so what is asserted is
+// the process table rather than the exit code: every process running from a
+// binary under this suite's own temp root is one it started, and a run leaves
+// none. What survives the stop is killed as a last resort and reported as a
+// FAILURE — a leak nobody is told about is how these two were found by hand.
+func (w *world) stop(t *testing.T) {
+	t.Helper()
+	var refused []string
+	for _, bin := range []string{w.hdis, w.htask} {
+		stop := exec.Command(bin, "stop")
+		stop.Env, stop.Dir = w.env, w.project
+		if out, err := stop.CombinedOutput(); err != nil {
+			refused = append(refused, fmt.Sprintf("%s stop: %v: %s",
+				filepath.Base(bin), err, strings.TrimSpace(string(out))))
+		}
+	}
+	// The daemon answers the stop and then ends itself, so the process is
+	// gone a moment after the call returns rather than during it.
+	var left []process
+	for i := 0; i < 100; i++ {
+		if left = w.running(t); len(left) == 0 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	for _, p := range left {
+		if err := syscall.Kill(p.pid, syscall.SIGKILL); err != nil {
+			t.Errorf("kill %d: %v", p.pid, err)
+		}
+	}
+	t.Errorf("this suite left %d process(es) running after stopping both daemons, "+
+		"killed here: %v (stops that refused: %v)", len(left), left, refused)
+}
+
+// process is one running process this suite is responsible for.
+type process struct {
+	pid  int
+	args string
+}
+
+func (p process) String() string { return fmt.Sprintf("%d %s", p.pid, p.args) }
+
+// running is every process on this machine started from a binary under this
+// suite's temp root. The root is what bounds it: the operator's own `hdis` and
+// `htask` daemons live elsewhere and are never this suite's to touch.
+func (w *world) running(t *testing.T) []process {
+	t.Helper()
+	out, err := exec.Command("ps", "-eo", "pid=,args=").Output()
+	if err != nil {
+		t.Fatalf("ps: %v", err)
+	}
+	var found []process
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || !strings.Contains(line, w.root+string(os.PathSeparator)) {
+			continue
+		}
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue
+		}
+		if pid == os.Getpid() {
+			continue
+		}
+		found = append(found, process{pid: pid, args: strings.Join(fields[1:], " ")})
+	}
+	return found
+}
+
+// withoutHerdrContext is the environment with every variable a Herdr pane
+// exports removed.
+func withoutHerdrContext(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		name, _, _ := strings.Cut(kv, "=")
+		switch name {
+		case "HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID", "HERDR_PLUGIN_CONTEXT_JSON":
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }
 
 // TestADispatchReservesARealBoardsTask is the whole layer: a task created

@@ -52,6 +52,10 @@ type Trees interface {
 	// RootDir is the directory the checkouts are made under, which is what
 	// bounds the reap.
 	RootDir() string
+	// Changed is the tracked paths a task's work has touched in its checkout,
+	// measured against the commit its branch was cut from. It fails rather
+	// than answering empty when git cannot answer.
+	Changed(ctx context.Context, project, dir, branch string) ([]string, error)
 }
 
 // Loop holds the adapters, the policy, and the bindings.
@@ -150,6 +154,17 @@ type Loop struct {
 	// streak within one run, and a restart re-reads the pane from Herdr and
 	// starts the count again rather than inheriting a suspicion.
 	missing map[string]int
+	// owedSweeps is the panes whose claims this daemon could not hand back
+	// yet, by pane, with the task each was holding. §11.7's release is
+	// refused while Herdr cannot be asked — UNAVAILABLE or TIMEOUT — and that
+	// is an "ask again" rather than an answer, so the note is kept and the
+	// next tick asks.
+	//
+	// It is deliberately NOT persisted: the board's own lease is the backstop
+	// under every failure here, and a restart re-reads reality rather than
+	// inheriting a debt it can no longer check. A refusal that will not change
+	// by asking again — FORBIDDEN, UNSUPPORTED — is never noted here.
+	owedSweeps map[string]string
 	// rows is the last tick's board rows, by task id: the project a worker
 	// runs in, the number an operator reads, the title status prints. It is
 	// a cache of board facts and never a source of them.
@@ -173,6 +188,9 @@ func (l *Loop) Tick(ctx context.Context) error {
 		return err
 	}
 	l.apply(ctx, decide.Decide(snap, l.Policy))
+	// After the actions, because this tick's own Unbind may have added one:
+	// a claim owed back is owed until the board takes it.
+	l.sweepOwed(ctx)
 	return nil
 }
 
@@ -1182,13 +1200,13 @@ func (l *Loop) apply(ctx context.Context, actions []decide.Action) {
 			// `doing` behind a pane that no longer exists is otherwise a
 			// silence until the lease runs out.
 			l.logf("task %s: pane %s is gone, dropping its binding; the claim it left is held by "+
-				"agent:%s and only that pane or the operator may release it, so the task comes back "+
-				"when the board's own pane-gone sweep or its lease reaches it", a.TaskID, a.Pane, a.Pane)
+				"agent:%s, and §11.7 lets this daemon hand it back because herdr no longer lists "+
+				"that pane", a.TaskID, a.Pane, a.Pane)
 			l.Spawn.Discard(a.Pane)
 			l.drop(ctx, a.Pane)
-			l.emit(store.EntityWorker, KindGone, a.TaskID, l.projectOf(a.TaskID), map[string]any{
-				"pane": a.Pane, "claim_held_by": "agent:" + a.Pane,
-			})
+			detail := map[string]any{"pane": a.Pane, "claim_held_by": "agent:" + a.Pane}
+			l.sweepClaim(ctx, a.TaskID, a.Pane, detail)
+			l.emit(store.EntityWorker, KindGone, a.TaskID, l.projectOf(a.TaskID), detail)
 		case decide.GiveUp:
 			l.logf("task %s: %s after %d prompts, retiring pane %s",
 				a.TaskID, a.Reason, l.promptsFor(a.Pane), a.Pane)
@@ -1327,6 +1345,7 @@ func (l *Loop) rearm(taskID string) {
 		if l.bindings[i].TaskID == taskID {
 			l.bindings[i].Notified = false
 			l.bindings[i].Verified = false
+			l.bindings[i].ShotSkipped = false
 		}
 	}
 	l.saveLocked()
@@ -1346,6 +1365,10 @@ func (l *Loop) rearm(taskID string) {
 // ceiling for a prompted /goal is the operator's, 1024 with 1023 safe, and it
 // lives beside its measurement in spawn.PromptedGoalBudget.
 func (l *Loop) prompt(ctx context.Context, a decide.Action) error {
+	if a.Reason == decide.ReasonSelfReview && l.nothingToMutate(ctx, a) {
+		l.skipShot(a)
+		return nil
+	}
 	text := l.nudge(a)
 	// §5.9: a consumer rendering text into a bounded artifact clamps at
 	// render time regardless, and says what it dropped. The bound is
@@ -1398,6 +1421,63 @@ func (l *Loop) prompt(ctx context.Context, a decide.Action) error {
 	l.mu.Unlock()
 	l.fire(ev)
 	return nil
+}
+
+// nothingToMutate reads the evidence the submission left behind and answers
+// whether the self-review shot has any work in it.
+//
+// The mutation pass is the whole mechanical half of the condition — a
+// compiling mutation per claimed guard, the tests the report names, the
+// failure confirmed — and a submission whose diff holds no code and whose
+// report names no test gives it nothing to bite on. Measured on 2026-08-29:
+// a task whose deliverable was one untracked text file earned two shots and
+// mailed the operator two reports of "Mutations run: 0" inside four minutes.
+//
+// It reads what this tick already holds — the binding's checkout and branch,
+// and the board row already fetched for it — and asks git. No Herdr call is
+// made for it: the pane's screen says nothing about a diff.
+//
+// Every uncertainty keeps the shot. A binding with no checkout, a row this
+// tick could not read, a git that would not answer: the expensive answer is
+// the safe one, because a shot nobody needed costs a prompt and a shot that
+// was needed and never fired costs the round this lane exists for.
+func (l *Loop) nothingToMutate(ctx context.Context, a decide.Action) bool {
+	var b decide.Binding
+	l.mu.Lock()
+	for _, held := range l.bindings {
+		if held.TaskID == a.TaskID {
+			b = held
+		}
+	}
+	l.mu.Unlock()
+	row, known := l.row(a.TaskID)
+	if !known || b.Worktree == "" || b.Branch == "" {
+		return false
+	}
+	changed, err := l.Worktrees.Changed(ctx, row.Project, b.Worktree, b.Branch)
+	if err != nil {
+		l.logf("task %s: the submission's diff cannot be read, so the self-review shot is sent: %v", a.TaskID, err)
+		return false
+	}
+	return decide.NothingToMutate(changed, row.Report)
+}
+
+// skipShot records the shot that did not fire, and remembers on the binding
+// that this submission has had its answer, so the next tick reads the same
+// diff no further.
+func (l *Loop) skipShot(a decide.Action) {
+	l.logf("task %s: no self-review shot for this submission, %s", a.TaskID, decide.ReasonNoCodeToMutate)
+	l.mu.Lock()
+	for i := range l.bindings {
+		if l.bindings[i].TaskID == a.TaskID {
+			l.bindings[i].ShotSkipped = true
+		}
+	}
+	ev := l.emitLocked(store.EntityWorker, KindShotSkipped, a.TaskID, l.rows[a.TaskID].Project, map[string]any{
+		"pane": a.Pane, "reason": decide.ReasonNoCodeToMutate,
+	})
+	l.mu.Unlock()
+	l.fire(ev)
 }
 
 // promptBudget is the §5.9 render-time clamp for a prompted /goal.

@@ -78,34 +78,33 @@ func samples(window, poll time.Duration) int {
 // there is: it closes the tab this daemon opened, removes the settings file
 // the spawn wrote and drops the binding with its checkout.
 //
-// What it does NOT do is hand the task back on the board, and that is not an
-// omission. The claimant is the pane's own `agent:<pane>` principal, and htask
-// refuses both ways in of getting past that — measured against htask 0.9.1
-// (contract 0.10.1) on 2026-08-29:
+// It then hands the task back on the board, and the ORDER is the whole of why
+// that works. The claimant is the pane's own `agent:<pane>` principal, and
+// against htask 0.9.1 (contract 0.10.1) on 2026-08-29 both ways past it were
+// refused: `release` because only the holder may release, and `sweep --pane`
+// because the board saw the pane still listed. Contract 0.11.0's §11.7 opens
+// the second one for a pane HERDR NO LONGER LISTS — and closing the pane is
+// exactly what makes Herdr stop listing it. So the retire comes first and the
+// sweep follows it; sent the other way round the board would ask Herdr, see a
+// live pane and refuse.
 //
-//	htask release <id> --as plugin:hdis@w1:p1
-//	  FORBIDDEN: you are plugin:hdis@w1:p1 and the lease on this task is held
-//	  by agent:w25:p1: only the holder may release it.
-//	htask sweep --pane w25:p1 --as plugin:hdis@w1:p1
-//	  FORBIDDEN: plugin:hdis@w1:p1 holds the leases of pane w25:p1; that pane
-//	  or the operator releases them.
-//
-// So closing the pane IS the hand-back this daemon can make: it is what a
-// `sweep --pane` reaction or the lease timer acts on, exactly as a dead
-// worker's teardown in dead.go already relies on. The REASON is written here,
-// where this daemon is the only thing that knows it — the board's own sweep can
-// say a lease lapsed and nothing more.
+// The REASON is still written here, where this daemon is the only thing that
+// knows it — the board's own sweep can say a lease lapsed and nothing more —
+// and now the trail carries what the hand-back returned beside it.
 func (l *Loop) retireRestored(ctx context.Context, pane string, row htask.Task) {
 	l.logf("task %s: pane %s came back from a restart and herdr called it idle for %s, "+
-		"so there is no worker in it — the pane is retired, and the task goes back when the board's "+
-		"own sweep or its lease reaches it (this daemon cannot release a claim held by agent:%s)",
-		row.ID, pane, RestoredWorkerConfirm, pane)
+		"so there is no worker in it — the pane is retired, and the claim it was holding is "+
+		"handed back to the board", row.ID, pane, RestoredWorkerConfirm)
 	l.retirePane(ctx, pane)
-	l.emit(store.EntityWorker, KindRetired, row.ID, row.Project, map[string]any{
+	detail := map[string]any{
 		"pane":   pane,
 		"reason": ReasonRestoredWithNoWorker,
 		"action": "adopt",
-	})
+	}
+	// After the retire, never before it: §11.7 is a door for a pane herdr no
+	// longer lists, and the retire is what takes it off that list.
+	l.sweepClaim(ctx, row.ID, pane, detail)
+	l.emit(store.EntityWorker, KindRetired, row.ID, row.Project, detail)
 }
 
 // ReasonRestoredWithNoWorker is what the trail calls a pane a restart handed

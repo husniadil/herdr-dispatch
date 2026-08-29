@@ -202,11 +202,14 @@ enabled = true
 
 // submitted moves the board's one task into review and leaves the worker's
 // pane alive, which is the state the verification lane acts on.
+//
+// The report it files names the gate it ran, which is one of the two things
+// the mutation shot is decided on: a submission that changed no code and named
+// no test earns no shot at all, and these cases are about the shot's delivery
+// rather than about the evidence for it.
 func submitted(t *testing.T, f *testenv.Fake, project string) {
 	t.Helper()
-	f.Write(t, "ready.json", `{"tasks":[],"count":0}`)
-	f.Write(t, "get.json", row(project, "review", "agent:wM:p9"))
-	f.Write(t, "panes.json", paneList("wM:p9", "idle"))
+	submittedWithReport(t, f, project, "the gate passes: `go test ./...` is green")
 }
 
 func bindingFor(l *Loop, pane string) (decide.Binding, bool) {
@@ -617,17 +620,18 @@ func TestAPromptedGoalOverItsBudgetIsNotDelivered(t *testing.T) {
 	}
 }
 
-// A pane that is gone leaves a claim behind, and the operator is owed the
-// reason it is still there.
+// A pane that is gone leaves a claim behind, and the operator is owed both the
+// name of who was holding it and what became of it.
 //
 // The claimant on the row is that pane's own `agent:<pane>` principal, and
-// htask refuses this daemon both ways past it — measured against htask 0.9.1
-// (contract 0.10.1) on 2026-08-29, `release --as plugin:hdis@…` answers
-// FORBIDDEN "only the holder may release it" and `sweep --pane --as
-// plugin:hdis@…` answers FORBIDDEN "that pane or the operator releases them".
-// So this daemon cannot hand the task back itself, and the one thing it can do
-// is say so rather than leave a task sitting in `doing` behind a pane that no
-// longer exists with nothing anywhere explaining it.
+// htask 0.9.1 (contract 0.10.1) refused this daemon both ways past it —
+// measured on 2026-08-29, `release --as plugin:hdis@…` answered FORBIDDEN
+// "only the holder may release it" and `sweep --pane --as plugin:hdis@…`
+// answered FORBIDDEN "that pane or the operator releases them". Contract
+// 0.11.0's §11.7 opens the second one for a pane HERDR no longer lists, so the
+// claim is now handed back rather than only explained; the name is still on
+// the trail, because a hand-back the board refuses leaves the operator with
+// exactly the question this event answered before.
 func TestAGonePaneSaysWhoStillHoldsItsClaim(t *testing.T) {
 	l, f, _ := newVerifyLoop(t, true)
 	var said bytes.Buffer
@@ -641,7 +645,7 @@ func TestAGonePaneSaysWhoStillHoldsItsClaim(t *testing.T) {
 		t.Fatalf("second tick: %v", err)
 	}
 
-	for _, want := range []string{"pane wM:p9 is gone", "agent:wM:p9", "only that pane or the operator"} {
+	for _, want := range []string{"pane wM:p9 is gone", "agent:wM:p9", "§11.7"} {
 		if !strings.Contains(said.String(), want) {
 			t.Errorf("the log does not say %q:\n%s", want, said.String())
 		}

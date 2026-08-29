@@ -35,7 +35,12 @@ func TestTheBoardAdapterCarriesNoReviewVerb(t *testing.T) {
 	// is asked is whether somebody other than this daemon has acted on a
 	// row this daemon is counting dead workers against. It renders no
 	// verdict and writes nothing.
-	want := []string{"Doctor", "Events", "Get", "GetIn", "Held", "Ready", "Release"}
+	// SweepPane is §11.7's one door, and it is a hand-BACK rather than a
+	// verdict: the leases of a pane HERDR no longer lists come off the rows
+	// that pane was holding, which returns the work to the board for the
+	// operator to judge. It cannot touch a live pane's lease — the board
+	// asks Herdr and refuses — and it settles nothing.
+	want := []string{"Doctor", "Events", "Get", "GetIn", "Held", "Ready", "Release", "SweepPane"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("the board adapter's verbs are %v, and the ones this binary may have are %v", got, want)
 	}

@@ -78,6 +78,12 @@ type Task struct {
 	// that stopped without submitting, and nothing else here can tell those
 	// two apart.
 	Feedback string `json:"feedback"`
+	// Report is what the worker filed with its submission, and it is on the
+	// row from the submission until the review gate settles it. The
+	// dispatcher READS it and never writes it: it is one of the two things
+	// the self-review shot is decided on — a report that names a test gives
+	// the mutation pass something to run.
+	Report string `json:"report"`
 }
 
 // Pane returns the pane the claiming principal runs in, or empty while the
@@ -214,6 +220,39 @@ type Event struct {
 	AtMS     int64  `json:"at"`
 	Actor    string `json:"actor"`
 	Kind     string `json:"kind"`
+}
+
+// SweepPane asks the board to release the leases held by a pane HERDR no
+// longer lists, which is §11.7's one door: a pane dies with the machine it ran
+// on and cannot sweep itself, and the plugin that put a worker there is the
+// only party still watching. It answers the task ids that came back.
+//
+// The authority is Herdr's answer and never this daemon's belief: the board
+// asks Herdr itself and refuses FORBIDDEN for a pane it still lists,
+// UNAVAILABLE or TIMEOUT for a Herdr it could not ask, and UNSUPPORTED for one
+// too old to list panes. Each comes back as a Refusal carrying that code,
+// because "the pane is alive after all" and "ask again later" are different
+// answers.
+//
+// It is idempotent: a pane whose leases are already back releases nothing and
+// answers an empty list, so a retry costs a call and nothing else.
+//
+// The `--as` this declares is CLI-only and is refused from a process carrying
+// a pane. Every call here already goes out with the Herdr names scrubbed from
+// the child's environment, which is what makes this one possible from a daemon
+// that was itself started from a door inside a pane.
+func (c *Client) SweepPane(ctx context.Context, pane string) ([]string, error) {
+	if pane == "" {
+		return nil, fmt.Errorf("htask sweep --pane: no pane to sweep")
+	}
+	var res struct {
+		Released []string `json:"released"`
+		Count    int      `json:"count"`
+	}
+	if err := c.json(ctx, &res, "sweep", "--pane", pane, "--json"); err != nil {
+		return nil, err
+	}
+	return res.Released, nil
 }
 
 // Events reads the board's trail from a Unix millisecond, across every
