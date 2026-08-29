@@ -33,7 +33,7 @@ import (
 // about, and a worker that came up would need a real terminal.
 const fakeHerdr = `case "$1 $2" in
 "api schema") echo '{"protocol":1,"requests":["tab.create","tab.list","tab.close","pane.split","pane.run","pane.read","pane.list","pane.close","agent.start","agent.get","agent.list","agent.prompt","notification.show"],"events":["pane_exited"]}' ;;
-"pane list") echo '{"id":"x","result":{"type":"pane_list","panes":[]}}' ;;
+"pane list") echo '{"id":"x","result":{"type":"pane_list","panes":[{"pane_id":"wM:p1","tab_id":"wM:t1","workspace_id":"wM","agent_status":"unknown"}]}}' ;;
 "tab list") echo '{"id":"x","result":{"type":"tab_list","tabs":[]}}' ;;
 "agent list") echo '{"id":"x","result":{"type":"agent_list","agents":[]}}' ;;
 "agent start") echo '{"id":"x","error":{"code":"timeout","message":"no terminal in this layer"}}' >&2; exit 1 ;;
