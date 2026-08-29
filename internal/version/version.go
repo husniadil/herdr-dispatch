@@ -6,7 +6,7 @@
 package version
 
 // Version is the dispatcher's own version. The manifest's version matches it.
-const Version = "0.8.0"
+const Version = "0.8.1"
 
 // Contract is the version of the Herdr plugin contract this binary satisfies.
 // It is this plugin's own conformance, and not the board's: doctor relays

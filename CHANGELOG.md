@@ -5,7 +5,7 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
-## Unreleased
+## 0.8.1 — 2026-08-29
 
 **Fixed: the trust-folder dialog is answered where its cursor sits, so a
 worker on claude 2.1.251 is not exited by its own first keypress.** Seeing the
