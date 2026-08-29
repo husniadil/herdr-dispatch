@@ -5,7 +5,7 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
-## Unreleased
+## 0.9.1 — 2026-08-29
 
 **Added: `[worker] env`, exported into every worker's pane.** A worker's own
 MCP doors read their §9 policy gate out of THEIR OWN environment —
