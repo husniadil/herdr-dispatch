@@ -929,8 +929,11 @@ whole of it.
    `htask goal <id> --one-line` is no longer part of this pipeline. It
    remains the operator's paste-ready form for arming `/goal` in a pane by
    hand, where nothing is typed character by character.
-5. If Claude Code's trust-folder dialog appears, exactly one Enter — and only
-   if it is seen on screen. A dialog that never comes is never answered.
+5. If Claude Code's trust-folder dialog appears, exactly one answer — and only
+   if it is seen on screen. A dialog that never comes is never answered. The
+   keys follow the caret: the cursor line says what an Enter would take, so a
+   dialog opened on `No, exit` is walked `down` first and only then confirmed.
+   See [Which key answers the trust dialog](#which-key-answers-the-trust-dialog).
 6. Delivery is confirmed from the pane, never from `agent start`'s exit. That
    return is inverted for this path: a goal that registers drives the worker
    past interactive readiness, so the command times out, and a goal that is
@@ -1154,8 +1157,53 @@ Two choices in that set are deliberate. The newer phrase is the dialog's
 selectable OPTION rather than its prose, because the option is what the dialog
 is for and the sentence around it is what churns. The older phrase stays so an
 operator still on a pre-2.1.239 claude is not broken by the fix;
-`TestTheTrustDialogIsAnsweredInTodaysWordingAndTheOlderOne` drives the whole
-pipeline against a recorded transcript of each and asserts exactly one Enter.
+`TestTheTrustDialogIsAnsweredWhereItsCursorSits` drives the whole pipeline
+against a recorded transcript of each and asserts the exact keys.
+
+## Which key answers the trust dialog
+
+Seeing the dialog is what earns an answer; WHICH key answers it is a second
+fact, and it is read off the same screen rather than assumed. Measured live on
+2026-08-29 on a fleet box under claude 2.1.251, the dialog opens with the
+caret on the refusing option:
+
+```
+ Quick safety check: Is this a project you created or one you trust? (Like your own code, a
+ well-known open source project, or work from your team). If not, take a moment to review
+ what's in this folder first.
+
+ Claude Code'll be able to read, edit, and execute files here.
+
+ Security guide
+
+ ❯ No, exit
+   Yes, I trust this folder
+
+ Enter to confirm · Esc to cancel
+```
+
+A bare Enter there EXITS the worker. So the cursor line — the one carrying
+`❯` (`spawn.TrustCursorMarker`) — decides, and there are three answers:
+
+- the caret names a trusting option (`spawn.TrustCursorAccepts`: `i trust this
+  folder`, `yes, proceed`) — `enter`, which is 2.1.239's dialog.
+- the caret names the refusing one (`no` as a whole word, so `not now` and
+  `I know this folder` do not count) — `down` then `enter`, which is 2.1.251's.
+- no cursor line is on screen — `enter`, unchanged, which is what answered the
+  pre-2.1.239 wording and is the only thing left to try.
+
+Every case is logged with which one was taken, so a build that reworks the
+dialog again shows up in the daemon's own log rather than as a worker that
+quietly exited. A caret line naming neither option — a prompt box caught in
+the same read — is passed over rather than answered.
+
+This costs no wider read. The cursor line sits inside the same block the
+dialog marker was matched in, so `config.MeasuredReadableColumns` and
+`config.MeasuredReadableRows` are untouched, and `TrustDialogMarkers` is
+unchanged. `TestTheTrustDialogIsAnsweredWhereItsCursorSits` covers all three
+cases end to end against the fake herdr, asserting the exact `pane send-keys`
+argv. What it cannot cover is a real dialog: no test raises one, so the
+2.1.251 transcript above is evidence from a live read, not from CI.
 
 Adding the newer phrase did not move the 40-column floor: it is 24 characters
 against the older phrase's 37, so the longest marker in use is unchanged.

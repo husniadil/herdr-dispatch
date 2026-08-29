@@ -5,6 +5,24 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
+## Unreleased
+
+**Fixed: the trust-folder dialog is answered where its cursor sits, so a
+worker on claude 2.1.251 is not exited by its own first keypress.** Seeing the
+dialog earned a bare Enter, which was right for every build that opened it on
+the trusting option. Measured live on 2026-08-29 under claude 2.1.251, it
+opens on `No, exit` instead, and that Enter shut the worker down before the
+goal was ever delivered: the spawn then failed at the confirm ceiling with
+nothing on screen to say why. The pipeline now reads the cursor line — the one
+carrying `❯` — before it presses anything. A caret on the refusing option is
+walked `down` and then `enter`; a caret on a trusting option is `enter`; a
+screen with no caret keeps the bare `enter` that answered the pre-2.1.239
+wording. Which of the three was taken is written to the daemon's log, so the
+next rewording of this dialog shows up there rather than as a worker that
+quietly exited. `TrustDialogMarkers` is unchanged and no read got wider, so
+the readable column and row floors are where they were. A caller sees nothing
+new: no CLI, MCP, JSON shape or error code moved.
+
 ## 0.8.0 — 2026-08-28
 
 **Fixed: a worker whose agent dies in a pane that stays alive is ended, and

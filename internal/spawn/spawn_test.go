@@ -1466,24 +1466,48 @@ const recordedTrustDialog2_1_239 = ` Accessing workspace:
 
  Enter to confirm · Esc to cancel`
 
+// recordedTrustDialog2_1_251 is what claude 2.1.251 renders in the same
+// place, read back on 2026-08-29 on a fleet box through the same call. The
+// options lost their numbers and, the part that matters, the CURSOR now opens
+// on "No, exit": the bare Enter that answered every build before this one
+// exits the worker here.
+const recordedTrustDialog2_1_251 = ` Quick safety check: Is this a project you created or one you trust? (Like your own code, a
+ well-known open source project, or work from your team). If not, take a moment to review
+ what's in this folder first.
+
+ Claude Code'll be able to read, edit, and execute files here.
+
+ Security guide
+
+ ❯ No, exit
+   Yes, I trust this folder
+
+ Enter to confirm · Esc to cancel`
+
 // recordedTrustDialogOlder is the wording claude rendered before 2.1.239, the
 // one the single marker was written for. An operator still on that build must
-// not be broken by the fix, so it stays in the set.
+// not be broken by the fix, so it stays in the set. It carries no cursor at
+// all in the transcript, which is the third case the answer has to cover.
 const recordedTrustDialogOlder = "Do you trust the files in this folder?\n" +
 	"/private/var/tmp/hdis-trust49/x5312\n" +
 	"Claude Code may read, edit, and execute files here.\n" +
 	"  1. Yes, proceed\n  2. No, exit"
 
-// Both wordings are answered: the one claude renders today, and the one it
-// rendered before. Each drives the whole pipeline, so what is proved is the
-// Enter, not just a substring.
-func TestTheTrustDialogIsAnsweredInTodaysWordingAndTheOlderOne(t *testing.T) {
+// Every wording is answered, and the keys follow the CURSOR rather than the
+// build: the caret says what an Enter would take, so a dialog that opens on
+// the refusing option is walked down to the trusting one first, and a screen
+// with no caret on it keeps the bare Enter that answered it before. Each case
+// drives the whole pipeline, so what is proved is the key sequence herdr was
+// asked for, not just a substring.
+func TestTheTrustDialogIsAnsweredWhereItsCursorSits(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		screen string
+		want   string
 	}{
-		{"claude 2.1.239", recordedTrustDialog2_1_239},
-		{"the older wording", recordedTrustDialogOlder},
+		{"claude 2.1.251, cursor on the refusing option", recordedTrustDialog2_1_251, "pane send-keys wM:p9 down enter"},
+		{"claude 2.1.239, cursor on the trusting option", recordedTrustDialog2_1_239, "pane send-keys wM:p9 enter"},
+		{"the older wording, no cursor on screen", recordedTrustDialogOlder, "pane send-keys wM:p9 enter"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t, []string{tc.screen, goalActive}, startRegistered)
@@ -1495,13 +1519,13 @@ func TestTheTrustDialogIsAnsweredInTodaysWordingAndTheOlderOne(t *testing.T) {
 			for _, argv := range h.Argv(t) {
 				if len(argv) >= 2 && argv[0] == "pane" && argv[1] == "send-keys" {
 					keys++
-					if got, want := strings.Join(argv, " "), "pane send-keys wM:p9 enter"; got != want {
-						t.Fatalf("keys: got %q, want %q", got, want)
+					if got := strings.Join(argv, " "); got != tc.want {
+						t.Fatalf("keys: got %q, want %q", got, tc.want)
 					}
 				}
 			}
 			if keys != 1 {
-				t.Fatalf("want exactly one Enter for this dialog, got %d", keys)
+				t.Fatalf("want exactly one answer for this dialog, got %d", keys)
 			}
 		})
 	}

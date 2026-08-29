@@ -13,7 +13,11 @@
 //     so the command succeeds. Delivery is confirmed from the pane, never
 //     from that exit.
 //   - a fresh directory raises Claude Code's trust-folder dialog, which
-//     blocks startup. It is answered when it is seen and never blind.
+//     blocks startup. It is answered when it is seen and never blind, and
+//     the key it is answered with is READ off the screen: measured on
+//     2026-08-29 against claude 2.1.251, the dialog opens with the caret on
+//     "No, exit", where the Enter that was right for every earlier build
+//     exits the worker. See TrustCursorMarker and trustDialogKeys.
 //   - `pane run` returns when the line is typed, not when it finishes. On
 //     the codex path that leaves the environment eval still owning the
 //     shell, and `agent start` into a busy shell is refused outright.
@@ -32,6 +36,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/husniadil/herdr-dispatch/internal/config"
@@ -364,6 +369,28 @@ var TrustDialogMarkers = []string{
 	"yes, i trust this folder",
 	"do you trust the files in this folder",
 }
+
+// TrustCursorMarker is the caret claude draws on the selected line of a menu.
+// The line carrying it is the only thing on the screen that says what an
+// Enter would take, which is why the answer is read there rather than assumed
+// from the wording.
+const TrustCursorMarker = "❯"
+
+// TrustCursorAccepts are the option texts that, under the caret, mean Enter
+// accepts the folder. They are the OPTIONS of both wordings rather than the
+// prose around them, and they are deliberately not TrustDialogMarkers: that
+// set is what earns an answer at all, and one of its two phrases is a
+// sentence that never sits on a cursor line.
+//
+// Nothing here widens a read. The cursor line is inside the same block the
+// dialog marker was already matched in, so it costs no extra rows or columns
+// and does not move config.MeasuredReadableColumns.
+var TrustCursorAccepts = []string{"i trust this folder", "yes, proceed"}
+
+// TrustCursorRefuses is the word that, under the caret, means Enter would
+// exit the worker. It is matched as a whole word so an option line reading
+// "not now" or "I know this folder" is never mistaken for "No, exit".
+const TrustCursorRefuses = "no"
 
 // GoalMarkers are what a registered /goal leaves on screen: the echo of the
 // condition, or the status line that says it is driving.
@@ -1038,7 +1065,9 @@ func (p *Pipeline) answerStartupDialog(ctx context.Context, pane string) error {
 			return nil // already past any dialog
 		}
 		if contains(text, TrustDialogMarkers) {
-			return p.Herdr.PaneSendKeys(ctx, pane, "enter")
+			keys, why := trustDialogKeys(text)
+			p.logf("trust dialog in pane %s: %s, pressing %s", pane, why, strings.Join(keys, " then "))
+			return p.Herdr.PaneSendKeys(ctx, pane, keys...)
 		}
 		p.sleep(p.Poll)
 	}
@@ -1140,6 +1169,49 @@ func attempts(ceiling, poll time.Duration) int {
 		return 1
 	}
 	return int(ceiling / poll)
+}
+
+// trustDialogKeys are the keys that answer the trust-folder dialog on the
+// screen just read, and the reason the operator is told.
+//
+// Which key is right is a fact on the screen rather than a constant, and it
+// changed under this pipeline: measured live on 2026-08-29 against claude
+// 2.1.251, the dialog opens with the caret on "No, exit", so the bare Enter
+// that answered every earlier build exits the worker. The caret is read
+// instead. A cursor line naming the refusing option is walked down one first;
+// a cursor line naming the trusting one is confirmed where it stands; a
+// screen with no cursor line on it keeps the bare Enter, which is what
+// answered the pre-2.1.239 wording and is the only thing left to try.
+//
+// Lines that carry the caret but name neither option — a prompt box caught in
+// the same read — are passed over rather than answered.
+func trustDialogKeys(text string) (keys []string, why string) {
+	for _, line := range strings.Split(text, "\n") {
+		if !strings.Contains(line, TrustCursorMarker) {
+			continue
+		}
+		if contains(line, TrustCursorAccepts) {
+			return []string{"enter"}, "the cursor is on the trusting option"
+		}
+		if hasWord(line, TrustCursorRefuses) {
+			return []string{"down", "enter"}, "the cursor is on the refusing option"
+		}
+	}
+	return []string{"enter"}, "no cursor line was on screen"
+}
+
+// hasWord is a whole-word, case-insensitive match, so a substring inside a
+// longer word never counts as the word itself.
+func hasWord(text, word string) bool {
+	fields := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	for _, f := range fields {
+		if f == word {
+			return true
+		}
+	}
+	return false
 }
 
 func contains(text string, markers []string) bool {
