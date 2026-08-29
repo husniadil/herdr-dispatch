@@ -5,7 +5,7 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
-## Unreleased
+## 0.10.0 — 2026-08-29
 
 **Changed: the declared contract revision is now 0.11.0, up from 0.10.1.**
 `docs/contract.md` is re-vendored at 0.11.0, which adds §11.7 and moves nothing
