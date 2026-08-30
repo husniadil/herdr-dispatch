@@ -166,6 +166,16 @@ func buildVerb(v verbs.Verb, g *globals, run Runner) *cobra.Command {
 		follow = cmd.Flags().Bool("follow", false,
 			"Keep the connection and print each event as it is written")
 	}
+	// --no-start is the CLI's own flag for the same reason, and it is on
+	// doctor alone: every verb but `stop` starts a daemon when none answers,
+	// which makes a health check the one question that cannot be asked
+	// without changing the answer. It refuses with CONFLICT: NOT_RUNNING
+	// instead, and a caller that wanted a daemon just leaves it off.
+	var noStart *bool
+	if v.Name == "doctor" {
+		noStart = cmd.Flags().Bool("no-start", false,
+			"Ask whatever daemon is already listening, and refuse rather than start one")
+	}
 
 	cmd.RunE = func(cmd *cobra.Command, argv []string) error {
 		args := map[string]any{}
@@ -202,6 +212,9 @@ func buildVerb(v verbs.Verb, g *globals, run Runner) *cobra.Command {
 		}
 		if follow != nil {
 			req.Follow = *follow
+		}
+		if noStart != nil {
+			req.NoStart = *noStart
 		}
 		if run == nil {
 			return nil

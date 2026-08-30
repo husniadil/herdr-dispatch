@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -155,6 +156,105 @@ func TestACallGivesUpBoundedWhenNoDaemonComesUp(t *testing.T) {
 	}
 	if waited := time.Since(start); waited > 5*time.Second {
 		t.Fatalf("the call waited %s for a daemon that never came", waited)
+	}
+}
+
+// A daemon that refuses to start says why, and the door that started it is
+// the only place that reason can still be read: a client told "none answered
+// within 3s" reports the wait and loses the refusal, and on a machine with no
+// `dispatch.toml` that refusal is the whole answer.
+func TestADaemonThatExitsBeforeAnsweringCarriesItsReasonToTheCaller(t *testing.T) {
+	bin := build(t)
+	world(t)
+	// The document the daemon refuses to run without. It is a refusal by
+	// design — a dispatcher without its own execution policy would start on
+	// defaults nobody wrote — so what is fixed here is that the caller HEARS
+	// it, not that the daemon tolerates it.
+	if err := os.Remove(filepath.Join(config.ConfigDir(), "dispatch.toml")); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &Client{Bin: bin, Timeout: 10 * time.Second}
+	reap(t, c)
+	_, err := c.Call(protocol.Request{Verb: "doctor", Door: "cli"})
+	if err == nil {
+		t.Fatal("the call answered, with no config document for the daemon to read")
+	}
+	if got, want := codes.Of(err), codes.Unavailable; got != want {
+		t.Fatalf("call = %v (%q), want %q", err, got, want)
+	}
+	for what, want := range map[string]string{
+		"the child's exit status": "exited with status",
+		"the missing document":    "dispatch.toml",
+		"why it could not start":  "no such file",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the failure does not carry %s (looked for %q): %v", what, want, err)
+		}
+	}
+}
+
+// The bound holds on the reason too: a daemon that dies after saying a great
+// deal must not paste its whole startup into one error.
+func TestTheReasonACallCarriesIsBounded(t *testing.T) {
+	world(t)
+	// A "daemon" that fills the log and exits. The log is where a started
+	// daemon's output goes, so this is what the client reads back.
+	loud := filepath.Join(t.TempDir(), "loud")
+	script := "#!/bin/sh\ni=0\nwhile [ $i -lt 200 ]; do\n" +
+		"  echo \"line $i xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"\n" +
+		"  i=$((i+1))\ndone\nexit 3\n"
+	if err := os.WriteFile(loud, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &Client{Bin: loud, Timeout: 2 * time.Second}
+	reap(t, c)
+	_, err := c.Call(protocol.Request{Verb: "doctor"})
+	if err == nil {
+		t.Fatal("a binary that binds nothing answered")
+	}
+	if !strings.Contains(err.Error(), "exited with status 3") {
+		t.Errorf("the failure does not carry the child's status: %v", err)
+	}
+	if !strings.Contains(err.Error(), "line 199") {
+		t.Errorf("the failure does not carry the LAST thing the daemon said: %v", err)
+	}
+	if len(err.Error()) > 2*childOutputBudget {
+		t.Errorf("the failure is %d bytes; the reason is bounded", len(err.Error()))
+	}
+}
+
+// A health check must not change what it reports. `doctor --no-start` is the
+// one read that asks whatever daemon is listening and refuses when none is,
+// and it is a property of the CALL rather than of the verb, so the same
+// client serves both.
+func TestDoctorWithNoStartDoesNotStartADaemon(t *testing.T) {
+	bin := build(t)
+	world(t)
+
+	c := &Client{Bin: bin, Timeout: 10 * time.Second}
+	reap(t, c)
+	_, err := c.Call(protocol.Request{Verb: "doctor", Door: "cli", NoStart: true})
+	if got, want := codes.ReasonOf(err), codes.NotRunning; got != want {
+		t.Fatalf("doctor --no-start with no daemon = %v (%q), want %q", err, got, want)
+	}
+	if c.Started != nil {
+		t.Fatal("doctor --no-start started a daemon to report on")
+	}
+	if _, err := os.Stat(config.SocketPath()); !os.IsNotExist(err) {
+		t.Errorf("doctor --no-start left a socket behind: %v", err)
+	}
+
+	// And it answers the daemon that IS listening, which is the half that
+	// makes it a health check rather than a second way to say "no".
+	live := &Client{Bin: bin, Timeout: 10 * time.Second}
+	reap(t, live)
+	if _, err := live.Call(protocol.Request{Verb: "doctor", Door: "cli"}); err != nil {
+		t.Fatalf("starting a daemon to ask a live one: %v", err)
+	}
+	if _, err := c.Call(protocol.Request{Verb: "doctor", Door: "cli", NoStart: true}); err != nil {
+		t.Fatalf("doctor --no-start against a live daemon: %v", err)
 	}
 }
 

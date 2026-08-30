@@ -98,6 +98,37 @@ of their own. There is one daemon per user, elected by a lock at
 `CONFLICT: ALREADY_RUNNING` rather than driving the same board alongside the
 first.
 
+Every verb but `stop` starts a daemon when none is listening, waits three
+seconds for it to bind, and asks it. **A daemon that refuses to start says why,
+through the door that started it.** A dispatcher with no
+`~/.config/dispatch/dispatch.toml` exits before it binds — that is a refusal by
+design, because a dispatcher without its own execution policy would start on
+defaults nobody wrote — and the client that started it reports the child's exit
+status and the last of what it said, bounded to five lines or a kilobyte:
+
+```text
+hdis: UNAVAILABLE: started a daemon and it exited with status 2 before answering on /Users/me/.local/state/dispatch/dispatch.sock: hdis: USAGE: INVALID: hdis config /Users/me/.config/dispatch/dispatch.toml: open /Users/me/.config/dispatch/dispatch.toml: no such file or directory
+```
+
+The lines are read back out of the log the daemon was started against, because
+that is where its output goes; a start that says nothing there is reported as
+having said nothing, naming the file. What is NOT said is a wait: "started a
+daemon and none answered within 3s" is the answer for a daemon that is still
+coming up, and a daemon that is already gone is a reason instead.
+
+Asking whether one is up is `hdis doctor --no-start`, which is the one read
+that never starts a daemon:
+
+```sh
+hdis doctor --no-start   # CONFLICT: NOT_RUNNING when none is listening
+```
+
+Without the flag `doctor` starts a daemon like every other verb, which makes an
+unguarded health check the one question that changes its own answer. With it, a
+daemon that IS listening answers exactly what `doctor` answers. The MCP door
+carries the same switch as `no_start` on the `doctor` tool, and on that tool
+alone: every other verb needs a live daemon to answer at all.
+
 **The daemon opens its own log.** It appends to
 `$XDG_STATE_HOME/dispatch/dispatch.log`, beside the socket, the lock and the
 bindings, whatever the shell line that started it redirected. Every line goes
@@ -174,6 +205,7 @@ unreachable to a harness that has no shell.
 | Verb                  | MCP tool         | What it does                                     |
 | --------------------- | ---------------- | ------------------------------------------------ |
 | `hdis doctor`         | `doctor`         | Why a dispatch would refuse, before one is tried |
+| `hdis doctor --no-start` | `doctor` (`no_start`) | The same, asked of a daemon that is already up, starting none |
 | `hdis dispatch <task>`| `dispatch`       | Reserve one ready task for the next tick         |
 | `hdis stop`           | `stop`           | Ask the running daemon to shut down              |
 | `hdis status`         | `status`         | What the dispatcher is driving now               |

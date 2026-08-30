@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 
@@ -31,16 +32,26 @@ type Client struct {
 	// StartTimeout.
 	Timeout time.Duration
 	// NoStart refuses with NotRunning when nothing is listening, rather
-	// than starting a daemon. Stop is what it is for.
+	// than starting a daemon. Stop is what it is for, and so is
+	// `doctor --no-start`, which asks the same question without answering
+	// it by changing it.
 	NoStart bool
 	// Started is the daemon this client had to bring up, if it brought one
 	// up. Nothing here stops it again: it outlives the door on purpose.
 	Started *os.Process
+
+	// logFrom is where the log stood when this client started a daemon.
+	// Everything past it is what that daemon said on its way up, which is
+	// the only account of a daemon that exits before it can be asked.
+	logFrom int64
+	// exited carries the child's end, once. A daemon that comes up never
+	// sends anything here, so the wait below reads it without blocking.
+	exited chan *os.ProcessState
 }
 
 // Call sends one request and returns the daemon's result.
 func (c *Client) Call(req protocol.Request) (json.RawMessage, error) {
-	conn, err := c.dialOrStart()
+	conn, err := c.dialOrStart(req)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +74,7 @@ func (c *Client) Call(req protocol.Request) (json.RawMessage, error) {
 // the stream is over or fn returns an error. This is `events --follow` (§8.2),
 // and it is the one call with no single answer to wait for.
 func (c *Client) Stream(req protocol.Request, fn func(json.RawMessage) error) error {
-	conn, err := c.dialOrStart()
+	conn, err := c.dialOrStart(req)
 	if err != nil {
 		return err
 	}
@@ -96,12 +107,15 @@ func (c *Client) Stream(req protocol.Request, fn func(json.RawMessage) error) er
 	}
 }
 
-func (c *Client) dialOrStart() (net.Conn, error) {
+func (c *Client) dialOrStart(req protocol.Request) (net.Conn, error) {
 	path := config.SocketPath()
 	if conn, err := net.Dial("unix", path); err == nil {
 		return conn, nil
 	}
-	if c.NoStart {
+	// The verb's own rule and the caller's, in either order: `stop` never
+	// starts a daemon, and `doctor --no-start` is a caller asking whether
+	// one is up rather than asking for one.
+	if c.NoStart || req.NoStart {
 		return nil, codes.Refusef(codes.NotRunning,
 			"no hdis daemon is listening on %s", path)
 	}
@@ -121,9 +135,106 @@ func (c *Client) dialOrStart() (net.Conn, error) {
 		if conn, err := net.Dial("unix", path); err == nil {
 			return conn, nil
 		}
+		// A daemon that is already gone is not going to answer, and the
+		// timeout would report the wait instead of the reason. Checked
+		// after the dial rather than before it, so a daemon that answered
+		// and then exited is still the answer this call gets.
+		if state := c.childEnd(); state != nil {
+			return nil, c.diedBeforeAnswering(path, state)
+		}
+	}
+	if state := c.childEnd(); state != nil {
+		return nil, c.diedBeforeAnswering(path, state)
 	}
 	return nil, codes.Errorf(codes.Unavailable,
 		"started a daemon and none answered on %s within %s", path, c.timeout())
+}
+
+// childEnd is how the daemon this client started ended, or nil while it is
+// still running.
+func (c *Client) childEnd() *os.ProcessState {
+	if c.exited == nil {
+		return nil
+	}
+	select {
+	case state := <-c.exited:
+		// Put it back: the answer is read more than once, and a state read
+		// out of the channel is gone.
+		c.exited <- state
+		return state
+	default:
+		return nil
+	}
+}
+
+// diedBeforeAnswering is the failure that used to read as a timeout. A daemon
+// that refuses to start — no config document is the one an operator meets
+// first — exits before it binds, and the door that started it is the only
+// place the reason can still be read: the child's output went to the log, and
+// an operator who is being told about a socket has no reason to look there.
+func (c *Client) diedBeforeAnswering(path string, state *os.ProcessState) error {
+	said := c.childOutput()
+	if said == "" {
+		said = fmt.Sprintf("it wrote nothing to %s", config.LogPath())
+	}
+	return codes.Errorf(codes.Unavailable,
+		"started a daemon and it exited %s before answering on %s: %s",
+		ended(state), path, said)
+}
+
+// ended reads a process state the way an operator would say it.
+func ended(state *os.ProcessState) string {
+	if code := state.ExitCode(); code >= 0 {
+		return fmt.Sprintf("with status %d", code)
+	}
+	// A signal has no exit code, and ProcessState prints it as
+	// "signal: killed".
+	return state.String()
+}
+
+// childOutputBudget bounds what a failure repeats from the log: enough for
+// the sentence a refusal ends on, and never a whole startup's worth of lines
+// pasted into an error.
+const (
+	childOutputBudget = 1 << 10
+	childOutputLines  = 5
+)
+
+// childOutput is what the daemon this client started appended to the log,
+// bounded to the last few lines. The log is the daemon's own file rather than
+// a pipe on purpose: a pipe the door closes on its way out would take a
+// long-lived daemon's stderr with it, and this is read exactly once, after a
+// child that is already gone.
+//
+// A second daemon starting at the same moment appends to the same file, so
+// what is read here is the window rather than provably one process's lines.
+// That is worth it: the alternative reported no reason at all.
+func (c *Client) childOutput() string {
+	f, err := os.Open(config.LogPath())
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || info.Size() <= c.logFrom {
+		return ""
+	}
+	from := c.logFrom
+	if info.Size()-from > childOutputBudget {
+		from = info.Size() - childOutputBudget
+	}
+	buf := make([]byte, info.Size()-from)
+	n, err := f.ReadAt(buf, from)
+	if n == 0 && err != nil {
+		return ""
+	}
+	lines := strings.Split(strings.TrimRight(string(buf[:n]), "\n"), "\n")
+	if len(lines) > childOutputLines {
+		lines = lines[len(lines)-childOutputLines:]
+	}
+	// One line, because this is a sentence an operator reads on stderr and
+	// a machine caller reads inside a JSON message.
+	return strings.TrimSpace(strings.Join(lines, " | "))
 }
 
 // start brings a daemon up, detached: it outlives the door that started it,
@@ -145,6 +256,12 @@ func (c *Client) start() error {
 		return fmt.Errorf("daemon log %s: %w", config.LogPath(), err)
 	}
 	defer logFile.Close()
+	// Where this child's own output begins. Read before it is started, so a
+	// failure repeats what THIS daemon said rather than the tail of the last
+	// one's run.
+	if info, err := logFile.Stat(); err == nil {
+		c.logFrom = info.Size()
+	}
 
 	cmd := exec.Command(bin, "daemon")
 	cmd.Stdin = nil
@@ -158,8 +275,14 @@ func (c *Client) start() error {
 	}
 	c.Started = cmd.Process
 	// Nothing waits for it, so let the kernel reap it rather than leaving a
-	// zombie behind this door.
-	go cmd.Wait()
+	// zombie behind this door — and keep how it ended, because a daemon that
+	// exits before it binds is a reason this door owes its caller.
+	c.exited = make(chan *os.ProcessState, 1)
+	exited := c.exited
+	go func() {
+		_ = cmd.Wait()
+		exited <- cmd.ProcessState
+	}()
 	return nil
 }
 

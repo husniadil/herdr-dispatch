@@ -135,6 +135,16 @@ func tool(v verbs.Verb) *mcp.Tool {
 		"description": "The board to act on; defaults to every board (§4.2)"}
 	props[argAllProjects] = map[string]any{"type": "boolean",
 		"description": "Act across every board, which is this daemon's default"}
+	// doctor's own connection argument, mirrored from the CLI's --no-start
+	// for the same reason the scope pair is mirrored: an agent asking
+	// whether the dispatcher is up should be able to ask without starting
+	// one, and a health check only this door lacked would send it to a
+	// shell.
+	if v.Name == doctorVerb {
+		props[argNoStart] = map[string]any{"type": "boolean",
+			"description": "Ask whatever daemon is already listening, and refuse with " +
+				"CONFLICT: NOT_RUNNING rather than start one"}
+	}
 	schema := map[string]any{"type": "object", "properties": props}
 	if len(required) > 0 {
 		schema["required"] = required
@@ -160,8 +170,13 @@ func handlerFor(v verbs.Verb, call Caller, opt Options) mcp.ToolHandler {
 		// declares would be refused there.
 		named, _ := args[argProject].(string)
 		everyBoard, _ := args[argAllProjects].(bool)
+		// Same rule, same reason: it is the door's, so it leaves Args
+		// before the daemon sees them. It never reaches a daemon at all —
+		// it is what decides whether one is started.
+		noStart, _ := args[argNoStart].(bool)
 		delete(args, argProject)
 		delete(args, argAllProjects)
+		delete(args, argNoStart)
 		// The board the door was STARTED on stands in for the call that
 		// named none. An explicit `project` or `all_projects` wins: the
 		// default is what the operator wired into the server configuration,
@@ -181,6 +196,7 @@ func handlerFor(v verbs.Verb, call Caller, opt Options) mcp.ToolHandler {
 			// relative to (§4.1).
 			Project:     project,
 			AllProjects: allProjects,
+			NoStart:     noStart,
 			// The pane this door was spawned in, if it was spawned in one. A
 			// caller on another harness has none; the daemon records what it
 			// is given and grants nothing for it.
@@ -214,9 +230,11 @@ func check(v verbs.Verb, args map[string]any) error {
 	for _, a := range v.Args {
 		declared[a.Name] = a
 	}
-	// The two the door injects into every schema rather than the registry
-	// declaring them, held to the types the schema published.
-	for name, want := range map[string]string{argProject: verbs.String, argAllProjects: verbs.Bool} {
+	// The ones the door injects rather than the registry declaring them,
+	// held to the types the schema published. The scope pair is on every
+	// tool; no_start is on doctor alone, and injected(v) is what says so
+	// once for both halves of this check.
+	for name, want := range injected(v) {
 		raw, ok := args[name]
 		if !ok || raw == nil {
 			continue
@@ -227,8 +245,17 @@ func check(v verbs.Verb, args map[string]any) error {
 	}
 	for name := range args {
 		if _, ok := declared[name]; !ok {
-			if name == argProject || name == argAllProjects {
+			if _, ok := injected(v)[name]; ok {
 				continue
+			}
+			// A tool that does not take it says so as itself rather than
+			// as "takes no argument named": a caller that wrote it on
+			// dispatch meant a health check, and the answer is which tool
+			// has one.
+			if name == argNoStart {
+				return codes.Refusef(codes.Invalid,
+					"%q is doctor's alone: it decides whether a daemon is STARTED, and "+
+						"every other verb needs one to answer at all", argNoStart)
 			}
 			// §7.5: the declaration is read from how the door was STARTED,
 			// so a call carrying it is refused BY name rather than falling
@@ -281,13 +308,29 @@ func failure(err error) *mcp.CallToolResult {
 	}
 }
 
-// The scope arguments every tool takes, mirroring the CLI's global flags.
-// They are constants because tool() publishes them and check() enforces them,
-// and a typo in one place would make the door promise what it does not keep.
+// The arguments the door injects, mirroring the CLI's flags: the scope pair
+// on every tool, and doctor's --no-start on doctor. They are constants
+// because tool() publishes them and check() enforces them, and a typo in one
+// place would make the door promise what it does not keep.
 const (
 	argProject     = "project"
 	argAllProjects = "all_projects"
+	argNoStart     = "no_start"
+	// doctorVerb is the one verb no_start is published on, named rather
+	// than written twice.
+	doctorVerb = "doctor"
 )
+
+// injected is what the door adds to one verb's published schema, by name and
+// type. tool() renders it and check() enforces it, so a tool cannot publish
+// an argument the door then refuses.
+func injected(v verbs.Verb) map[string]string {
+	args := map[string]string{argProject: verbs.String, argAllProjects: verbs.Bool}
+	if v.Name == doctorVerb {
+		args[argNoStart] = verbs.Bool
+	}
+	return args
+}
 
 // argOperator is not an argument, and never becomes one (§7.5). It is named
 // here so that check can refuse it BY name, because a reserved word nothing

@@ -405,6 +405,39 @@ func TestFollowIsOnTheRequestAndNotAnArgument(t *testing.T) {
 	}
 }
 
+// --no-start is the same kind of thing as --follow, on the one verb an
+// operator asks BEFORE they know whether a daemon is up: every verb but stop
+// starts one when none answers, which makes a health check the one question
+// that changes its own answer.
+func TestNoStartIsOnTheRequestAndOnDoctorAlone(t *testing.T) {
+	v := verb(t, "doctor")
+	req, _, err := Request(v, []string{"--no-start"})
+	if err != nil {
+		t.Fatalf("doctor --no-start: %v", err)
+	}
+	if !req.NoStart {
+		t.Fatal("--no-start did not reach the request")
+	}
+	if _, named := req.Args["no_start"]; named {
+		t.Fatalf("--no-start was sent as an argument: %v", req.Args)
+	}
+	// The default is unchanged: a doctor nobody flagged still starts a
+	// daemon, because that is what every other verb does and a caller who
+	// wanted an answer asked for one.
+	plain, _, err := Request(v, nil)
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+	if plain.NoStart {
+		t.Fatal("doctor refuses to start a daemon without being asked to")
+	}
+	// And on doctor alone. A verb that needs a live daemon to answer at all
+	// has nothing to offer a caller that forbids starting one.
+	if _, _, err := Request(verb(t, "status"), []string{"--no-start"}); err == nil {
+		t.Fatal("status took --no-start, which only doctor has an answer for")
+	}
+}
+
 // An event reads as one line an operator can scan, and as its own document
 // for a machine caller.
 func TestAnEventRendersAsALineAndAsItsOwnDocument(t *testing.T) {

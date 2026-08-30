@@ -26,6 +26,15 @@ type Request struct {
 	// of the verb, which is why it is here and not in the verb's Args: a
 	// tool call answers once, so the MCP door has nothing to set it with.
 	Follow bool `json:"follow,omitempty"`
+	// NoStart is the caller asking for whatever daemon is already
+	// listening and for none to be started when there is none: `hdis
+	// doctor --no-start`, and the `no_start` argument of the doctor tool.
+	// Like Follow it is a property of the CONNECTION rather than an
+	// argument of the verb, which is why it is here and not in the verb's
+	// Args — and unlike Follow it never travels, because the whole point of
+	// it is a call that may never reach a daemon at all. Both doors build
+	// it, the client reads it, and the wire never carries it.
+	NoStart bool `json:"-"`
 	// Project is the §4.1 canonical project the caller named with
 	// --project, already resolved by the door: a relative path is relative
 	// to the CALLER's working directory and the daemon's is somewhere else.

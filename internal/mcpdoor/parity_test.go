@@ -201,12 +201,15 @@ func TestTheSchemaDeclaresExactlyWhatTheCLITakes(t *testing.T) {
 		if err := json.Unmarshal(raw, &schema); err != nil {
 			t.Fatalf("schema for %q: %v", v.Name, err)
 		}
-		// The two scope arguments are injected into every tool rather than
-		// declared by a verb: they are the CLI's --project and
-		// --all-projects, and TestEveryToolTakesTheScopeArguments is what
-		// holds them. Everything else in the schema comes from the registry.
+		// A few arguments are injected by the door rather than declared by
+		// a verb, because they are properties of the CONNECTION and not of
+		// the verb: the scope pair, which is the CLI's --project and
+		// --all-projects on every tool, and doctor's no_start, which is its
+		// --no-start. TestEveryToolTakesTheScopeArguments and
+		// TestOnlyDoctorTakesNoStart are what hold them. Everything else in
+		// the schema comes from the registry.
 		declared := len(schema.Properties)
-		for _, name := range []string{argProject, argAllProjects} {
+		for name := range injected(v) {
 			if _, ok := schema.Properties[name]; ok {
 				declared--
 			}
@@ -505,6 +508,76 @@ func TestEveryToolTakesTheScopeArguments(t *testing.T) {
 				t.Errorf("tool %q declares %q as %q, want %q", tl.Name, name, prop.Type, want)
 			}
 		}
+	}
+}
+
+// A health check that starts a daemon has changed the thing it was asked to
+// report, so doctor carries the CLI's --no-start on this door too — and only
+// doctor does: every other verb needs a live daemon to answer at all, and an
+// argument that could only ever refuse is one a caller would read as an
+// option.
+func TestOnlyDoctorTakesNoStart(t *testing.T) {
+	_, call, _ := inProcessDaemon(t)
+	sess := session(t, call)
+	tools, err := sess.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	for _, tl := range tools.Tools {
+		raw, ok := properties(t, tl)[argNoStart]
+		if tl.Name != doctorVerb {
+			if ok {
+				t.Errorf("tool %q takes %q, which is doctor's alone", tl.Name, argNoStart)
+			}
+			continue
+		}
+		if !ok {
+			t.Fatalf("tool %q takes no %q argument", tl.Name, argNoStart)
+		}
+		var prop struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(raw, &prop); err != nil {
+			t.Fatalf("doctor's %q: %v", argNoStart, err)
+		}
+		if prop.Type != "boolean" {
+			t.Errorf("doctor declares %q as %q, want boolean", argNoStart, prop.Type)
+		}
+	}
+
+	// It reaches the client rather than the daemon: it is what decides
+	// whether there is a daemon to reach.
+	var got protocol.Request
+	catch := func(req protocol.Request) (json.RawMessage, error) {
+		got = req
+		return json.RawMessage(`{}`), nil
+	}
+	res, err := sessionWith(t, catch, Options{}).CallTool(context.Background(),
+		&mcp.CallToolParams{Name: doctorVerb, Arguments: map[string]any{argNoStart: true}})
+	if err != nil {
+		t.Fatalf("doctor with %s: %v", argNoStart, err)
+	}
+	if res.IsError {
+		t.Fatalf("doctor with %s: %s", argNoStart, text(res))
+	}
+	if !got.NoStart {
+		t.Error("the door dropped no_start on its way to the client")
+	}
+	if _, ok := got.Args[argNoStart]; ok {
+		t.Errorf("the door sent %q to the daemon, which declares no such argument", argNoStart)
+	}
+
+	// A tool that does not take it says which one does.
+	refused, err := sess.CallTool(context.Background(),
+		&mcp.CallToolParams{Name: "status", Arguments: map[string]any{argNoStart: true}})
+	if err != nil {
+		t.Fatalf("status with %s: %v", argNoStart, err)
+	}
+	if !refused.IsError {
+		t.Fatal("status accepted no_start, which it does not take")
+	}
+	if body := text(refused); !strings.Contains(body, "doctor") {
+		t.Errorf("the refusal does not name the verb that takes it: %s", body)
 	}
 }
 

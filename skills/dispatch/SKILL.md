@@ -156,6 +156,16 @@ configured path that is missing is a spawn already refused. An `accounts` line
 appears only when there is something to say: a profile whose account the proxy
 launcher does not hold, or a launcher store that could not be read at all.
 
+Calling `doctor` STARTS a dispatcher when none is running, the way every verb
+but `stop` does. When the question is whether one is up, ask
+`hdis doctor --no-start` — `no_start: true` on the `doctor` tool — which
+answers `CONFLICT: NOT_RUNNING` instead of starting one, and answers whatever
+`doctor` answers when a daemon is listening. It is on `doctor` alone: every
+other verb needs a live daemon to answer at all. A daemon that was started and
+then refused to run — no `~/.config/dispatch/dispatch.toml` is the usual
+reason — reports its exit status and the last of what it said in the failure
+you get back, so read the message rather than the log.
+
 ## Through MCP instead of the CLI
 
 Every verb this binary has is one of the `herdr-dispatch` server's MCP tools,

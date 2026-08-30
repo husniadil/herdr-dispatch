@@ -5,6 +5,43 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
+## 0.10.3 — 2026-08-30
+
+**Fixed: a daemon that exits before it binds hands its reason to the caller
+that started it.** Every verb but `stop` starts a daemon when none is
+listening and waits three seconds for it to answer. On a machine with no
+`~/.config/dispatch/dispatch.toml` the daemon refuses to start — which is the
+design, because a dispatcher without its own execution policy would run on
+defaults nobody wrote — and every client reported the same sentence, `started
+a daemon and none answered on <socket> within 3s`. That is a wait, not a
+reason: the refusal went to the log, and an operator being told about a socket
+has no cause to open one. Measured on a fresh box on 2026-08-30 with hdis
+0.10.2, where four verbs in a row said the socket was silent and none of them
+said the document was missing. A client that finds the daemon it started
+already gone now reports its exit status and the last of what it wrote to the
+log, bounded to five lines or a kilobyte, joined into one sentence: `started a
+daemon and it exited with status 2 before answering on <socket>: hdis: USAGE:
+INVALID: hdis config <path>: open <path>: no such file or directory`. A daemon that is still
+coming up when the wait runs out is unchanged, and so is the daemon's own
+refusal to start without its document. **What a caller changes:** nothing —
+the code is still `UNAVAILABLE` and the timeout wording is still what a slow
+start gets; a caller matching on the exact old string for a daemon that DIED
+now reads the reason instead.
+
+**Added: `hdis doctor --no-start`, a health check that does not start what it
+is reporting on.** `stop` was the only verb that would not autostart a daemon,
+so there was no way to ask whether the dispatcher was up: asking started one,
+and the answer was then yes. `doctor` takes `--no-start` on the CLI and
+`no_start` on the MCP door's `doctor` tool. With it, a daemon that is
+listening answers exactly what `doctor` answers today, and none listening is
+`CONFLICT: NOT_RUNNING` naming the socket, on the failure stream and with the
+status §6.3 fixes for `CONFLICT`. Without it `doctor` starts a daemon as it
+always has. It is on `doctor` alone, on both doors: every other verb needs a
+live daemon to answer at all, and the tools that do not take it refuse it by
+name saying which one does. **What a caller changes:** nothing — the switch is
+new and defaulted off, `doctor`'s own report and JSON shape are untouched, and
+the `doctor` tool's schema carries one more optional boolean.
+
 ## 0.10.2 — 2026-08-30
 
 Release assets for darwin and linux (amd64, arm64), so `agamemnon box join

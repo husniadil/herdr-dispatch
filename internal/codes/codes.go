@@ -96,8 +96,10 @@ const (
 	AlreadyDispatched Reason = "ALREADY_DISPATCHED"
 	// AlreadyRunning is a second daemon meeting the first one's lock.
 	AlreadyRunning Reason = "ALREADY_RUNNING"
-	// NotRunning is a verb that needs a live daemon and found none. Only
-	// stop answers with it: every other verb starts one rather than refuse.
+	// NotRunning is a verb that needs a live daemon and found none. Two
+	// calls answer with it: stop, which will not start one just to stop
+	// it, and `doctor --no-start`, which is a caller asking whether one is
+	// up. Every other verb starts one rather than refuse.
 	NotRunning Reason = "NOT_RUNNING"
 )
 
