@@ -5,6 +5,10 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
+## 0.10.5 — 2026-08-31
+
+The 0.10.4 tag carried the source version default of 0.10.3, so a binary built from that source (the fleet image builds plugins from source) reported 0.10.3. No code change; this tag exists so a source build reports the version it is.
+
 ## 0.10.4 — 2026-08-30
 
 **Added: a `managed` marker in the state dir turns autostart off for every
