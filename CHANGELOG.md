@@ -5,6 +5,11 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
+## 0.10.2 — 2026-08-30
+
+Release assets for darwin and linux (amd64, arm64), so `agamemnon box join
+--install` can fetch the binary at a pinned version.
+
 ## 0.10.1 — 2026-08-29
 
 **Fixed: a retired pane's checkout is removed with it, so the task's branch is

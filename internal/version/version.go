@@ -6,7 +6,12 @@
 package version
 
 // Version is the dispatcher's own version. The manifest's version matches it.
-const Version = "0.10.1"
+//
+// It is a var rather than a const because a release build stamps it: the tag
+// goreleaser is cutting is written over this default with
+// `-X ...internal/version.Version`, so a published binary reports its tag and a
+// build from a checkout reports what is written here.
+var Version = "0.10.2"
 
 // Contract is the version of the Herdr plugin contract this binary satisfies.
 // It is this plugin's own conformance, and not the board's: doctor relays
