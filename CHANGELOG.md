@@ -5,7 +5,7 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
-## Unreleased
+## 0.10.4 — 2026-08-30
 
 **Added: a `managed` marker in the state dir turns autostart off for every
 door.** On a box where launchd manages the daemon as a service, any client
