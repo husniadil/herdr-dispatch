@@ -5,6 +5,10 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
+## 0.10.6 — 2026-08-31
+
+The MCP door built its client with autostart on for every verb, so `stop` through the door with no daemon listening started one and then failed with UNAVAILABLE. The registry's NoAutostart verbs now apply through both doors (`cli.ClientFor`), so `stop` answers CONFLICT NOT_RUNNING there exactly as on the command line. No caller change.
+
 ## 0.10.5 — 2026-08-31
 
 The 0.10.4 tag carried the source version default of 0.10.3, so a binary built from that source (the fleet image builds plugins from source) reported 0.10.3. No code change; this tag exists so a source build reports the version it is.

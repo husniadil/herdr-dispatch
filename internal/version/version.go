@@ -11,7 +11,7 @@ package version
 // goreleaser is cutting is written over this default with
 // `-X ...internal/version.Version`, so a published binary reports its tag and a
 // build from a checkout reports what is written here.
-var Version = "0.10.5"
+var Version = "0.10.6"
 
 // Contract is the version of the Herdr plugin contract this binary satisfies.
 // It is this plugin's own conformance, and not the board's: doctor relays

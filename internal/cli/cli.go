@@ -21,6 +21,7 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/loop"
 	"github.com/husniadil/herdr-dispatch/internal/protocol"
 	"github.com/husniadil/herdr-dispatch/internal/store"
+	"github.com/husniadil/herdr-dispatch/internal/verbs"
 )
 
 // Door names this surface in the daemon's log.
@@ -77,11 +78,22 @@ func message(err error) string {
 	return err.Error()
 }
 
+// ClientFor builds the client a request's verb calls for. A verb the registry
+// marks NoAutostart is sent to whatever daemon is already listening and
+// refused when none is, and that is a property of the VERB rather than of the
+// door it arrived at: `stop` must no more start a daemon over MCP than it does
+// on a command line. Both doors build their client here, so the rule stays the
+// registry's and neither door carries a second copy of it.
+func ClientFor(req protocol.Request) *client.Client {
+	v, ok := verbs.ByName(req.Verb)
+	return &client.Client{NoStart: ok && v.NoAutostart}
+}
+
 // Send performs one parsed call: it asks the daemon and writes the answer. It
 // is the Runner the binary hands Root, and the only place in this door that
 // opens the socket.
 func Send(c Call) error {
-	cl := &client.Client{NoStart: c.Verb.NoAutostart}
+	cl := ClientFor(c.Req)
 	if c.Req.Follow {
 		// A stream has no single answer to print, so each event is written
 		// as it arrives and the call returns when the daemon says the

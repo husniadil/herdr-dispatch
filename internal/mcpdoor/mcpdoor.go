@@ -15,7 +15,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/husniadil/herdr-dispatch/internal/cli"
-	"github.com/husniadil/herdr-dispatch/internal/client"
 	"github.com/husniadil/herdr-dispatch/internal/codes"
 	"github.com/husniadil/herdr-dispatch/internal/daemon"
 	"github.com/husniadil/herdr-dispatch/internal/protocol"
@@ -73,12 +72,13 @@ type Options struct {
 // New builds the MCP server with one tool per verb.
 func New(version string, call Caller, opt Options) *mcp.Server {
 	if call == nil {
-		// Through cli.Ask rather than the client directly, so this door
-		// obeys the `managed` marker and answers `doctor` with it exactly
-		// as the CLI does. It is the door the gateway holds open, and the
-		// door that autostarted the orphan this marker exists to prevent.
+		// Through cli.ClientFor and cli.Ask rather than the client
+		// directly, so this door obeys the registry's NoAutostart verbs and
+		// the `managed` marker, and answers `doctor` with it, exactly as the
+		// CLI does. It is the door the gateway holds open, and the door that
+		// autostarted the orphan this marker exists to prevent.
 		call = func(req protocol.Request) (json.RawMessage, error) {
-			return cli.Ask(&client.Client{}, req)
+			return cli.Ask(cli.ClientFor(req), req)
 		}
 	}
 	s := mcp.NewServer(&mcp.Implementation{
