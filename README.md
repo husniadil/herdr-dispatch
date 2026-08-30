@@ -129,6 +129,48 @@ daemon that IS listening answers exactly what `doctor` answers. The MCP door
 carries the same switch as `no_start` on the `doctor` tool, and on that tool
 alone: every other verb needs a live daemon to answer at all.
 
+**A marker turns autostart off where a service manager owns the daemon.** On a
+box where launchd or systemd starts `hdis daemon` as a service, a door that
+autostarts one is a bug: the daemon it starts comes up under the CALLER's
+environment, with none of the service's configuration, and it holds
+`$XDG_STATE_HOME/dispatch/dispatch.lock` — so the service's own daemon then
+refuses with `CONFLICT: ALREADY_RUNNING` on every retry. The manager writes a
+file named `managed` in the state dir, beside the socket and the lock:
+
+```sh
+echo dev.herdr.hdis > "$XDG_STATE_HOME/dispatch/managed"
+```
+
+The content is free text naming the manager — a launchd label, a systemd unit
+— and only its first line is read; a marker with nothing in it still counts,
+and is reported as `a service manager`. There is no config key: the file IS
+the contract, so a manager can write it without knowing anything about the
+config document at `~/.config/dispatch/dispatch.toml`.
+
+While it is there, no door starts a daemon — not the CLI, not `hdis mcp` — and
+a call that finds none listening is refused rather than answered by a daemon
+nobody configured:
+
+```text
+hdis: CONFLICT: NOT_RUNNING: no hdis daemon is listening on /Users/me/.local/state/dispatch/dispatch.sock, and /Users/me/.local/state/dispatch/managed says dev.herdr.hdis starts it: not starting one here, because it would hold /Users/me/.local/state/dispatch/dispatch.lock and the service's own daemon would then refuse. Wait for dev.herdr.hdis to bring it back, or restart the service
+```
+
+`doctor` is the exception, on both doors: it reports the manager instead of
+refusing, because asking whether the dispatcher is up has an answer even when
+nothing is listening.
+
+```text
+hdis on /Users/me/.local/state/dispatch/dispatch.sock
+  managed     dev.herdr.hdis, by the marker at /Users/me/.local/state/dispatch/managed
+  daemon      not answering: no door starts one while that marker is there
+```
+
+The report carries `managed` and `daemon_answering` as JSON fields; a daemon
+that IS listening answers its full report with `daemon_answering: true` and one
+more `managed` line. `hdis daemon` itself is unaffected — the service's own
+start is the point of the marker, not something it guards — and so is `stop`,
+which never started a daemon to begin with.
+
 **The daemon opens its own log.** It appends to
 `$XDG_STATE_HOME/dispatch/dispatch.log`, beside the socket, the lock and the
 bindings, whatever the shell line that started it redirected. Every line goes

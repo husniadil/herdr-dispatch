@@ -6,6 +6,7 @@ package client
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -47,6 +48,32 @@ type Client struct {
 	// exited carries the child's end, once. A daemon that comes up never
 	// sends anything here, so the wait below reads it without blocking.
 	exited chan *os.ProcessState
+}
+
+// ManagedError is the refusal a door raises when the `managed` marker names a
+// service manager and no daemon is listening. It carries the contract code
+// like every other failure; the manager is kept beside it because `doctor`
+// answers with the fact rather than the refusal.
+type ManagedError struct {
+	// Manager is what the marker named, never empty: an unnamed one reads
+	// as config.UnnamedManager.
+	Manager string
+	err     *codes.Error
+}
+
+func (e *ManagedError) Error() string { return e.err.Error() }
+
+// Unwrap keeps the code reachable, so codes.Of and codes.ReasonOf read this
+// refusal exactly as they read any other.
+func (e *ManagedError) Unwrap() error { return e.err }
+
+// ManagedRefusal reports the manager err names, when err is that refusal.
+func ManagedRefusal(err error) (string, bool) {
+	var managed *ManagedError
+	if errors.As(err, &managed) {
+		return managed.Manager, true
+	}
+	return "", false
 }
 
 // Call sends one request and returns the daemon's result.
@@ -112,10 +139,26 @@ func (c *Client) dialOrStart(req protocol.Request) (net.Conn, error) {
 	if conn, err := net.Dial("unix", path); err == nil {
 		return conn, nil
 	}
-	// The verb's own rule and the caller's, in either order: `stop` never
-	// starts a daemon, and `doctor --no-start` is a caller asking whether
-	// one is up rather than asking for one.
-	if c.NoStart || req.NoStart {
+	// The verb's own rule first: `stop` never starts a daemon, and it says
+	// so the same way wherever the daemon came from.
+	if c.NoStart {
+		return nil, codes.Refusef(codes.NotRunning,
+			"no hdis daemon is listening on %s", path)
+	}
+	// A service manager's marker turns autostart off for every door. A
+	// daemon started here would come up under THIS caller's environment,
+	// with none of the service's configuration, and hold the lock the
+	// service's own daemon then meets as ALREADY_RUNNING on every retry.
+	if manager, ok := config.Managed(); ok {
+		return nil, &ManagedError{Manager: manager, err: codes.Refusef(codes.NotRunning,
+			"no hdis daemon is listening on %s, and %s says %s starts it: "+
+				"not starting one here, because it would hold %s and the service's own daemon "+
+				"would then refuse. Wait for %s to bring it back, or restart the service",
+			path, config.ManagedPath(), manager, config.LockPath(), manager)}
+	}
+	// `doctor --no-start` is a caller asking whether one is up rather than
+	// asking for one.
+	if req.NoStart {
 		return nil, codes.Refusef(codes.NotRunning,
 			"no hdis daemon is listening on %s", path)
 	}

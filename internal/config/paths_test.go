@@ -234,3 +234,52 @@ func TestTheStateDirGuardComparesDirectoriesRatherThanStrings(t *testing.T) {
 	}
 	guardOperatorStateDir(realHome + "-elsewhere")
 }
+
+// The marker is the whole contract with a service manager: one file, beside
+// the socket and the lock, whose name a launchd or systemd author can guess
+// and whose text is free.
+func TestTheManagedMarkerSitsBesideTheSocket(t *testing.T) {
+	t.Setenv("DISPATCH_STATE_DIR", "/tmp/state")
+	if got, want := ManagedPath(), "/tmp/state/managed"; got != want {
+		t.Errorf("ManagedPath() = %q, want %q", got, want)
+	}
+}
+
+func TestManagedNamesTheManagerTheMarkerCarries(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DISPATCH_STATE_DIR", dir)
+
+	if _, ok := Managed(); ok {
+		t.Fatal("a state dir with no marker in it reads as managed")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "managed"),
+		[]byte("dev.herdr.hdis\nwritten by the service on load\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	name, ok := Managed()
+	if !ok {
+		t.Fatal("a marker that is there does not read as managed")
+	}
+	// The first line alone: the refusal that repeats it is one sentence.
+	if want := "dev.herdr.hdis"; name != want {
+		t.Errorf("Managed() = %q, want %q", name, want)
+	}
+}
+
+// The FILE is what turns autostart off. A manager that wrote one and named
+// nobody still owns the daemon, and the report says so in words rather than
+// leaving the line blank.
+func TestAnEmptyMarkerStillCountsAndIsNamedInWords(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DISPATCH_STATE_DIR", dir)
+	if err := os.WriteFile(filepath.Join(dir, "managed"), []byte("\n  \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	name, ok := Managed()
+	if !ok {
+		t.Fatal("an empty marker does not read as managed")
+	}
+	if name != UnnamedManager {
+		t.Errorf("Managed() = %q, want %q", name, UnnamedManager)
+	}
+}

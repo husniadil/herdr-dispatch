@@ -16,8 +16,10 @@ import (
 
 	"github.com/husniadil/herdr-dispatch/internal/client"
 	"github.com/husniadil/herdr-dispatch/internal/codes"
+	"github.com/husniadil/herdr-dispatch/internal/config"
 	"github.com/husniadil/herdr-dispatch/internal/daemon"
 	"github.com/husniadil/herdr-dispatch/internal/loop"
+	"github.com/husniadil/herdr-dispatch/internal/protocol"
 	"github.com/husniadil/herdr-dispatch/internal/store"
 )
 
@@ -88,11 +90,48 @@ func Send(c Call) error {
 			return WriteEvent(raw, c.AsJSON, os.Stdout)
 		})
 	}
-	result, err := cl.Call(c.Req)
+	result, err := Ask(cl, c.Req)
 	if err != nil {
 		return err
 	}
 	return Write(c.Verb.Name, result, c.AsJSON, os.Stdout)
+}
+
+// Ask sends one request through cl and answers `doctor` with the managed
+// report when the daemon a service manager owns is not up. Both doors go
+// through here rather than through the client directly, because a health
+// check is the one call that has an answer when there is no daemon to ask:
+// refusing it would have an operator diagnosing a socket instead of reading
+// that a service is bringing its daemon back.
+func Ask(cl *client.Client, req protocol.Request) (json.RawMessage, error) {
+	raw, err := cl.Call(req)
+	if err == nil || req.Verb != "doctor" {
+		return raw, err
+	}
+	manager, managed := client.ManagedRefusal(err)
+	if !managed {
+		return raw, err
+	}
+	// Only what is knowable without the daemon. Nothing is invented about
+	// a process that is not there: a report carrying an empty version and
+	// no base pane would read as a daemon answering badly.
+	return json.Marshal(managedDoctor{
+		Socket:          config.SocketPath(),
+		StateDir:        config.StateDir(),
+		Managed:         manager,
+		DaemonAnswering: false,
+	})
+}
+
+// managedDoctor is `doctor`'s answer when the marker says a service owns the
+// daemon and none is listening. It unmarshals into daemon.DoctorReport, which
+// is what the printer below reads, and DaemonAnswering is what tells the two
+// apart.
+type managedDoctor struct {
+	Socket          string `json:"socket"`
+	StateDir        string `json:"state_dir"`
+	Managed         string `json:"managed"`
+	DaemonAnswering bool   `json:"daemon_answering"`
 }
 
 // Write prints one answer: as it came when the caller asked for that, and as
@@ -109,6 +148,16 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 		if err := json.Unmarshal(result, &rep); err != nil {
 			return err
 		}
+		// The one report no daemon produced: a service manages this one and
+		// it is not up, so the two facts that are still true are the whole
+		// answer. Both halves are asked, because a report a daemon produced
+		// always says it answered and never leaves the field to its zero.
+		if rep.Managed != "" && !rep.DaemonAnswering {
+			fmt.Fprintf(out, "hdis on %s\n", rep.Socket)
+			fmt.Fprintf(out, "  managed     %s, by the marker at %s\n", rep.Managed, config.ManagedPath())
+			fmt.Fprintf(out, "  daemon      not answering: no door starts one while that marker is there\n")
+			return nil
+		}
 		fmt.Fprintf(out, "hdis %s on %s\n", rep.Version, rep.Socket)
 		fmt.Fprintf(out, "  contract    %s satisfied by this plugin\n", rep.Contract)
 		// Who this very call is, as the daemon recorded it (§10.3). It is the
@@ -117,6 +166,9 @@ func Write(verb string, result json.RawMessage, asJSON bool, out io.Writer) erro
 		fmt.Fprintf(out, "  principal   %s\n", rep.Principal)
 		fmt.Fprintf(out, "  state dir   %s\n", rep.StateDir)
 		fmt.Fprintf(out, "  config dir  %s\n", rep.ConfigDir)
+		if rep.Managed != "" {
+			fmt.Fprintf(out, "  managed     %s\n", rep.Managed)
+		}
 		fmt.Fprintf(out, "  base pane   %s%s\n", or(rep.BasePane, "none yet: one is adopted when a live pane can be, and until then nothing is spawned and dispatch refuses"), basePaneNote(rep))
 		fmt.Fprintf(out, "  workers     %d live%s, %d reserved, max %d\n",
 			rep.Workers, held(rep.AwaitingReview), rep.Pending, rep.MaxWorkers)

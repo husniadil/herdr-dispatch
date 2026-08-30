@@ -117,6 +117,35 @@ func BindingsPath() string { return filepath.Join(StateDir(), Name+"-bindings.js
 // must not be one the operator or another worker is holding.
 func WorktreeDir() string { return filepath.Join(StateDir(), "worktrees") }
 
+// ManagedFile is the marker a service manager writes beside the socket and the
+// lock to say that starting this daemon is ITS job. It is named after nothing
+// this plugin owns on purpose: an operator wiring hdis into launchd or systemd
+// writes one file with a name it can guess and never has to know a config key.
+const ManagedFile = "managed"
+
+// UnnamedManager is what an empty marker is reported as. The FILE is the
+// contract; its text only says who to name, and a marker with nothing in it
+// still means the daemon is not this door's to start.
+const UnnamedManager = "a service manager"
+
+// ManagedPath is <state_dir>/managed.
+func ManagedPath() string { return filepath.Join(StateDir(), ManagedFile) }
+
+// Managed reports the manager the marker names and whether there is one. The
+// content is free text — a launchd label, a systemd unit — and only its first
+// line is read, because it is repeated inside a one-line refusal.
+func Managed() (string, bool) {
+	b, err := os.ReadFile(ManagedPath())
+	if err != nil {
+		return "", false
+	}
+	first, _, _ := strings.Cut(string(b), "\n")
+	if name := strings.TrimSpace(first); name != "" {
+		return name, true
+	}
+	return UnnamedManager, true
+}
+
 // LogPath is <state_dir>/dispatch.log, where a daemon started by a door writes:
 // it has no terminal, and a dispatcher nobody can hear is worse than none.
 func LogPath() string { return filepath.Join(StateDir(), Name+".log") }

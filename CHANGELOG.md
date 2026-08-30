@@ -5,6 +5,32 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
+## Unreleased
+
+**Added: a `managed` marker in the state dir turns autostart off for every
+door.** On a box where launchd manages the daemon as a service, any client
+call that arrives while the service's daemon is down autostarts one: a hub
+status read through the MCP door, or the door itself under a gateway.
+Measured on 2026-08-30 — door pid 82803 spawned `hdis daemon` pid 82830 one
+second after the service's daemon was stopped. That orphan comes up under the
+CALLER's environment with none of the service's configuration, holds
+`dispatch.lock`, and the service's own daemon then fails
+`CONFLICT: ALREADY_RUNNING` on every retry. A manager now writes a file named
+`managed` beside the socket and the lock, whose free-text first line names it
+(`dev.herdr.hdis`, a systemd unit, anything); the file IS the whole contract,
+so there is no config key to know. While it is there no door starts a daemon,
+and a call that finds none listening is refused with `CONFLICT: NOT_RUNNING`
+naming the marker, the manager, the lock at stake, and that the service is
+bringing it back. `doctor` is the exception on both doors: it reports
+`managed: <manager>` and `daemon_answering: false` rather than refusing,
+because asking whether the dispatcher is up has an answer even with nothing
+listening. `hdis daemon` — the service's own start — is unaffected, and so is
+`stop`, which never autostarted anything. **What a caller changes:** nothing
+on an unmarked box. On a marked one, every verb but `doctor` answers
+`CONFLICT` while the daemon is down instead of starting one, and `doctor`'s
+report carries two new fields: `managed`, present only where a marker is, and
+`daemon_answering`, which is `true` on every report a daemon produced.
+
 ## 0.10.3 — 2026-08-30
 
 **Fixed: a daemon that exits before it binds hands its reason to the caller

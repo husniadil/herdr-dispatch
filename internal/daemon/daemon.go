@@ -387,7 +387,17 @@ type DoctorReport struct {
 	// the caller's.
 	StateDir  string `json:"state_dir"`
 	ConfigDir string `json:"config_dir"`
-	BasePane  string `json:"base_pane"`
+	// Managed is the service manager the `managed` marker in the state dir
+	// names, and empty where there is no marker. A managed daemon is not
+	// started by any door: an operator whose call was refused reads this
+	// line to see whose job it is.
+	Managed string `json:"managed,omitempty"`
+	// DaemonAnswering is true on every report a daemon produced, which is
+	// every report but one: `doctor` against a MANAGED daemon that is not
+	// listening answers with the two facts it can still know rather than
+	// starting the thing it is reporting on.
+	DaemonAnswering bool   `json:"daemon_answering"`
+	BasePane        string `json:"base_pane"`
 	// BasePaneGone says Herdr no longer holds the pane above. It is not a
 	// field an operator should ever have to infer: a base pane closed out
 	// from under this daemon — a worker running `herdr workspace close`
@@ -695,23 +705,26 @@ type BoardHealth struct {
 func (d *Daemon) doctor(ctx context.Context, req protocol.Request) (DoctorReport, error) {
 	parked := d.Loop.Parked()
 	rep := DoctorReport{
-		Version:        d.Version,
-		Contract:       version.Contract,
-		Principal:      req.Caller(),
-		Socket:         config.SocketPath(),
-		StateDir:       config.StateDir(),
-		ConfigDir:      config.ConfigDir(),
-		BasePane:       d.Loop.Base(),
-		MaxWorkers:     d.Loop.Policy.MaxWorkers,
-		Interval:       d.Interval.String(),
-		Workers:        len(d.Loop.Bindings()),
-		AwaitingReview: d.Loop.AwaitingReview(),
-		Pending:        len(d.Loop.Pending()),
-		WorkersDied:    d.Loop.WorkersDied(),
-		Bindings:       d.Loop.BindingsPath(),
-		Log:            d.LogPath,
-		Readopted:      d.Loop.Readopted(),
-		Verify:         VerifyHealth{Enabled: d.Loop.Config.Verify.Enabled},
+		Version:   d.Version,
+		Contract:  version.Contract,
+		Principal: req.Caller(),
+		Socket:    config.SocketPath(),
+		StateDir:  config.StateDir(),
+		ConfigDir: config.ConfigDir(),
+		// This report came off a daemon, so the answer is yes by
+		// construction.
+		DaemonAnswering: true,
+		BasePane:        d.Loop.Base(),
+		MaxWorkers:      d.Loop.Policy.MaxWorkers,
+		Interval:        d.Interval.String(),
+		Workers:         len(d.Loop.Bindings()),
+		AwaitingReview:  d.Loop.AwaitingReview(),
+		Pending:         len(d.Loop.Pending()),
+		WorkersDied:     d.Loop.WorkersDied(),
+		Bindings:        d.Loop.BindingsPath(),
+		Log:             d.LogPath,
+		Readopted:       d.Loop.Readopted(),
+		Verify:          VerifyHealth{Enabled: d.Loop.Config.Verify.Enabled},
 		// One read of the parked set answers both figures, so they can
 		// never come from different moments.
 		Gate: GateHealth{
@@ -723,6 +736,11 @@ func (d *Daemon) doctor(ctx context.Context, req protocol.Request) (DoctorReport
 		},
 		MinPaneColumns: d.Loop.Config.Layout.MinPaneColumns,
 		MaxPanesPerTab: d.Loop.Config.Layout.MaxPanesPerTab,
+	}
+	// A managed daemon that IS up still says who manages it: the marker is
+	// how an operator tells a service's daemon from one a door started.
+	if manager, ok := config.Managed(); ok {
+		rep.Managed = manager
 	}
 	if live, known := d.Loop.BaseLive(ctx); rep.BasePane != "" {
 		rep.BasePaneGone, rep.BasePaneUnknown = known && !live, !known

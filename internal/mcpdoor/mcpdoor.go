@@ -73,7 +73,13 @@ type Options struct {
 // New builds the MCP server with one tool per verb.
 func New(version string, call Caller, opt Options) *mcp.Server {
 	if call == nil {
-		call = (&client.Client{}).Call
+		// Through cli.Ask rather than the client directly, so this door
+		// obeys the `managed` marker and answers `doctor` with it exactly
+		// as the CLI does. It is the door the gateway holds open, and the
+		// door that autostarted the orphan this marker exists to prevent.
+		call = func(req protocol.Request) (json.RawMessage, error) {
+			return cli.Ask(&client.Client{}, req)
+		}
 	}
 	s := mcp.NewServer(&mcp.Implementation{
 		Name:        ServerName,
