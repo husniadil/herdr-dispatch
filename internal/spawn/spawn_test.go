@@ -18,6 +18,7 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/htask"
 	"github.com/husniadil/herdr-dispatch/internal/proxy"
 	"github.com/husniadil/herdr-dispatch/internal/testenv"
+	"github.com/husniadil/herdr-dispatch/internal/worktree"
 )
 
 const (
@@ -598,10 +599,12 @@ func TestTheSpawnConditionIsAShortPointerToTheBoard(t *testing.T) {
 	}
 	// The cap is what keeps this a pointer rather than the row's own text,
 	// which runs past a thousand characters. It was 256 while the condition
-	// was only a pointer; it is 384 now that the condition also carries the
-	// isolation rule, which no board row states and none could. Still a
-	// third of the shortest document this replaced.
-	if len(got) > 384 {
+	// was only a pointer; it went to 384 when the condition took on the
+	// isolation rule, which no board row states and none could, and to 600
+	// when it took on the publish rule, which no board row states either.
+	// Still under half the shortest document this replaced, and far under
+	// the ~1.4k a typed line was measured breaking at.
+	if len(got) > 600 {
 		t.Fatalf("the condition is %d characters, which is no longer a pointer: %s", len(got), got)
 	}
 	t.Logf("pointer condition: %d characters, %q", len(got), got)
@@ -1922,6 +1925,34 @@ func TestTheSpawnConditionNamesTheWorkingDirectoryAsTheOnlyWritableCheckout(t *t
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("the condition does not say %q: %s", want, got)
+		}
+	}
+}
+
+// The condition names the one other thing no board row can state: the branch
+// the worker's own checkout is on, and that the branch has to be published
+// before the row is submitted. hdis makes the branch and never integrates it
+// — internal/worktree's boundary test holds that against the shipped source —
+// so a reviewer on another machine sees nothing unless the worker itself
+// pushes. The clause is conditional on an origin remote, because a checkout
+// with none is not a failure the task should stall on.
+func TestTheSpawnConditionTellsTheWorkerToPublishItsOwnBranchBeforeSubmitting(t *testing.T) {
+	for _, seq := range []int{14, 1234} {
+		got := PointerGoal(seq)
+		for _, want := range []string{
+			"if the repo has an origin remote",
+			"git push -u origin " + worktree.Branch(seq),
+			"before you run htask submit",
+		} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("the condition for task %d does not say %q: %s", seq, want, got)
+			}
+		}
+		// The branch is the worktree package's own name for it, not a
+		// second spelling that can drift away from the checkout the
+		// worker is standing in.
+		if !strings.Contains(got, "hdis/task-"+strconv.Itoa(seq)) {
+			t.Fatalf("the condition for task %d names no task branch: %s", seq, got)
 		}
 	}
 }

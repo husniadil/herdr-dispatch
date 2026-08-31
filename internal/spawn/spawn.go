@@ -43,6 +43,7 @@ import (
 	"github.com/husniadil/herdr-dispatch/internal/herdrclient"
 	"github.com/husniadil/herdr-dispatch/internal/htask"
 	"github.com/husniadil/herdr-dispatch/internal/proxy"
+	"github.com/husniadil/herdr-dispatch/internal/worktree"
 )
 
 // Kind is the agent kind every worker starts as. Both providers run the same
@@ -152,13 +153,27 @@ const SettingsFileMode = 0o600
 // directory is the only writable checkout, everything else is read-only, and
 // a task that needs a sibling changed is filed on that sibling's board rather
 // than edited in place.
+//
+// A second rule rides along for the same reason: the worker's branch has to
+// leave the worker's machine before the row is submitted, or a reviewer on
+// another box has nothing to read. hdis does not do this for it. The branch
+// belongs to the operator once the work is home — integrating it, deleting
+// it — and this binary passes no integrating git verb anywhere, which
+// internal/worktree's boundary test proves against the shipped source. So
+// the branch is published by the worker itself, in its own checkout, as
+// prompt text and nothing more. It is conditional on an origin remote
+// because a throwaway or purely local checkout has none, and a worker that
+// stalled on a failing push there would be stuck on a step the task never
+// needed.
 func PointerGoal(seq int) string {
 	return fmt.Sprintf("task %d is submitted for review: claim it with htask claim %d, "+
-		"read its full criteria with htask get %d, do the work, then run "+
-		"htask submit %d with a report and evidence. "+
+		"read its full criteria with htask get %d, do the work, then, if the repo "+
+		"has an origin remote, publish your branch with git push -u origin %s "+
+		"before you run htask submit %d with a report and evidence. "+
 		"Your working directory is the only writable checkout: never edit or commit "+
 		"outside it. A sibling repo is read-only; file a task on its board. "+
-		"Reach the dispatcher at $"+DispatcherPaneVar+".", seq, seq, seq, seq)
+		"Reach the dispatcher at $"+DispatcherPaneVar+".",
+		seq, seq, seq, worktree.Branch(seq), seq)
 }
 
 // SelfReviewCondition composes the second condition a worker is prompted with
@@ -341,13 +356,24 @@ const PromptedGoalBudget = 1023
 // line for a two-digit task rendered 661 characters, where the same shape
 // without it rendered 573.
 //
-// It sits at 768 now, which is the 640 plus that 88 and the same headroom the
-// 512 and the 640 were each chosen for — a longer temp path, another profile
+// It sat at 768 on that measurement, which was the 640 plus that 88 and the
+// same headroom the 512 and the 640 were each chosen for.
+//
+// The condition then took on the publish rule — the worker pushes its own
+// branch before it submits — which is 103 characters for a two-digit task and
+// carries the branch name, so a five-digit one costs a little more again.
+// Re-measured on 2026-08-31 with the codex profile above, the whole line is
+// 707 characters for a two-digit task; the claude-profile shape, which
+// rendered 661 before the rule, renders 764 for a two-digit task and about
+// 779 for a five-digit one, past the old ceiling.
+//
+// It sits at 896 now, which is the 768 plus that 103 and the same headroom
+// every earlier number was chosen for — a longer temp path, another profile
 // flag and a five-digit task number. It is still comfortably under the ~1.4k
 // line that came out broken on the live shell, and what bounds this is that
 // measured break rather than the budget's own roundness: the test that types
 // the corrupted shape still refuses it at this ceiling.
-const TypedLineBudget = 768
+const TypedLineBudget = 896
 
 // TypedLine reconstructs the command line herdr types into a worker's pane
 // for an agent argv: the client's own name, then every argument, quoted the

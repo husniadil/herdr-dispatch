@@ -1143,10 +1143,14 @@ whole of it.
    composes — claim the task with `htask claim <n>`, read its full
    criteria with `htask get <n>`, and finish by submitting it for review
    with a report and evidence — and never the board's rendered goal document.
-   It carries one rule beyond the pointer, because no board row states it and
-   none could: the working directory is the only writable checkout, everything
-   else including a sibling repository is read-only, and a task that needs a
-   sibling changed is filed on that sibling's board. See
+   It carries two rules beyond the pointer, because no board row states them
+   and none could: the working directory is the only writable checkout,
+   everything else including a sibling repository is read-only, and a task
+   that needs a sibling changed is filed on that sibling's board; and, if the
+   checkout has an origin remote, the worker publishes its own branch with
+   `git push -u origin hdis/task-<n>` before it submits, so a reviewer
+   elsewhere has something to read. The worker is asked to push its branch;
+   hdis still runs no git integration itself. See
    [A checkout is only isolation if the worker uses it](#a-checkout-is-only-isolation-if-the-worker-uses-it).
    The line is
    TYPED into the pane, character by character, and a long one intermittently
@@ -1999,6 +2003,12 @@ Bringing the work home — fast-forward, merge, cherry-pick, push — and deleti
 the branch afterwards are the operator's own acts, after review, on their own
 judgment. `TestNoSourceFilePassesAMergePushOrBranchDeleteAsAnArgument` pins
 that the way the review-verb guard pins the board boundary.
+
+The spawn condition does ask the worker to publish its own branch —
+`git push -u origin hdis/task-<seq>`, if the checkout has an origin remote —
+before it submits the row, so a reviewer elsewhere has something to read. That
+is prompt text the worker acts on in its own checkout; hdis still runs no git
+integration itself, and the guard above is what proves it.
 
 The split is not tidiness. It has bitten twice. Two workers sharing the
 project directory is how one task's commit swept up another task's

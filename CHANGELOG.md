@@ -5,6 +5,10 @@ the shared plugin contract makes the CLI, the MCP tool list, the JSON shapes
 and the error codes stable within a minor and changeable between minors with an
 entry here, so every entry says what moved and what a caller does about it.
 
+## 0.10.7 — 2026-08-31
+
+The dispatch goal now asks the worker to publish its branch before submitting: when the repo has an origin remote, `git push -u origin hdis/task-<n>` comes before `htask submit` (I1, D35). Prompt text only; hdis still runs no git integration itself, and the boundary test keeps proving it. The typed-line budget grew 768 to 896 for the longer condition, re-measured against the corruption threshold.
+
 ## 0.10.6 — 2026-08-31
 
 The MCP door built its client with autostart on for every verb, so `stop` through the door with no daemon listening started one and then failed with UNAVAILABLE. The registry's NoAutostart verbs now apply through both doors (`cli.ClientFor`), so `stop` answers CONFLICT NOT_RUNNING there exactly as on the command line. No caller change.
